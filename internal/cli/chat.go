@@ -37,7 +37,7 @@ func runInteractiveChat(ctx Context, args []string) error {
 	mainAgentID := fs.String("main-agent-id", "", "main agent id for a new chat")
 	title := fs.String("title", "CLI Chat", "new chat title")
 	targetAgentID := fs.String("agent", "", "default target agent id")
-	if err := fs.Parse(args); err != nil {
+	if err := parseFlags(fs, args, "chat"); err != nil {
 		return err
 	}
 
@@ -91,7 +91,7 @@ func runInteractiveChat(ctx Context, args []string) error {
 		if strings.HasPrefix(line, "/agent ") {
 			next := strings.TrimSpace(strings.TrimPrefix(line, "/agent "))
 			if next == "" {
-				return usageError("missing agent id after /agent")
+				return newUsageError("chat", "missing agent id after /agent")
 			}
 			currentTarget = next
 			if err := printLine(ctx.Stdout, "target agent: %s", currentTarget); err != nil {
@@ -147,7 +147,7 @@ func resolveChatSession(ctx Context, sessionID, projectID, mainAgentID, title st
 		return chat, err
 	}
 	if projectID == "" || mainAgentID == "" {
-		return chatRecord{}, usageError("missing --session or --project-id/--main-agent-id")
+		return chatRecord{}, newUsageError("chat", "missing --session or --project-id/--main-agent-id")
 	}
 	var chat chatRecord
 	err := ctx.Client.Post("/api/chat/sessions", map[string]any{
