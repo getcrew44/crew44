@@ -46,7 +46,7 @@ func BuildChatSummary(events []Event) string {
 			state.lastToolIdx = len(state.events)
 		}
 		if event.Type == EventTypeMessage && event.Message != nil && event.Message.Role == MessageRoleUser {
-			state.userMessages = append(state.userMessages, event.Message.Content)
+			state.userMessages = append(state.userMessages, StripHandoffMarker(event.Message.Content))
 		}
 		state.events = append(state.events, event)
 	}

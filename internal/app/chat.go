@@ -32,7 +32,6 @@ func (a *App) PostMessage(chatID, content, targetAgentID string) (model.ChatReco
 	if runtimeRecord.Status == model.RuntimeStatusMissing {
 		return model.ChatRecord{}, ErrConflict
 	}
-
 	if chat.LastRuntimeSession.AgentID != "" && chat.LastRuntimeSession.AgentID != targetAgentID {
 		events, err := a.store.ListEvents(chatID, 0)
 		if err == nil {
@@ -98,6 +97,16 @@ func (a *App) runChat(ctx context.Context, chatID, agentID, turnID, prompt strin
 			a.finishChatWithError(chatID, err.Error())
 			return
 		}
+		runtimeRecord, err := a.store.GetRuntime(agent.RuntimeID)
+		if err != nil {
+			a.finishChatWithError(chatID, err.Error())
+			return
+		}
+		project, err := a.store.GetProject(chat.ProjectID)
+		if err != nil {
+			a.finishChatWithError(chatID, err.Error())
+			return
+		}
 
 		resumeSessionID := ""
 		if chat.LastRuntimeSession.AgentID == currentAgentID {
@@ -106,19 +115,21 @@ func (a *App) runChat(ctx context.Context, chatID, agentID, turnID, prompt strin
 
 		var lastAssistant string
 		result, err := a.engine.Run(ctx, runtime.RunRequest{
+			Runtime:         runtimeRecord,
 			Agent:           agent,
 			Prompt:          currentPrompt,
 			SummaryPath:     a.store.SummaryPath(chatID),
+			WorkDir:         project.Workdir,
 			ResumeSessionID: resumeSessionID,
 		}, func(streamEvent runtime.StreamEvent) error {
 			event := model.Event{
-				Type:         streamEvent.Type,
-				TS:           time.Now().UTC(),
-				TurnID:       currentTurnID,
-				ActorAgentID: currentAgentID,
-				Message:      streamEvent.Message,
-				Thinking:     streamEvent.Thinking,
-				ToolCall:     streamEvent.ToolCall,
+				Type:           streamEvent.Type,
+				TS:             time.Now().UTC(),
+				TurnID:         currentTurnID,
+				ActorAgentID:   currentAgentID,
+				Message:        streamEvent.Message,
+				Thinking:       streamEvent.Thinking,
+				ToolCall:       streamEvent.ToolCall,
 				ToolCallResult: streamEvent.ToolCallResult,
 			}
 			if streamEvent.Message != nil && streamEvent.Message.Role == model.MessageRoleAssistant {
@@ -152,6 +163,9 @@ func (a *App) runChat(ctx context.Context, chatID, agentID, turnID, prompt strin
 		if handoffTo == "" {
 			break
 		}
+		if handoffTo == currentAgentID {
+			break
+		}
 		if _, err := a.store.GetAgent(handoffTo); err != nil {
 			break
 		}
@@ -160,8 +174,9 @@ func (a *App) runChat(ctx context.Context, chatID, agentID, turnID, prompt strin
 			_ = a.store.WriteSummary(chatID, model.BuildChatSummary(events))
 		}
 
+		nextPrompt := model.StripHandoffMarker(lastAssistant)
 		currentAgentID = handoffTo
-		currentPrompt = ""
+		currentPrompt = nextPrompt
 		currentTurnID = id.New()
 		chat.ActiveTurnID = currentTurnID
 		chat.CurrentAgentID = currentAgentID

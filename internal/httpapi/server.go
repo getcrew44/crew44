@@ -11,11 +11,14 @@ import (
 	"github.com/sqtech/crew-ai/crewai-repo/internal/app"
 	"github.com/sqtech/crew-ai/crewai-repo/internal/broker"
 	"github.com/sqtech/crew-ai/crewai-repo/internal/model"
+	"github.com/sqtech/crew-ai/crewai-repo/internal/runtime"
 )
 
 type ServerConfig struct {
 	StateDir       string
 	RuntimeScanDir string
+	Scanner        runtime.Scanner
+	Engine         runtime.Engine
 }
 
 type Server struct {
@@ -27,6 +30,8 @@ func NewServer(cfg ServerConfig) (http.Handler, error) {
 	application, err := app.New(app.Config{
 		StateDir:       cfg.StateDir,
 		RuntimeScanDir: cfg.RuntimeScanDir,
+		Scanner:        cfg.Scanner,
+		Engine:         cfg.Engine,
 	})
 	if err != nil {
 		return nil, err
