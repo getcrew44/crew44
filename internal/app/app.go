@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -33,6 +34,8 @@ type App struct {
 	cancels map[string]context.CancelFunc
 }
 
+const defaultAgentInstruction = "You are the default CrewAI assistant. Be concise, helpful, and use tools when you need facts from the workspace."
+
 func New(cfg Config) (*App, error) {
 	st, err := store.New(cfg.StateDir)
 	if err != nil {
@@ -41,14 +44,18 @@ func New(cfg Config) (*App, error) {
 	if err := os.MkdirAll(cfg.RuntimeScanDir, 0o755); err != nil {
 		return nil, err
 	}
-	return &App{
+	app := &App{
 		store:          st,
 		runtimeScanDir: cfg.RuntimeScanDir,
 		scanner:        firstScanner(cfg.Scanner),
 		engine:         firstEngine(cfg.Engine),
 		broker:         broker.New[model.Event](),
 		cancels:        make(map[string]context.CancelFunc),
-	}, nil
+	}
+	if err := app.bootstrapDefaultState(); err != nil {
+		return nil, err
+	}
+	return app, nil
 }
 
 func firstEngine(engine runtime.Engine) runtime.Engine {
@@ -63,6 +70,76 @@ func firstScanner(scanner runtime.Scanner) runtime.Scanner {
 		return scanner
 	}
 	return runtime.LocalScanner{}
+}
+
+func (a *App) bootstrapDefaultState() error {
+	runtimes, err := a.store.ListRuntimes()
+	if err != nil {
+		return err
+	}
+	if len(runtimes) == 0 {
+		runtimes, err = a.RescanRuntimes()
+		if err != nil {
+			return err
+		}
+	}
+
+	agents, err := a.store.ListAgents()
+	if err != nil {
+		return err
+	}
+	if len(agents) > 0 {
+		return nil
+	}
+
+	runtimeRecord, ok := pickDefaultRuntime(runtimes)
+	if !ok {
+		return nil
+	}
+
+	now := time.Now().UTC()
+	agent := model.AgentConfig{
+		ID:          id.New(),
+		Name:        "Default Agent",
+		Instruction: defaultAgentInstruction,
+		RuntimeID:   runtimeRecord.ID,
+		Model:       defaultRuntimeModel(runtimeRecord),
+		SkillIDs:    []string{},
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}
+	return a.store.SaveAgent(agent)
+}
+
+func pickDefaultRuntime(records []model.RuntimeRecord) (model.RuntimeRecord, bool) {
+	available := make([]model.RuntimeRecord, 0, len(records))
+	for _, record := range records {
+		if record.Status == model.RuntimeStatusAvailable {
+			available = append(available, record)
+		}
+	}
+	if len(available) == 0 {
+		return model.RuntimeRecord{}, false
+	}
+
+	preferred := []string{"codex", "claude"}
+	for _, provider := range preferred {
+		for _, record := range available {
+			if record.Provider == provider || record.ID == provider {
+				return record, true
+			}
+		}
+	}
+
+	sort.Slice(available, func(i, j int) bool { return available[i].ID < available[j].ID })
+	return available[0], true
+}
+
+func defaultRuntimeModel(record model.RuntimeRecord) string {
+	if value, ok := record.Metadata["model"].(string); ok {
+		return value
+	}
+	return ""
 }
 
 func (a *App) StateDir() string {
@@ -177,6 +254,13 @@ func (a *App) GetAgent(id string) (model.AgentConfig, error) {
 }
 
 func (a *App) CreateAgent(name, instruction, runtimeID, modelName string) (model.AgentConfig, error) {
+	runtimeRecord, err := a.requireAvailableRuntime(runtimeID)
+	if err != nil {
+		return model.AgentConfig{}, err
+	}
+	if modelName == "" {
+		modelName = defaultRuntimeModel(runtimeRecord)
+	}
 	now := time.Now().UTC()
 	agent := model.AgentConfig{
 		ID:          id.New(),
@@ -206,6 +290,9 @@ func (a *App) UpdateAgent(agent model.AgentConfig) (model.AgentConfig, error) {
 		current.Instruction = agent.Instruction
 	}
 	if agent.RuntimeID != "" {
+		if _, err := a.requireAvailableRuntime(agent.RuntimeID); err != nil {
+			return model.AgentConfig{}, err
+		}
 		current.RuntimeID = agent.RuntimeID
 	}
 	if agent.Model != "" {
@@ -336,6 +423,15 @@ func (a *App) GetProject(id string) (model.ProjectRecord, error) {
 }
 
 func (a *App) CreateProject(name, workdir, mainAgentID string) (model.ProjectRecord, error) {
+	if strings.TrimSpace(workdir) == "" {
+		return model.ProjectRecord{}, ErrBadRequest
+	}
+	if strings.TrimSpace(mainAgentID) == "" {
+		return model.ProjectRecord{}, ErrBadRequest
+	}
+	if _, err := a.requireRunnableAgent(mainAgentID); err != nil {
+		return model.ProjectRecord{}, err
+	}
 	now := time.Now().UTC()
 	project := model.ProjectRecord{
 		ID:          id.New(),
@@ -363,6 +459,9 @@ func (a *App) UpdateProject(project model.ProjectRecord) (model.ProjectRecord, e
 		current.Workdir = project.Workdir
 	}
 	if project.MainAgentID != "" {
+		if _, err := a.requireRunnableAgent(project.MainAgentID); err != nil {
+			return model.ProjectRecord{}, err
+		}
 		current.MainAgentID = project.MainAgentID
 	}
 	current.UpdatedAt = time.Now().UTC()
@@ -382,10 +481,21 @@ func (a *App) ListProjectChats(projectID string) ([]model.ChatRecord, error) {
 }
 
 func (a *App) CreateChat(projectID, title, mainAgentID string) (model.ChatRecord, error) {
+	project, err := a.store.GetProject(projectID)
+	if err != nil {
+		return model.ChatRecord{}, a.mapError(err)
+	}
+	if strings.TrimSpace(mainAgentID) == "" {
+		return model.ChatRecord{}, ErrBadRequest
+	}
+	if _, err := a.requireRunnableAgent(mainAgentID); err != nil {
+		return model.ChatRecord{}, err
+	}
+
 	now := time.Now().UTC()
 	record := model.ChatRecord{
 		ID:                  id.New(),
-		ProjectID:           projectID,
+		ProjectID:           project.ID,
 		Title:               title,
 		MainAgentID:         mainAgentID,
 		CurrentAgentID:      mainAgentID,
@@ -478,4 +588,32 @@ func (a *App) mapError(err error) error {
 	default:
 		return err
 	}
+}
+
+func (a *App) requireRunnableAgent(agentID string) (model.AgentConfig, error) {
+	if strings.TrimSpace(agentID) == "" {
+		return model.AgentConfig{}, ErrBadRequest
+	}
+	agent, err := a.store.GetAgent(agentID)
+	if err != nil {
+		return model.AgentConfig{}, a.mapError(err)
+	}
+	if _, err := a.requireAvailableRuntime(agent.RuntimeID); err != nil {
+		return model.AgentConfig{}, err
+	}
+	return agent, nil
+}
+
+func (a *App) requireAvailableRuntime(runtimeID string) (model.RuntimeRecord, error) {
+	if strings.TrimSpace(runtimeID) == "" {
+		return model.RuntimeRecord{}, ErrBadRequest
+	}
+	record, err := a.store.GetRuntime(runtimeID)
+	if err != nil {
+		return model.RuntimeRecord{}, ErrBadRequest
+	}
+	if record.Status != model.RuntimeStatusAvailable {
+		return model.RuntimeRecord{}, ErrBadRequest
+	}
+	return record, nil
 }

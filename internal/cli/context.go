@@ -15,6 +15,9 @@ type Context struct {
 func Run(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	global, rest, err := parseGlobalArgs(args)
 	if err != nil {
+		if usage, ok := err.(usageErr); ok {
+			printCommandUsage(stderr, usage.scope)
+		}
 		return err
 	}
 	if global.help || len(rest) == 0 {
@@ -29,25 +32,32 @@ func Run(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 		Stderr: stderr,
 	}
 
+	var runErr error
 	switch rest[0] {
 	case "runtimes":
-		return runRuntimes(ctx, rest[1:])
+		runErr = runRuntimes(ctx, rest[1:])
 	case "agents":
-		return runAgents(ctx, rest[1:])
+		runErr = runAgents(ctx, rest[1:])
 	case "skills":
-		return runSkills(ctx, rest[1:])
+		runErr = runSkills(ctx, rest[1:])
 	case "projects":
-		return runProjects(ctx, rest[1:])
+		runErr = runProjects(ctx, rest[1:])
 	case "chats":
-		return runChats(ctx, rest[1:])
+		runErr = runChats(ctx, rest[1:])
 	case "chat":
-		return runInteractiveChat(ctx, rest[1:])
+		runErr = runInteractiveChat(ctx, rest[1:])
 	case "help":
 		printUsage(stdout)
 		return nil
 	default:
-		return usageError("unknown command %q", rest[0])
+		err := newUsageError("", "unknown command %q", rest[0])
+		printUsage(stderr)
+		return err
 	}
+	if usage, ok := runErr.(usageErr); ok {
+		printCommandUsage(stderr, usage.scope)
+	}
+	return runErr
 }
 
 type globalArgs struct {
@@ -68,7 +78,7 @@ func parseGlobalArgs(args []string) (globalArgs, []string, error) {
 		switch args[i] {
 		case "--base-url":
 			if i+1 >= len(args) {
-				return globalArgs{}, nil, usageError("missing value for --base-url")
+				return globalArgs{}, nil, newUsageError("", "missing value for --base-url")
 			}
 			out.baseURL = args[i+1]
 			i++

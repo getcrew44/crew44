@@ -66,6 +66,32 @@ func TestResourceLifecyclePersistsExpectedFiles(t *testing.T) {
 	assertFileExists(t, filepath.Join(env.stateDir, "chats", "chat-"+chat["id"].(string), "summary.md"))
 }
 
+func TestBootstrapCreatesDefaultAgentWhenRuntimeExists(t *testing.T) {
+	env := newTestEnv(t)
+
+	var agents map[string]any
+	getJSON(t, env.server, "/api/agents", http.StatusOK, &agents)
+	items, _ := agents["items"].([]any)
+	if len(items) != 1 {
+		t.Fatalf("expected one bootstrapped agent, got %#v", agents)
+	}
+	agent, _ := items[0].(map[string]any)
+	if agent["runtime_id"] != "runtime-mock" {
+		t.Fatalf("expected bootstrapped agent to use runtime-mock, got %#v", agent["runtime_id"])
+	}
+}
+
+func TestBootstrapSkipsDefaultAgentWhenNoRuntimeExists(t *testing.T) {
+	env := newTestEnvWithScannerAndEngine(t, &runtime.StaticScanner{}, runtime.MockEngine{})
+
+	var agents map[string]any
+	getJSON(t, env.server, "/api/agents", http.StatusOK, &agents)
+	items, _ := agents["items"].([]any)
+	if len(items) != 0 {
+		t.Fatalf("expected no bootstrapped agents without runtimes, got %#v", agents)
+	}
+}
+
 func TestChatMessageReplayAndFollowSSE(t *testing.T) {
 	env := newTestEnv(t)
 	postJSON(t, env.server, http.MethodPost, "/api/runtimes/rescan", nil, http.StatusOK, nil)
@@ -184,6 +210,103 @@ func TestRejectsConcurrentMessagesAndMissingRuntime(t *testing.T) {
 	}, http.StatusConflict, nil)
 }
 
+func TestCreateProjectRequiresNonEmptyWorkdir(t *testing.T) {
+	env := newTestEnv(t)
+
+	postJSON(t, env.server, http.MethodPost, "/api/projects", map[string]any{
+		"name":          "Empty Workdir Project",
+		"workdir":       "",
+		"main_agent_id": "",
+	}, http.StatusBadRequest, nil)
+}
+
+func TestCreateProjectRequiresMainAgentID(t *testing.T) {
+	env := newTestEnv(t)
+
+	postJSON(t, env.server, http.MethodPost, "/api/projects", map[string]any{
+		"name":          "No Agent Project",
+		"workdir":       "/tmp/no-agent-project",
+		"main_agent_id": "",
+	}, http.StatusBadRequest, nil)
+}
+
+func TestCreateProjectRequiresRunnableMainAgent(t *testing.T) {
+	env := newTestEnv(t)
+	agentID := defaultAgentID(t, env)
+
+	env.scanner.Records = nil
+	postJSON(t, env.server, http.MethodPost, "/api/runtimes/rescan", nil, http.StatusOK, nil)
+
+	postJSON(t, env.server, http.MethodPost, "/api/projects", map[string]any{
+		"name":          "Missing Runtime Project",
+		"workdir":       "/tmp/missing-runtime-project",
+		"main_agent_id": agentID,
+	}, http.StatusBadRequest, nil)
+}
+
+func TestCreateAgentRequiresRuntimeID(t *testing.T) {
+	env := newTestEnv(t)
+
+	postJSON(t, env.server, http.MethodPost, "/api/agents", map[string]any{
+		"name":        "No Runtime Agent",
+		"instruction": "You are helpful",
+		"runtime_id":  "",
+		"model":       "mock-1",
+	}, http.StatusBadRequest, nil)
+}
+
+func TestCreateChatRequiresRunnableMainAgentAndExistingProject(t *testing.T) {
+	env := newTestEnv(t)
+	defaultAgentID := defaultAgentID(t, env)
+	projectID := createProject(t, env, defaultAgentID)
+
+	postJSON(t, env.server, http.MethodPost, "/api/chat/sessions", map[string]any{
+		"project_id":    projectID,
+		"title":         "No Main Agent Chat",
+		"main_agent_id": "",
+	}, http.StatusBadRequest, nil)
+
+	postJSON(t, env.server, http.MethodPost, "/api/chat/sessions", map[string]any{
+		"project_id":    "missing-project",
+		"title":         "Missing Project Chat",
+		"main_agent_id": defaultAgentID,
+	}, http.StatusNotFound, nil)
+
+	env.scanner.Records = nil
+	postJSON(t, env.server, http.MethodPost, "/api/runtimes/rescan", nil, http.StatusOK, nil)
+
+	postJSON(t, env.server, http.MethodPost, "/api/chat/sessions", map[string]any{
+		"project_id":    projectID,
+		"title":         "Missing Runtime Chat",
+		"main_agent_id": defaultAgentID,
+	}, http.StatusBadRequest, nil)
+}
+
+func TestUpdateAgentRejectsUnavailableRuntime(t *testing.T) {
+	env := newTestEnv(t)
+	agentID := createAgent(t, env, "Aria")
+
+	env.scanner.Records = nil
+	postJSON(t, env.server, http.MethodPost, "/api/runtimes/rescan", nil, http.StatusOK, nil)
+
+	postJSON(t, env.server, http.MethodPut, fmt.Sprintf("/api/agents/%s", agentID), map[string]any{
+		"runtime_id": "runtime-mock",
+	}, http.StatusBadRequest, nil)
+}
+
+func TestUpdateProjectRejectsUnavailableMainAgent(t *testing.T) {
+	env := newTestEnv(t)
+	agentID := createAgent(t, env, "Aria")
+	projectID := createProject(t, env, agentID)
+
+	env.scanner.Records = nil
+	postJSON(t, env.server, http.MethodPost, "/api/runtimes/rescan", nil, http.StatusOK, nil)
+
+	postJSON(t, env.server, http.MethodPut, fmt.Sprintf("/api/projects/%s", projectID), map[string]any{
+		"main_agent_id": agentID,
+	}, http.StatusBadRequest, nil)
+}
+
 func TestHandoffToCurrentAgentStopsLoop(t *testing.T) {
 	engine := &loopingHandoffEngine{}
 	env := newTestEnvWithEngine(t, engine)
@@ -264,8 +387,8 @@ func TestRestartReloadsPersistedResources(t *testing.T) {
 
 	var agents map[string]any
 	getJSON(t, restarted, "/api/agents", http.StatusOK, &agents)
-	if items, _ := agents["items"].([]any); len(items) != 1 {
-		t.Fatalf("expected 1 agent after restart, got %#v", agents)
+	if items, _ := agents["items"].([]any); len(items) != 2 {
+		t.Fatalf("expected 2 agents after restart, got %#v", agents)
 	}
 
 	var projects map[string]any
@@ -300,10 +423,18 @@ type testEnv struct {
 }
 
 func newTestEnv(t *testing.T) testEnv {
-	return newTestEnvWithEngine(t, runtime.MockEngine{})
+	return newTestEnvWithScannerAndEngine(t, &runtime.StaticScanner{
+		Records: []model.RuntimeRecord{mockRuntimeRecord()},
+	}, runtime.MockEngine{})
 }
 
 func newTestEnvWithEngine(t *testing.T, engine runtime.Engine) testEnv {
+	return newTestEnvWithScannerAndEngine(t, &runtime.StaticScanner{
+		Records: []model.RuntimeRecord{mockRuntimeRecord()},
+	}, engine)
+}
+
+func newTestEnvWithScannerAndEngine(t *testing.T, scanner *runtime.StaticScanner, engine runtime.Engine) testEnv {
 	t.Helper()
 
 	root := t.TempDir()
@@ -311,10 +442,6 @@ func newTestEnvWithEngine(t *testing.T, engine runtime.Engine) testEnv {
 	runtimeScanDir := filepath.Join(root, "runtime-manifests")
 	if err := os.MkdirAll(runtimeScanDir, 0o755); err != nil {
 		t.Fatalf("mkdir runtime scan dir: %v", err)
-	}
-
-	scanner := &runtime.StaticScanner{
-		Records: []model.RuntimeRecord{mockRuntimeRecord()},
 	}
 
 	app, err := NewServer(ServerConfig{
@@ -396,6 +523,19 @@ func createAgent(t *testing.T, env testEnv, name string) string {
 		"model":       "mock-1",
 	}, http.StatusCreated, &resp)
 	return resp["id"].(string)
+}
+
+func defaultAgentID(t *testing.T, env testEnv) string {
+	t.Helper()
+
+	var resp map[string]any
+	getJSON(t, env.server, "/api/agents", http.StatusOK, &resp)
+	items, _ := resp["items"].([]any)
+	if len(items) == 0 {
+		t.Fatal("expected at least one agent")
+	}
+	agent, _ := items[0].(map[string]any)
+	return agent["id"].(string)
 }
 
 func createProject(t *testing.T, env testEnv, mainAgentID string) string {
