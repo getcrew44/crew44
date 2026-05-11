@@ -2,3 +2,4 @@
 /bin/
 /crewai-cli
 /crewai-server
+.gstack/
