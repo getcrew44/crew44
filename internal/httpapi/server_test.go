@@ -14,26 +14,21 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/sqtech/crew-ai/crewai-repo/internal/model"
+	"github.com/sqtech/crew-ai/crewai-repo/internal/runtime"
 )
 
 func TestResourceLifecyclePersistsExpectedFiles(t *testing.T) {
 	env := newTestEnv(t)
-	writeRuntimeManifest(t, env.runtimeScanDir, map[string]any{
-		"id":          "runtime-mock",
-		"provider":    "mock",
-		"name":        "Mock Runtime",
-		"binary_path": "builtin://mock",
-		"version":     "test",
-	})
-
 	postJSON(t, env.server, http.MethodPost, "/api/runtimes/rescan", nil, http.StatusOK, nil)
 
 	var agent map[string]any
 	postJSON(t, env.server, http.MethodPost, "/api/agents", map[string]any{
-		"name":       "Aria",
+		"name":        "Aria",
 		"instruction": "You are helpful",
-		"runtime_id": "runtime-mock",
-		"model":      "mock-1",
+		"runtime_id":  "runtime-mock",
+		"model":       "mock-1",
 	}, http.StatusCreated, &agent)
 
 	var skill map[string]any
@@ -54,9 +49,9 @@ func TestResourceLifecyclePersistsExpectedFiles(t *testing.T) {
 
 	var chat map[string]any
 	postJSON(t, env.server, http.MethodPost, "/api/chat/sessions", map[string]any{
-		"project_id":     project["id"],
-		"title":          "Demo Chat",
-		"main_agent_id":  agent["id"],
+		"project_id":    project["id"],
+		"title":         "Demo Chat",
+		"main_agent_id": agent["id"],
 	}, http.StatusCreated, &chat)
 
 	assertFileExists(t, filepath.Join(env.stateDir, "runtimes.json"))
@@ -73,13 +68,6 @@ func TestResourceLifecyclePersistsExpectedFiles(t *testing.T) {
 
 func TestChatMessageReplayAndFollowSSE(t *testing.T) {
 	env := newTestEnv(t)
-	writeRuntimeManifest(t, env.runtimeScanDir, map[string]any{
-		"id":          "runtime-mock",
-		"provider":    "mock",
-		"name":        "Mock Runtime",
-		"binary_path": "builtin://mock",
-		"version":     "test",
-	})
 	postJSON(t, env.server, http.MethodPost, "/api/runtimes/rescan", nil, http.StatusOK, nil)
 
 	agentID := createAgent(t, env, "Aria")
@@ -128,13 +116,6 @@ func TestChatMessageReplayAndFollowSSE(t *testing.T) {
 
 func TestChatSwitchAgentRebuildsSummaryAndSupportsHandoff(t *testing.T) {
 	env := newTestEnv(t)
-	writeRuntimeManifest(t, env.runtimeScanDir, map[string]any{
-		"id":          "runtime-mock",
-		"provider":    "mock",
-		"name":        "Mock Runtime",
-		"binary_path": "builtin://mock",
-		"version":     "test",
-	})
 	postJSON(t, env.server, http.MethodPost, "/api/runtimes/rescan", nil, http.StatusOK, nil)
 
 	agentA := createAgent(t, env, "Aria")
@@ -176,13 +157,6 @@ func TestChatSwitchAgentRebuildsSummaryAndSupportsHandoff(t *testing.T) {
 
 func TestRejectsConcurrentMessagesAndMissingRuntime(t *testing.T) {
 	env := newTestEnv(t)
-	writeRuntimeManifest(t, env.runtimeScanDir, map[string]any{
-		"id":          "runtime-mock",
-		"provider":    "mock",
-		"name":        "Mock Runtime",
-		"binary_path": "builtin://mock",
-		"version":     "test",
-	})
 	postJSON(t, env.server, http.MethodPost, "/api/runtimes/rescan", nil, http.StatusOK, nil)
 
 	agentID := createAgent(t, env, "Aria")
@@ -201,9 +175,7 @@ func TestRejectsConcurrentMessagesAndMissingRuntime(t *testing.T) {
 
 	waitForChatIdle(t, env.server, chatID)
 
-	if err := os.Remove(filepath.Join(env.runtimeScanDir, "runtime-mock.crewai-runtime.json")); err != nil {
-		t.Fatalf("remove runtime manifest: %v", err)
-	}
+	env.scanner.Records = nil
 	postJSON(t, env.server, http.MethodPost, "/api/runtimes/rescan", nil, http.StatusOK, nil)
 
 	postJSON(t, env.server, http.MethodPost, fmt.Sprintf("/api/chat/sessions/%s/messages", chatID), map[string]any{
@@ -212,13 +184,126 @@ func TestRejectsConcurrentMessagesAndMissingRuntime(t *testing.T) {
 	}, http.StatusConflict, nil)
 }
 
+func TestHandoffToCurrentAgentStopsLoop(t *testing.T) {
+	engine := &loopingHandoffEngine{}
+	env := newTestEnvWithEngine(t, engine)
+	postJSON(t, env.server, http.MethodPost, "/api/runtimes/rescan", nil, http.StatusOK, nil)
+
+	agentA := createAgent(t, env, "Aria")
+	agentB := createAgent(t, env, "Bex")
+	engine.targetID = agentB
+	projectID := createProject(t, env, agentA)
+	chatID := createChat(t, env, projectID, agentA)
+
+	postJSON(t, env.server, http.MethodPost, fmt.Sprintf("/api/chat/sessions/%s/messages", chatID), map[string]any{
+		"content":         "trigger handoff loop guard",
+		"target_agent_id": agentA,
+	}, http.StatusAccepted, nil)
+	waitForChatIdle(t, env.server, chatID)
+
+	var replay map[string]any
+	getJSON(t, env.server, fmt.Sprintf("/api/chat/sessions/%s/events?after=0", chatID), http.StatusOK, &replay)
+	items, _ := replay["events"].([]any)
+	if len(items) != 3 {
+		t.Fatalf("expected loop guard to stop after one self-handoff, got %#v", replay)
+	}
+
+	var chat map[string]any
+	getJSON(t, env.server, fmt.Sprintf("/api/chat/sessions/%s", chatID), http.StatusOK, &chat)
+	if chat["current_agent_id"] != agentB {
+		t.Fatalf("expected current agent to remain on handoff target %s, got %#v", agentB, chat["current_agent_id"])
+	}
+}
+
+func TestListChatsWithoutProjectFilterReturnsAllChats(t *testing.T) {
+	env := newTestEnv(t)
+	postJSON(t, env.server, http.MethodPost, "/api/runtimes/rescan", nil, http.StatusOK, nil)
+
+	agentID := createAgent(t, env, "Aria")
+	projectA := createProject(t, env, agentID)
+	projectB := createProject(t, env, agentID)
+	chatA := createChat(t, env, projectA, agentID)
+	chatB := createChat(t, env, projectB, agentID)
+
+	var resp map[string]any
+	getJSON(t, env.server, "/api/chat/sessions", http.StatusOK, &resp)
+
+	items, _ := resp["items"].([]any)
+	if len(items) != 2 {
+		t.Fatalf("expected 2 chats from unfiltered list, got %#v", resp)
+	}
+
+	seen := map[string]bool{}
+	for _, item := range items {
+		record, _ := item.(map[string]any)
+		seen[record["id"].(string)] = true
+	}
+	if !seen[chatA] || !seen[chatB] {
+		t.Fatalf("expected both chats in unfiltered list, got %#v", resp)
+	}
+}
+
+func TestRestartReloadsPersistedResources(t *testing.T) {
+	env := newTestEnv(t)
+	postJSON(t, env.server, http.MethodPost, "/api/runtimes/rescan", nil, http.StatusOK, nil)
+
+	agentID := createAgent(t, env, "Aria")
+
+	var skill map[string]any
+	postJSON(t, env.server, http.MethodPost, "/api/skills", map[string]any{
+		"name": "Core Skill",
+	}, http.StatusCreated, &skill)
+	postJSON(t, env.server, http.MethodPut, fmt.Sprintf("/api/agents/%s/skills", agentID), map[string]any{
+		"skill_ids": []string{skill["id"].(string)},
+	}, http.StatusOK, nil)
+
+	projectID := createProject(t, env, agentID)
+	chatID := createChat(t, env, projectID, agentID)
+
+	restarted := newServerForState(t, env.stateDir, env.scanner)
+
+	var agents map[string]any
+	getJSON(t, restarted, "/api/agents", http.StatusOK, &agents)
+	if items, _ := agents["items"].([]any); len(items) != 1 {
+		t.Fatalf("expected 1 agent after restart, got %#v", agents)
+	}
+
+	var projects map[string]any
+	getJSON(t, restarted, "/api/projects", http.StatusOK, &projects)
+	if items, _ := projects["items"].([]any); len(items) != 1 {
+		t.Fatalf("expected 1 project after restart, got %#v", projects)
+	}
+
+	var chats map[string]any
+	getJSON(t, restarted, "/api/chat/sessions", http.StatusOK, &chats)
+	items, _ := chats["items"].([]any)
+	if len(items) != 1 {
+		t.Fatalf("expected 1 chat after restart, got %#v", chats)
+	}
+	record, _ := items[0].(map[string]any)
+	if record["id"] != chatID {
+		t.Fatalf("expected restarted chat list to include %s, got %#v", chatID, record["id"])
+	}
+
+	var chat map[string]any
+	getJSON(t, restarted, fmt.Sprintf("/api/chat/sessions/%s", chatID), http.StatusOK, &chat)
+	if chat["project_id"] != projectID {
+		t.Fatalf("expected chat project_id %s after restart, got %#v", projectID, chat["project_id"])
+	}
+}
+
 type testEnv struct {
-	server        http.Handler
-	stateDir      string
+	server         http.Handler
+	stateDir       string
 	runtimeScanDir string
+	scanner        *runtime.StaticScanner
 }
 
 func newTestEnv(t *testing.T) testEnv {
+	return newTestEnvWithEngine(t, runtime.MockEngine{})
+}
+
+func newTestEnvWithEngine(t *testing.T, engine runtime.Engine) testEnv {
 	t.Helper()
 
 	root := t.TempDir()
@@ -228,31 +313,75 @@ func newTestEnv(t *testing.T) testEnv {
 		t.Fatalf("mkdir runtime scan dir: %v", err)
 	}
 
+	scanner := &runtime.StaticScanner{
+		Records: []model.RuntimeRecord{mockRuntimeRecord()},
+	}
+
 	app, err := NewServer(ServerConfig{
 		StateDir:       stateDir,
 		RuntimeScanDir: runtimeScanDir,
+		Scanner:        scanner,
+		Engine:         engine,
 	})
 	if err != nil {
 		t.Fatalf("new server: %v", err)
 	}
 
 	return testEnv{
-		server:        app,
-		stateDir:      stateDir,
+		server:         app,
+		stateDir:       stateDir,
 		runtimeScanDir: runtimeScanDir,
+		scanner:        scanner,
 	}
 }
 
-func writeRuntimeManifest(t *testing.T, dir string, doc map[string]any) {
+type loopingHandoffEngine struct {
+	targetID string
+}
+
+func (e *loopingHandoffEngine) Run(_ context.Context, request runtime.RunRequest, emit func(runtime.StreamEvent) error) (runtime.RunResult, error) {
+	var content string
+	switch request.Agent.Name {
+	case "Aria":
+		content = "handoff to Bex ^<CREWAI_HANDOFF>" + e.targetID + "</CREWAI_HANDOFF>"
+	default:
+		content = "repeat handoff ^<CREWAI_HANDOFF>" + request.Agent.ID + "</CREWAI_HANDOFF>"
+	}
+	if err := emit(runtime.StreamEvent{
+		Type: model.EventTypeMessage,
+		Message: &model.MessagePayload{
+			Role:    model.MessageRoleAssistant,
+			Content: content,
+		},
+	}); err != nil {
+		return runtime.RunResult{}, err
+	}
+	return runtime.RunResult{SessionID: "loop-guard"}, nil
+}
+
+func newServerForState(t *testing.T, stateDir string, scanner runtime.Scanner) http.Handler {
 	t.Helper()
 
-	path := filepath.Join(dir, fmt.Sprintf("%s.crewai-runtime.json", doc["id"]))
-	data, err := json.Marshal(doc)
+	server, err := NewServer(ServerConfig{
+		StateDir:       stateDir,
+		RuntimeScanDir: filepath.Join(filepath.Dir(stateDir), "runtime-manifests"),
+		Scanner:        scanner,
+		Engine:         runtime.MockEngine{},
+	})
 	if err != nil {
-		t.Fatalf("marshal runtime manifest: %v", err)
+		t.Fatalf("new server for existing state: %v", err)
 	}
-	if err := os.WriteFile(path, data, 0o644); err != nil {
-		t.Fatalf("write runtime manifest: %v", err)
+	return server
+}
+
+func mockRuntimeRecord() model.RuntimeRecord {
+	return model.RuntimeRecord{
+		ID:         "runtime-mock",
+		Provider:   "mock",
+		Name:       "Mock Runtime",
+		Status:     model.RuntimeStatusAvailable,
+		BinaryPath: "builtin://mock",
+		Version:    "test",
 	}
 }
 
@@ -261,10 +390,10 @@ func createAgent(t *testing.T, env testEnv, name string) string {
 
 	var resp map[string]any
 	postJSON(t, env.server, http.MethodPost, "/api/agents", map[string]any{
-		"name":       name,
+		"name":        name,
 		"instruction": "Be helpful",
-		"runtime_id": "runtime-mock",
-		"model":      "mock-1",
+		"runtime_id":  "runtime-mock",
+		"model":       "mock-1",
 	}, http.StatusCreated, &resp)
 	return resp["id"].(string)
 }

@@ -2,10 +2,8 @@ package app
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"os"
-	"path/filepath"
 	"sort"
 	"sync"
 	"time"
@@ -20,11 +18,14 @@ import (
 type Config struct {
 	StateDir       string
 	RuntimeScanDir string
+	Scanner        runtime.Scanner
+	Engine         runtime.Engine
 }
 
 type App struct {
 	store          *store.Store
 	runtimeScanDir string
+	scanner        runtime.Scanner
 	engine         runtime.Engine
 	broker         *broker.Broker[model.Event]
 
@@ -43,10 +44,25 @@ func New(cfg Config) (*App, error) {
 	return &App{
 		store:          st,
 		runtimeScanDir: cfg.RuntimeScanDir,
-		engine:         runtime.MockEngine{},
+		scanner:        firstScanner(cfg.Scanner),
+		engine:         firstEngine(cfg.Engine),
 		broker:         broker.New[model.Event](),
 		cancels:        make(map[string]context.CancelFunc),
 	}, nil
+}
+
+func firstEngine(engine runtime.Engine) runtime.Engine {
+	if engine != nil {
+		return engine
+	}
+	return runtime.RealEngine{}
+}
+
+func firstScanner(scanner runtime.Scanner) runtime.Scanner {
+	if scanner != nil {
+		return scanner
+	}
+	return runtime.LocalScanner{}
 }
 
 func (a *App) StateDir() string {
@@ -88,27 +104,16 @@ func (a *App) RescanRuntimes() ([]model.RuntimeRecord, error) {
 		currentByID[record.ID] = record
 	}
 
-	matches, err := filepath.Glob(filepath.Join(a.runtimeScanDir, "*.crewai-runtime.json"))
+	scanned, err := a.scanner.Scan(context.Background())
 	if err != nil {
 		return nil, err
 	}
 
 	var next []model.RuntimeRecord
 	now := time.Now().UTC()
-	for _, match := range matches {
-		data, err := os.ReadFile(match)
-		if err != nil {
-			return nil, err
-		}
-		var record model.RuntimeRecord
-		if err := json.Unmarshal(data, &record); err != nil {
-			return nil, err
-		}
+	for _, record := range scanned {
 		record.Status = model.RuntimeStatusAvailable
 		record.DetectedAt = now
-		if record.Metadata == nil {
-			record.Metadata = map[string]any{}
-		}
 		next = append(next, record)
 		delete(currentByID, record.ID)
 	}
@@ -399,6 +404,22 @@ func (a *App) CreateChat(projectID, title, mainAgentID string) (model.ChatRecord
 }
 
 func (a *App) ListChats(projectID string) ([]model.ChatRecord, error) {
+	if projectID == "" {
+		projects, err := a.store.ListProjects()
+		if err != nil {
+			return nil, err
+		}
+		chats := make([]model.ChatRecord, 0)
+		for _, project := range projects {
+			projectChats, err := a.store.ListChats(project.ID)
+			if err != nil {
+				return nil, a.mapError(err)
+			}
+			chats = append(chats, projectChats...)
+		}
+		sort.Slice(chats, func(i, j int) bool { return chats[i].CreatedAt.Before(chats[j].CreatedAt) })
+		return chats, nil
+	}
 	return a.store.ListChats(projectID)
 }
 

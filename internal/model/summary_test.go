@@ -14,7 +14,7 @@ func TestBuildChatSummaryKeepsUserAndFinalAssistantMessages(t *testing.T) {
 			ActorAgentID: "agent-a",
 			Message: &MessagePayload{
 				Role:    MessageRoleUser,
-				Content: "please investigate [@Aria](mention://agent/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa)",
+				Content: "please investigate [@Aria](mention://agent/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa) ^<CREWAI_HANDOFF>cccccccc-cccc-cccc-cccc-cccccccccccc</CREWAI_HANDOFF>",
 			},
 		},
 		{

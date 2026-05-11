@@ -11,9 +11,11 @@ import (
 )
 
 type RunRequest struct {
+	Runtime         model.RuntimeRecord
 	Agent           model.AgentConfig
 	Prompt          string
 	SummaryPath     string
+	WorkDir         string
 	ResumeSessionID string
 }
 
@@ -29,11 +31,25 @@ type RunResult struct {
 	SessionID string
 }
 
+type Scanner interface {
+	Scan(ctx context.Context) ([]model.RuntimeRecord, error)
+}
+
 type Engine interface {
 	Run(ctx context.Context, request RunRequest, emit func(StreamEvent) error) (RunResult, error)
 }
 
 type MockEngine struct{}
+
+type StaticScanner struct {
+	Records []model.RuntimeRecord
+}
+
+func (s StaticScanner) Scan(context.Context) ([]model.RuntimeRecord, error) {
+	out := make([]model.RuntimeRecord, len(s.Records))
+	copy(out, s.Records)
+	return out, nil
+}
 
 func (MockEngine) Run(ctx context.Context, request RunRequest, emit func(StreamEvent) error) (RunResult, error) {
 	if err := emit(StreamEvent{
