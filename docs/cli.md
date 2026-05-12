@@ -1,7 +1,7 @@
 # crewai-cli
 
 `crewai-cli` is a backend API client for local terminal use. It talks to the
-running `crewai-server` over HTTP. By default it targets:
+running CrewAI daemon over HTTP. By default it targets:
 
 ```bash
 http://127.0.0.1:8080

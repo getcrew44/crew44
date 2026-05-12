@@ -2,11 +2,10 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-FRONTEND_DIR="${ROOT_DIR}/frontend"
 STATE_ROOT="${CREWAI_UI_E2E_ROOT:-/tmp/crewai-ui-e2e}"
 STATE_DIR="${STATE_ROOT}/state"
 WORK_DIR="${STATE_ROOT}/workspace"
-BIN_PATH="${STATE_ROOT}/crewai-server"
+BIN_PATH="${STATE_ROOT}/crewai-daemon"
 JSONQ_BIN="${STATE_ROOT}/jsonq"
 PID_FILE="${STATE_ROOT}/server.pid"
 VITE_PID_FILE="${STATE_ROOT}/vite.pid"
@@ -93,9 +92,9 @@ build_binaries() {
   require_cmd go
   require_cmd npm
 
-  step "Build crewai-server and jsonq"
+  step "Build crewai-daemon and jsonq"
   (
-    cd "${ROOT_DIR}"
+    cd "${ROOT_DIR}/daemon"
     go build -o "${BIN_PATH}" ./cmd/crewai-server
     go build -o "${JSONQ_BIN}" ./test-utils/jsonq
   )
@@ -159,7 +158,7 @@ seed_backend_resources() {
 }
 
 start_frontend() {
-  [[ -d "${FRONTEND_DIR}/node_modules/electron" ]] || fail "missing Electron dependencies; run npm install in frontend/"
+  [[ -d "${ROOT_DIR}/node_modules/electron" ]] || fail "missing Electron dependencies; run npm install"
 
   if is_vite_running; then
     return
@@ -167,7 +166,7 @@ start_frontend() {
 
   step "Start Vite renderer"
   (
-    cd "${FRONTEND_DIR}"
+    cd "${ROOT_DIR}"
     CREWAI_BACKEND_URL="${BASE_URL}" \
     nohup npm run dev -- --host 127.0.0.1 --port "${FRONTEND_PORT}" >"${VITE_LOG_FILE}" 2>&1 < /dev/null &
     echo "$!" > "${VITE_PID_FILE}"
@@ -179,7 +178,7 @@ start_frontend() {
 open_electron() {
   step "Open Electron UI"
   (
-    cd "${FRONTEND_DIR}"
+    cd "${ROOT_DIR}"
     CREWAI_RENDERER_URL="${RENDERER_URL}" \
     CREWAI_BACKEND_URL="${BASE_URL}" \
     npm run electron
