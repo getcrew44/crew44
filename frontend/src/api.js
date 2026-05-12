@@ -1,13 +1,18 @@
-const BASE = '/api';
+const injectedBackendUrl =
+  typeof window !== 'undefined' && window.electronAPI?.backendUrl
+    ? window.electronAPI.backendUrl.replace(/\/$/, '')
+    : '';
+const configuredBackendUrl = (import.meta.env.VITE_CREWAI_BACKEND_URL || '').replace(/\/$/, '');
+const API_BASE = `${injectedBackendUrl || configuredBackendUrl}/api`;
 
 async function get(path) {
-  const res = await fetch(BASE + path);
+  const res = await fetch(API_BASE + path);
   if (!res.ok) throw new Error(`API ${res.status}: ${path}`);
   return res.json();
 }
 
 async function post(path, body) {
-  const res = await fetch(BASE + path, {
+  const res = await fetch(API_BASE + path, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -17,7 +22,7 @@ async function post(path, body) {
 }
 
 async function put(path, body) {
-  const res = await fetch(BASE + path, {
+  const res = await fetch(API_BASE + path, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -27,7 +32,7 @@ async function put(path, body) {
 }
 
 async function del(path) {
-  const res = await fetch(BASE + path, { method: 'DELETE' });
+  const res = await fetch(API_BASE + path, { method: 'DELETE' });
   if (!res.ok) throw new Error(`API ${res.status}: ${path}`);
   return res.json();
 }
@@ -145,7 +150,7 @@ export async function cancelChat(chatId) {
 // Returns a cleanup function. Connects SSE, calls onEvent for each event,
 // onDone when the stream ends, onError on failure.
 export function streamChatEvents(chatId, after, onEvent, onDone, onError) {
-  const url = `/api/chat/sessions/${chatId}/events?follow=1${after ? '&after=' + after : ''}`;
+  const url = `${API_BASE}/chat/sessions/${chatId}/events?follow=1${after ? '&after=' + after : ''}`;
   const es = new EventSource(url);
 
   es.addEventListener('chat.event', (e) => {

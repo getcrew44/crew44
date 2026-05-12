@@ -259,6 +259,7 @@ export default function NewTaskRoute({ projects, agents, onNewTask, onExistingFo
           padding: 16, boxShadow: '0 1px 0 rgba(0,0,0,0.02)',
         }}>
           <textarea
+            data-testid="new-task-input"
             value={val}
             onChange={(e) => setVal(e.target.value)}
             onKeyDown={onKeyDown}
@@ -300,6 +301,7 @@ export default function NewTaskRoute({ projects, agents, onNewTask, onExistingFo
 
             <div style={{ flex: 1 }} />
             <button
+              data-testid="start-crew-button"
               onClick={startCrew}
               disabled={!canStart}
               style={{

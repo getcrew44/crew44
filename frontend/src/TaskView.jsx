@@ -266,6 +266,7 @@ function Composer({ onSend, disabled }) {
         padding: '10px 12px 8px', boxShadow: '0 1px 0 rgba(0,0,0,0.02)',
       }}>
         <textarea
+          data-testid="composer-input"
           ref={ta}
           value={val}
           onChange={(e) => setVal(e.target.value)}
@@ -286,6 +287,7 @@ function Composer({ onSend, disabled }) {
           <div style={{ flex: 1 }} />
           <span style={{ fontSize: 11.5, color: '#A89F92' }}>⌘↵ send</span>
           <button
+            data-testid="composer-send"
             onClick={send}
             disabled={disabled || !val.trim()}
             style={{
