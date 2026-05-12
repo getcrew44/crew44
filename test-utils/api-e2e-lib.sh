@@ -5,7 +5,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 STATE_ROOT="${CREWAI_API_E2E_ROOT:-/tmp/crewai-api-e2e}"
 STATE_DIR="${STATE_ROOT}/state"
 WORK_DIR="${STATE_ROOT}/workspace"
-BIN_PATH="${STATE_ROOT}/crewai-server"
+BIN_PATH="${STATE_ROOT}/crewai-daemon"
 JSONQ_BIN="${STATE_ROOT}/jsonq"
 PID_FILE="${STATE_ROOT}/server.pid"
 LOG_FILE="${STATE_ROOT}/server.log"
@@ -145,9 +145,9 @@ build_binaries() {
   require_cmd curl
   require_cmd go
 
-  step "Build crewai-server and jsonq"
+  step "Build crewai-daemon and jsonq"
   (
-    cd "${ROOT_DIR}"
+    cd "${ROOT_DIR}/daemon"
     go build -o "${BIN_PATH}" ./cmd/crewai-server
     go build -o "${JSONQ_BIN}" ./test-utils/jsonq
   )
@@ -155,7 +155,7 @@ build_binaries() {
 
 start_server() {
   mkdir -p "${STATE_ROOT}"
-  step "Start crewai-server"
+  step "Start crewai-daemon"
   CREWAI_STATE_DIR="${STATE_DIR}" \
   PORT="${PORT}" \
   nohup "${BIN_PATH}" >"${LOG_FILE}" 2>&1 < /dev/null &
@@ -167,7 +167,7 @@ start_server() {
 
 destroy_server() {
   if is_server_running; then
-    step "Stop crewai-server"
+    step "Stop crewai-daemon"
     kill "$(server_pid)" >/dev/null 2>&1 || true
     sleep 1
   fi
