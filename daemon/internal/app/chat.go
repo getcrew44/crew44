@@ -107,6 +107,11 @@ func (a *App) runChat(ctx context.Context, chatID, agentID, turnID, prompt strin
 			a.finishChatWithError(chatID, err.Error())
 			return
 		}
+		agentSkills, err := a.resolveAgentSkills(agent.SkillIDs)
+		if err != nil {
+			a.finishChatWithError(chatID, err.Error())
+			return
+		}
 
 		resumeSessionID := ""
 		if chat.LastRuntimeSession.AgentID == currentAgentID {
@@ -117,9 +122,11 @@ func (a *App) runChat(ctx context.Context, chatID, agentID, turnID, prompt strin
 		result, err := a.engine.Run(ctx, runtime.RunRequest{
 			Runtime:         runtimeRecord,
 			Agent:           agent,
+			AgentSkills:     agentSkills,
 			Prompt:          currentPrompt,
 			SummaryPath:     a.store.SummaryPath(chatID),
 			WorkDir:         project.Workdir,
+			RuntimeEnvDir:   a.store.RuntimeEnvDir(chatID, currentAgentID),
 			ResumeSessionID: resumeSessionID,
 		}, func(streamEvent runtime.StreamEvent) error {
 			event := model.Event{
