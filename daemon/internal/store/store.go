@@ -35,6 +35,10 @@ func (s *Store) SummaryPath(chatID string) string {
 	return filepath.Join(s.root, "chats", "chat-"+chatID, "summary.md")
 }
 
+func (s *Store) RuntimeEnvDir(chatID, agentID string) string {
+	return filepath.Join(s.root, "runtime-env", "chat-"+chatID, "agent-"+agentID)
+}
+
 func (s *Store) ListRuntimes() ([]model.RuntimeRecord, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -158,7 +162,8 @@ func (s *Store) EnsureSkillFile(id, name string) error {
 	}
 	path := filepath.Join(dir, "SKILL.md")
 	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
-		return os.WriteFile(path, []byte("# "+name+"\n"), 0o644)
+		content := fmt.Sprintf("---\nname: %s\ndescription: Use this skill when it is relevant to the user's task.\n---\n\n# %s\n", name, name)
+		return os.WriteFile(path, []byte(content), 0o644)
 	}
 	return nil
 }
@@ -168,32 +173,40 @@ func (s *Store) ListSkillFiles(id string) ([]model.SkillFile, error) {
 	defer s.mu.Unlock()
 
 	dir := s.SkillDir(id)
-	entries, err := os.ReadDir(dir)
-	if errors.Is(err, os.ErrNotExist) {
+	if _, err := os.Stat(dir); errors.Is(err, os.ErrNotExist) {
 		return nil, ErrNotFound
-	}
-	if err != nil {
+	} else if err != nil {
 		return nil, err
 	}
-	files := make([]model.SkillFile, 0, len(entries))
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
+	var files []model.SkillFile
+	err := filepath.WalkDir(dir, func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
 		}
-		path := filepath.Join(dir, entry.Name())
+		if entry.IsDir() {
+			return nil
+		}
+		rel, err := filepath.Rel(dir, path)
+		if err != nil {
+			return err
+		}
 		content, err := os.ReadFile(path)
 		if err != nil {
-			return nil, err
+			return err
 		}
 		info, err := entry.Info()
 		if err != nil {
-			return nil, err
+			return err
 		}
 		files = append(files, model.SkillFile{
-			ID:        entry.Name(),
+			ID:        filepath.ToSlash(rel),
 			Content:   string(content),
 			UpdatedAt: info.ModTime(),
 		})
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 	sort.Slice(files, func(i, j int) bool { return files[i].ID < files[j].ID })
 	return files, nil
@@ -206,17 +219,36 @@ func (s *Store) PutSkillFile(id, fileID, content string) error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(dir, filepath.Base(fileID)), []byte(content), 0o644)
+	path, err := safeSkillFilePath(dir, fileID)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(path, []byte(content), 0o644)
 }
 
 func (s *Store) DeleteSkillFile(id, fileID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	err := os.Remove(filepath.Join(s.SkillDir(id), filepath.Base(fileID)))
+	path, err := safeSkillFilePath(s.SkillDir(id), fileID)
+	if err != nil {
+		return err
+	}
+	err = os.Remove(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return ErrNotFound
 	}
 	return err
+}
+
+func safeSkillFilePath(root, fileID string) (string, error) {
+	cleaned := filepath.Clean(filepath.FromSlash(strings.TrimSpace(fileID)))
+	if cleaned == "." || filepath.IsAbs(cleaned) || cleaned == ".." || strings.HasPrefix(cleaned, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("%w: %q", ErrInvalidPath, fileID)
+	}
+	return filepath.Join(root, cleaned), nil
 }
 
 func (s *Store) DeleteSkill(id string) error {

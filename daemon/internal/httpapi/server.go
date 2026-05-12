@@ -73,7 +73,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("DELETE /api/skills/{id}", s.handleDeleteSkill)
 	s.mux.HandleFunc("GET /api/skills/{id}/files", s.handleListSkillFiles)
 	s.mux.HandleFunc("PUT /api/skills/{id}/files", s.handlePutSkillFile)
-	s.mux.HandleFunc("DELETE /api/skills/{id}/files/{fileId}", s.handleDeleteSkillFile)
+	s.mux.HandleFunc("DELETE /api/skills/{id}/files/{fileId...}", s.handleDeleteSkillFile)
 
 	s.mux.HandleFunc("GET /api/projects", s.handleListProjects)
 	s.mux.HandleFunc("POST /api/projects", s.handleCreateProject)

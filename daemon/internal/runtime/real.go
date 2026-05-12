@@ -14,14 +14,20 @@ import (
 type RealEngine struct{}
 
 func (RealEngine) Run(ctx context.Context, request RunRequest, emit func(StreamEvent) error) (RunResult, error) {
+	env, err := prepareSkillEnvironment(request)
+	if err != nil {
+		return RunResult{}, err
+	}
 	backend, err := backendagent.New(request.Runtime.Provider, backendagent.Config{
 		ExecutablePath: request.Runtime.BinaryPath,
+		Env:            env,
 	})
 	if err != nil {
 		return RunResult{}, err
 	}
 
 	systemPrompt := strings.TrimSpace(request.Agent.Instruction)
+	systemPrompt = appendSkillSummary(systemPrompt, request.Runtime.Provider, request.AgentSkills)
 	if request.SummaryPath != "" {
 		if summaryBytes, err := os.ReadFile(request.SummaryPath); err == nil {
 			summary := strings.TrimSpace(string(summaryBytes))

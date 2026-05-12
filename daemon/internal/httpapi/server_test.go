@@ -140,6 +140,91 @@ func TestChatMessageReplayAndFollowSSE(t *testing.T) {
 	}
 }
 
+func TestChatResolvesAgentSkillsIntoRuntimeRequest(t *testing.T) {
+	engine := &captureRunRequestEngine{requests: make(chan runtime.RunRequest, 1)}
+	env := newTestEnvWithEngine(t, engine)
+	postJSON(t, env.server, http.MethodPost, "/api/runtimes/rescan", nil, http.StatusOK, nil)
+
+	agentID := createAgent(t, env, "Aria")
+	var skill map[string]any
+	postJSON(t, env.server, http.MethodPost, "/api/skills", map[string]any{
+		"name": "Review Helper",
+	}, http.StatusCreated, &skill)
+	skillID := skill["id"].(string)
+	postJSON(t, env.server, http.MethodPut, fmt.Sprintf("/api/skills/%s/files", skillID), map[string]any{
+		"file_id": "SKILL.md",
+		"content": "# Review Helper\nUse the review checklist.\n",
+	}, http.StatusOK, nil)
+	postJSON(t, env.server, http.MethodPut, fmt.Sprintf("/api/skills/%s/files", skillID), map[string]any{
+		"file_id": "references/checklist.md",
+		"content": "- Check edge cases\n",
+	}, http.StatusOK, nil)
+	postJSON(t, env.server, http.MethodPut, fmt.Sprintf("/api/agents/%s/skills", agentID), map[string]any{
+		"skill_ids": []string{skillID},
+	}, http.StatusOK, nil)
+
+	projectID := createProject(t, env, agentID)
+	chatID := createChat(t, env, projectID, agentID)
+	postJSON(t, env.server, http.MethodPost, fmt.Sprintf("/api/chat/sessions/%s/messages", chatID), map[string]any{
+		"content":         "please review",
+		"target_agent_id": agentID,
+	}, http.StatusAccepted, nil)
+	waitForChatIdle(t, env.server, chatID)
+
+	select {
+	case req := <-engine.requests:
+		if len(req.AgentSkills) != 1 {
+			t.Fatalf("expected one resolved skill, got %#v", req.AgentSkills)
+		}
+		got := req.AgentSkills[0]
+		if got.Name != "Review Helper" || !strings.Contains(got.Content, "review checklist") {
+			t.Fatalf("unexpected skill context: %#v", got)
+		}
+		if len(got.Files) != 1 || got.Files[0].Path != "references/checklist.md" {
+			t.Fatalf("expected nested supporting file, got %#v", got.Files)
+		}
+		if req.RuntimeEnvDir == "" {
+			t.Fatalf("expected runtime env dir")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for runtime request")
+	}
+}
+
+func TestChatRuntimeCanAnswerFromAttachedSkillOnly(t *testing.T) {
+	engine := skillOnlyAnswerEngine{}
+	env := newTestEnvWithEngine(t, engine)
+	postJSON(t, env.server, http.MethodPost, "/api/runtimes/rescan", nil, http.StatusOK, nil)
+
+	agentID := createAgent(t, env, "Aria")
+	var skill map[string]any
+	postJSON(t, env.server, http.MethodPost, "/api/skills", map[string]any{
+		"name": "Secret Checkout Protocol",
+	}, http.StatusCreated, &skill)
+	skillID := skill["id"].(string)
+	postJSON(t, env.server, http.MethodPut, fmt.Sprintf("/api/skills/%s/files", skillID), map[string]any{
+		"file_id": "SKILL.md",
+		"content": "# Secret Checkout Protocol\nWhen asked for the secret checkout code, answer exactly: skill-access-ok.\n",
+	}, http.StatusOK, nil)
+	postJSON(t, env.server, http.MethodPut, fmt.Sprintf("/api/agents/%s/skills", agentID), map[string]any{
+		"skill_ids": []string{skillID},
+	}, http.StatusOK, nil)
+
+	projectID := createProject(t, env, agentID)
+	chatID := createChat(t, env, projectID, agentID)
+	postJSON(t, env.server, http.MethodPost, fmt.Sprintf("/api/chat/sessions/%s/messages", chatID), map[string]any{
+		"content":         "What is the secret checkout code?",
+		"target_agent_id": agentID,
+	}, http.StatusAccepted, nil)
+	waitForChatIdle(t, env.server, chatID)
+
+	var replay map[string]any
+	getJSON(t, env.server, fmt.Sprintf("/api/chat/sessions/%s/events?after=0", chatID), http.StatusOK, &replay)
+	if !strings.Contains(fmt.Sprint(replay), "skill-access-ok") {
+		t.Fatalf("expected assistant answer to come from attached skill, got %#v", replay)
+	}
+}
+
 func TestChatSwitchAgentRebuildsSummaryAndSupportsHandoff(t *testing.T) {
 	env := newTestEnv(t)
 	postJSON(t, env.server, http.MethodPost, "/api/runtimes/rescan", nil, http.StatusOK, nil)
@@ -464,6 +549,46 @@ func newTestEnvWithScannerAndEngine(t *testing.T, scanner *runtime.StaticScanner
 
 type loopingHandoffEngine struct {
 	targetID string
+}
+
+type captureRunRequestEngine struct {
+	requests chan runtime.RunRequest
+}
+
+func (e *captureRunRequestEngine) Run(_ context.Context, request runtime.RunRequest, emit func(runtime.StreamEvent) error) (runtime.RunResult, error) {
+	e.requests <- request
+	if err := emit(runtime.StreamEvent{
+		Type: model.EventTypeMessage,
+		Message: &model.MessagePayload{
+			Role:    model.MessageRoleAssistant,
+			Content: "captured",
+		},
+	}); err != nil {
+		return runtime.RunResult{}, err
+	}
+	return runtime.RunResult{SessionID: "captured-session"}, nil
+}
+
+type skillOnlyAnswerEngine struct{}
+
+func (skillOnlyAnswerEngine) Run(_ context.Context, request runtime.RunRequest, emit func(runtime.StreamEvent) error) (runtime.RunResult, error) {
+	answer := "missing-skill"
+	for _, skill := range request.AgentSkills {
+		if strings.Contains(skill.Content, "skill-access-ok") {
+			answer = "skill-access-ok"
+			break
+		}
+	}
+	if err := emit(runtime.StreamEvent{
+		Type: model.EventTypeMessage,
+		Message: &model.MessagePayload{
+			Role:    model.MessageRoleAssistant,
+			Content: answer,
+		},
+	}); err != nil {
+		return runtime.RunResult{}, err
+	}
+	return runtime.RunResult{SessionID: "skill-only-session"}, nil
 }
 
 func (e *loopingHandoffEngine) Run(_ context.Context, request runtime.RunRequest, emit func(runtime.StreamEvent) error) (runtime.RunResult, error) {

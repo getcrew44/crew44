@@ -13,10 +13,24 @@ import (
 type RunRequest struct {
 	Runtime         model.RuntimeRecord
 	Agent           model.AgentConfig
+	AgentSkills     []SkillContext
 	Prompt          string
 	SummaryPath     string
 	WorkDir         string
+	RuntimeEnvDir   string
 	ResumeSessionID string
+}
+
+type SkillContext struct {
+	ID      string
+	Name    string
+	Content string
+	Files   []SkillFileContext
+}
+
+type SkillFileContext struct {
+	Path    string
+	Content string
 }
 
 type StreamEvent struct {

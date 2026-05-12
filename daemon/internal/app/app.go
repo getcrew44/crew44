@@ -327,6 +327,9 @@ func (a *App) ReplaceAgentSkills(id string, skillIDs []string) (model.AgentConfi
 	if err != nil {
 		return model.AgentConfig{}, a.mapError(err)
 	}
+	if _, err := a.resolveAgentSkills(skillIDs); err != nil {
+		return model.AgentConfig{}, err
+	}
 	agent.SkillIDs = append([]string(nil), skillIDs...)
 	agent.UpdatedAt = time.Now().UTC()
 	if err := a.store.SaveAgent(agent); err != nil {
@@ -411,6 +414,51 @@ func (a *App) PutSkillFile(id, fileID, content string) error {
 
 func (a *App) DeleteSkillFile(id, fileID string) error {
 	return a.mapError(a.store.DeleteSkillFile(id, fileID))
+}
+
+func (a *App) resolveAgentSkills(skillIDs []string) ([]runtime.SkillContext, error) {
+	if len(skillIDs) == 0 {
+		return nil, nil
+	}
+	records, err := a.store.ListSkills()
+	if err != nil {
+		return nil, err
+	}
+	byID := make(map[string]model.SkillRecord, len(records))
+	for _, record := range records {
+		byID[record.ID] = record
+	}
+
+	out := make([]runtime.SkillContext, 0, len(skillIDs))
+	for _, skillID := range skillIDs {
+		record, ok := byID[skillID]
+		if !ok {
+			return nil, ErrBadRequest
+		}
+		files, err := a.store.ListSkillFiles(skillID)
+		if err != nil {
+			return nil, a.mapError(err)
+		}
+		ctx := runtime.SkillContext{
+			ID:   record.ID,
+			Name: record.Name,
+		}
+		for _, file := range files {
+			if file.ID == "SKILL.md" {
+				ctx.Content = file.Content
+				continue
+			}
+			ctx.Files = append(ctx.Files, runtime.SkillFileContext{
+				Path:    file.ID,
+				Content: file.Content,
+			})
+		}
+		if strings.TrimSpace(ctx.Content) == "" {
+			ctx.Content = "# " + record.Name + "\n"
+		}
+		out = append(out, ctx)
+	}
+	return out, nil
 }
 
 func (a *App) ListProjects() ([]model.ProjectRecord, error) {
@@ -585,6 +633,8 @@ func (a *App) mapError(err error) error {
 		return ErrNotFound
 	case errors.Is(err, store.ErrConflict):
 		return ErrConflict
+	case errors.Is(err, store.ErrInvalidPath):
+		return ErrBadRequest
 	default:
 		return err
 	}
