@@ -2,14 +2,14 @@
 
 Local-first CrewAI workspace for running multi-agent chat flows on your own machine.
 
-The current repository is a Go backend plus a React/Vite frontend and a Go CLI. The backend owns persistence, runtime discovery, chat execution, SSE streaming, and handoff orchestration. The frontend is a browser app that talks to the backend over HTTP. Electron packaging is not wired in this tree yet; the current local development path is backend + frontend.
+The current repository is an Electron desktop shell around a React/Vite frontend, a Go backend, and a Go CLI. The backend owns persistence, runtime discovery, chat execution, SSE streaming, and handoff orchestration. The renderer talks to the backend over HTTP; browser development uses the Vite proxy, while Electron injects the backend URL through preload.
 
 ## Architecture
 
 ```text
 ┌─────────────────────────────────────────────────────────────┐
-│ React frontend (frontend/)                                  │
-│ Vite + React 18                                             │
+│ Electron + React frontend (frontend/)                       │
+│ Electron main/preload + Vite + React 18                     │
 │                                                             │
 │ App.jsx                                                     │
 │ ├── Sidebar.jsx       project/chat navigation               │
@@ -17,9 +17,9 @@ The current repository is a Go backend plus a React/Vite frontend and a Go CLI. 
 │ ├── TaskView.jsx      chat transcript, composer, SSE client │
 │ └── CrewRoute.jsx     agents, skills, runtimes management   │
 │                                                             │
-│ api.js uses fetch + EventSource against /api                │
+│ api.js uses fetch + EventSource against /api or injected URL│
 └──────────────────────────────┬──────────────────────────────┘
-                               │ HTTP/SSE, dev proxy to :8080
+                               │ HTTP/SSE, dev proxy or Electron backend URL
 ┌──────────────────────────────┴──────────────────────────────┐
 │ Go backend (cmd/crewai-server)                              │
 │                                                             │
@@ -69,7 +69,7 @@ There is no separate task/subtask backend model in the current implementation. T
 
 ## Frontend Packages
 
-The frontend is in `frontend/` and uses React 18 with Vite.
+The frontend is in `frontend/` and uses Electron, React 18, and Vite.
 
 | File | Responsibility |
 |---|---|
@@ -81,7 +81,35 @@ The frontend is in `frontend/` and uses React 18 with Vite.
 | `frontend/src/api.js` | Fetch wrappers and `streamChatEvents()` SSE helper. |
 | `frontend/src/utils.js` | Event mapping, display helpers, deterministic agent colors. |
 | `frontend/src/components.jsx` | Shared UI atoms. |
+| `frontend/electron/main.cjs` | Electron app shell, BrowserWindow setup, backend URL injection, native folder picker IPC. |
+| `frontend/electron/preload.cjs` | Safe renderer bridge for backend URL and folder selection. |
+| `frontend/scripts/electron-dev.cjs` | Starts Vite and opens Electron for local desktop development. |
+| `frontend/scripts/run-electron.cjs` | Creates a renamed local `CrewAI Desktop.app` from Electron's dev bundle and launches it. |
 | `frontend/vite.config.js` | Dev server on port `3000`, proxying `/api` to backend port `8080`. |
+
+## Electron Development
+
+Install frontend dependencies once:
+
+```bash
+cd frontend
+npm install
+```
+
+Run a backend, then start the desktop app:
+
+```bash
+cd frontend
+CREWAI_BACKEND_URL=http://127.0.0.1:8080 npm run electron:dev
+```
+
+The Electron shell loads Vite in development via `CREWAI_RENDERER_URL` and uses Vite's `/api` proxy. Without `CREWAI_RENDERER_URL`, it loads the built `frontend/dist/index.html` and injects `CREWAI_BACKEND_URL` directly.
+
+The UI e2e harness mirrors the API e2e layout with isolated state under `/tmp/crewai-ui-e2e`:
+
+```bash
+make ui-e2e
+```
 
 ## State Layout
 

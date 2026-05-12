@@ -35,10 +35,11 @@ function WindowChromeButtons() {
   );
 }
 
-function NavItem({ icon, label, active, onClick }) {
+function NavItem({ icon, label, active, onClick, testId }) {
   const [hover, setHover] = React.useState(false);
   return (
     <div
+      data-testid={testId}
       onClick={onClick}
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
@@ -61,6 +62,7 @@ function ProjectGroup({ project, openIds, currentChatId, onToggle, onPick }) {
   return (
     <div style={{ marginBottom: 2 }}>
       <div
+        data-testid={`project-${project.id}`}
         onClick={() => onToggle(project.id)}
         style={{
           display: 'flex', alignItems: 'center', gap: 8,
@@ -106,6 +108,7 @@ function SessionItem({ session, active, onPick }) {
   const [hover, setHover] = React.useState(false);
   return (
     <div
+      data-testid={`chat-${session.id}`}
       onClick={onPick}
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
@@ -298,13 +301,14 @@ export default function Sidebar({ projects, currentChatId, route, setRoute, onPi
 
       {/* Function nav */}
       <div style={{ padding: '2px 0' }}>
-        <NavItem icon="new"    label="New Task"          active={route === 'new'}    onClick={() => setRoute('new')} />
-        <NavItem icon="search" label="Search"            active={route === 'search'} onClick={() => setRoute('search')} />
+        <NavItem icon="new"    label="New Task"          active={route === 'new'}    onClick={() => setRoute('new')} testId="nav-new-task" />
+        <NavItem icon="search" label="Search"            active={route === 'search'} onClick={() => setRoute('search')} testId="nav-search" />
         <NavItem icon="agents" label="Agents"
           active={route === 'agents' || route === 'skills' || route === 'runtimes'}
           onClick={() => setRoute('agents')}
+          testId="nav-agents"
         />
-        <NavItem icon="auto"   label="Auto optimization" active={route === 'auto'}   onClick={() => setRoute('auto')} />
+        <NavItem icon="auto"   label="Auto optimization" active={route === 'auto'}   onClick={() => setRoute('auto')} testId="nav-auto" />
       </div>
 
       {/* Projects heading */}

@@ -101,9 +101,24 @@ export default function App() {
     loadData();
   }, [loadData]);
 
+  const agentsList = Object.values(agentsMap).filter(a => a.kind === 'agent');
+
   const handleExistingFolder = React.useCallback(() => {
-    // In Electron this will be replaced by window.electronAPI.openFolderDialog()
-    // For web, use a hidden directory input
+    if (window.electronAPI?.openFolderDialog) {
+      window.electronAPI.openFolderDialog().then(async (result) => {
+        if (result.canceled || !result.filePaths?.[0]) return;
+        const folderPath = result.filePaths[0];
+        const folderName = folderPath.split(/[\\/]/).filter(Boolean).pop() || folderPath;
+        try {
+          await api.createProject(folderName, folderPath, agentsList[0]?.id || '');
+          loadData();
+        } catch (err) {
+          console.error('Failed to create project:', err);
+        }
+      });
+      return;
+    }
+
     const input = document.createElement('input');
     input.type = 'file';
     input.webkitdirectory = true;
@@ -124,7 +139,7 @@ export default function App() {
     };
     document.body.appendChild(input);
     input.click();
-  }, [loadData]);
+  }, [agentsList, loadData]);
 
   // Build sidebar-compatible project list from backend data
   const sidebarProjects = React.useMemo(() =>
@@ -141,7 +156,6 @@ export default function App() {
     [projects, projectChats]
   );
 
-  const agentsList = Object.values(agentsMap).filter(a => a.kind === 'agent');
   const deskName = runtimes[0]?.name || 'CrewAI Desktop';
 
   let content;
