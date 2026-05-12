@@ -3,10 +3,13 @@ import Sidebar from './Sidebar.jsx';
 import TaskView from './TaskView.jsx';
 import CrewRoute from './CrewRoute.jsx';
 import NewTaskRoute from './NewTaskRoute.jsx';
+import OnboardingRoute from './OnboardingRoute.jsx';
 import { Icon } from './components.jsx';
 import { displayAgent, relativeTime, HUMAN_USER } from './utils.js';
 import * as api from './api.js';
 import { createExistingFolderProject } from './existingFolderProject.js';
+
+const ONBOARDING_KEY = 'crewai.onboardingComplete';
 
 // Minimal toast — renders a small pill at the bottom-center of the window
 function Toast({ message, onDone }) {
@@ -32,6 +35,7 @@ function EmptyRoute({ icon, title, body }) {
       height: '100%', display: 'flex', flexDirection: 'column',
       alignItems: 'center', justifyContent: 'center', background: '#FAF5E8',
       color: '#5C544B', textAlign: 'center', padding: 40,
+      WebkitAppRegion: 'drag',
     }}>
       <div style={{
         width: 56, height: 56, borderRadius: 14,
@@ -48,7 +52,7 @@ function EmptyRoute({ icon, title, body }) {
 
 function LoadingScreen() {
   return (
-    <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#FAF5E8', color: '#A89F92', fontSize: 13 }}>
+    <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#FAF5E8', color: '#A89F92', fontSize: 13, WebkitAppRegion: 'drag' }}>
       Connecting to backend…
     </div>
   );
@@ -146,7 +150,24 @@ export default function App() {
   const [backendOnline, setBackendOnline] = React.useState(false);
   const [toast, setToast] = React.useState(null);
   const [folderPathDialogOpen, setFolderPathDialogOpen] = React.useState(false);
+  const [onboardingDismissed, setOnboardingDismissed] = React.useState(() => {
+    try { return localStorage.getItem(ONBOARDING_KEY) === '1'; }
+    catch { return false; }
+  });
+  const [forceOnboarding, setForceOnboarding] = React.useState(false);
   const showToast = React.useCallback((msg) => setToast(msg), []);
+
+  const markOnboardingDone = React.useCallback(() => {
+    try { localStorage.setItem(ONBOARDING_KEY, '1'); } catch {}
+    setOnboardingDismissed(true);
+    setForceOnboarding(false);
+  }, []);
+
+  const resetOnboarding = React.useCallback(() => {
+    try { localStorage.removeItem(ONBOARDING_KEY); } catch {}
+    setOnboardingDismissed(false);
+    setForceOnboarding(true);
+  }, []);
 
 
   const loadData = React.useCallback(async () => {
@@ -309,6 +330,32 @@ export default function App() {
 
   const deskName = runtimes[0]?.name || 'CrewAI Desktop';
 
+  const shouldShowOnboarding =
+    !loading && backendOnline && (
+      forceOnboarding ||
+      (!onboardingDismissed && agentsList.length === 0 && projects.length === 0)
+    );
+
+  if (shouldShowOnboarding) {
+    return (
+      <>
+        <style>{`@keyframes toastIn { from { opacity:0; transform:translateX(-50%) translateY(8px) } to { opacity:1; transform:translateX(-50%) translateY(0) } }`}</style>
+        {toast && <Toast message={toast} onDone={() => setToast(null)} />}
+        <div style={{ width: '100%', height: '100%', background: '#FAF5E8', overflow: 'hidden' }}>
+          <OnboardingRoute
+            runtimes={runtimes}
+            onSkip={() => { markOnboardingDone(); }}
+            onComplete={() => {
+              markOnboardingDone();
+              loadData();
+              showToast('Crew ready. Welcome aboard.');
+            }}
+          />
+        </div>
+      </>
+    );
+  }
+
   let content;
   if (loading) {
     content = <LoadingScreen />;
@@ -376,6 +423,7 @@ export default function App() {
         onRenameProject={handleRenameProject}
         onShowInFinder={handleShowInFinder}
         onCreateProject={handleCreateProject}
+        onResetOnboarding={resetOnboarding}
       />
       <div style={{ flex: 1, minWidth: 0, height: '100%', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
         {content}

@@ -114,6 +114,8 @@ export function Icon({ name, size = 16 }) {
       return <svg {...s} viewBox="0 0 16 16"><path d="M6 4l4 4-4 4" {...p}/></svg>;
     case 'plus':
       return <svg {...s} viewBox="0 0 16 16"><path d="M8 3v10M3 8h10" {...p}/></svg>;
+    case 'reset':
+      return <svg {...s} viewBox="0 0 16 16"><path d="M3 8a5 5 0 1 0 1.6-3.7" {...p}/><path d="M3 2.5v3h3" {...p}/></svg>;
     default: return null;
   }
 }

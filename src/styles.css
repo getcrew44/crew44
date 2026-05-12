@@ -29,4 +29,7 @@ body {
 ::-webkit-scrollbar-track { background: transparent; }
 textarea { font-family: inherit; }
 button { font-family: inherit; }
+button, input, textarea, select {
+  -webkit-app-region: no-drag;
+}
 * { box-sizing: border-box; }
