@@ -16,9 +16,10 @@ function WindowChromeButtons() {
     width: 22, height: 22,
     display: 'flex', alignItems: 'center', justifyContent: 'center',
     borderRadius: 5, color: '#807972', cursor: 'pointer',
+    WebkitAppRegion: 'no-drag',
   };
   return (
-    <div style={{ display: 'flex', gap: 4, alignItems: 'center', marginLeft: 'auto' }}>
+    <div style={{ display: 'flex', gap: 4, alignItems: 'center', marginLeft: 'auto', WebkitAppRegion: 'no-drag' }}>
       <div style={btn} title="Toggle sidebar">
         <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
           <rect x="1.5" y="2.5" width="11" height="9" rx="1.5" stroke="currentColor" strokeWidth="1"/>
@@ -523,7 +524,7 @@ function DropItem({ icon, label, onClick }) {
   );
 }
 
-export default function Sidebar({ projects, currentChatId, route, setRoute, onPick, deskName, backendOnline, onNewProject, onNewChat, onRenameProject, onShowInFinder, onCreateProject }) {
+export default function Sidebar({ projects, currentChatId, route, setRoute, onPick, deskName, backendOnline, onNewProject, onNewChat, onRenameProject, onShowInFinder, onCreateProject, onResetOnboarding }) {
   const [openIds, setOpenIds] = React.useState(() => new Set(projects.map(p => p.id)));
   const [creatingProject, setCreatingProject] = React.useState(false);
   const [newProjectName, setNewProjectName] = React.useState('');
@@ -570,7 +571,14 @@ export default function Sidebar({ projects, currentChatId, route, setRoute, onPi
       flexShrink: 0,
     }}>
       {/* Window chrome */}
-      <div style={{ height: 38, display: 'flex', alignItems: 'center', padding: '0 14px', flexShrink: 0 }}>
+      <div style={{
+        height: 38,
+        display: 'flex',
+        alignItems: 'center',
+        padding: '0 14px',
+        flexShrink: 0,
+        WebkitAppRegion: 'drag',
+      }}>
         <TrafficLights />
         <WindowChromeButtons />
       </div>
@@ -654,6 +662,11 @@ export default function Sidebar({ projects, currentChatId, route, setRoute, onPi
           textAlign: 'center', letterSpacing: 0.1,
         }}>{deskName || 'CrewAI Desktop'}</span>
         <button style={iconBtnStyle} title="Mobile app"><Icon name="phone" /></button>
+        <button
+          style={iconBtnStyle}
+          title="Restart onboarding"
+          onClick={onResetOnboarding}
+        ><Icon name="reset" /></button>
       </div>
     </div>
   );

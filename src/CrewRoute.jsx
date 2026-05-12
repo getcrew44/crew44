@@ -279,8 +279,9 @@ function AgentDetail({ agent, skills, agentsMap, onBack, onSave }) {
       <div style={{
         padding: '16px 36px 12px', borderBottom: '1px solid #ECE6D5',
         display: 'flex', alignItems: 'center', gap: 8, fontSize: 13,
+        WebkitAppRegion: 'drag',
       }}>
-        <span onClick={onBack} style={{ color: '#807972', cursor: 'pointer' }}>Agents</span>
+        <span onClick={onBack} style={{ color: '#807972', cursor: 'pointer', WebkitAppRegion: 'no-drag' }}>Agents</span>
         <span style={{ color: '#C9BFA8' }}>›</span>
         <span style={{ color: '#1C1A17', fontWeight: 500 }}>{agent.name}</span>
         <div style={{ flex: 1 }} />
@@ -437,7 +438,15 @@ export default function CrewRoute({ agents, agentsMap, skills, runtimes, initial
 
   const meta = CREW_TABS.find(t => t.key === tab);
   return (
-    <div style={{ height: '100%', background: '#FAF5E8', overflow: 'auto' }}>
+    <div style={{ height: '100%', background: '#FAF5E8', overflow: 'auto', position: 'relative' }}>
+      <div aria-hidden="true" style={{
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        right: 0,
+        height: 38,
+        WebkitAppRegion: 'drag',
+      }} />
       <div style={{ padding: '28px 36px 40px', maxWidth: 1080 }}>
         <h1 style={{ fontSize: 22, fontWeight: 600, margin: '0 0 4px', color: '#1C1A17', letterSpacing: -0.2 }}>Crew</h1>
         <div style={{ fontSize: 13, color: '#807972', marginBottom: 18 }}>{meta?.subtitle}</div>

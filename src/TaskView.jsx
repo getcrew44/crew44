@@ -183,7 +183,7 @@ function EventRouter({ event, agentsMap }) {
 const headerBtn = {
   padding: '5px 12px', borderRadius: 6, fontSize: 12.5, fontWeight: 500,
   border: '1px solid #DCD3BC', background: '#FCFAF1', color: '#1C1A17',
-  cursor: 'pointer', fontFamily: UI_FONT,
+  cursor: 'pointer', fontFamily: UI_FONT, WebkitAppRegion: 'no-drag',
 };
 
 function TaskHeader({ chat, agentsMap, isStreaming, onCancel }) {
@@ -193,7 +193,7 @@ function TaskHeader({ chat, agentsMap, isStreaming, onCancel }) {
   const status = chat.stream?.status === 'streaming' ? 'running' : chat.status || 'active';
 
   return (
-    <div style={{ padding: '20px 36px 16px', borderBottom: '1px solid #ECE6D5', background: '#FAF5E8' }}>
+    <div style={{ padding: '20px 36px 16px', borderBottom: '1px solid #ECE6D5', background: '#FAF5E8', WebkitAppRegion: 'drag' }}>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, fontSize: 12.5, color: '#A89F92', marginBottom: 6 }}>
         <span style={{ fontFamily: MONO_FONT, color: '#5C544B' }}>{chat.id?.slice(0, 8)}</span>
         <span>·</span>
