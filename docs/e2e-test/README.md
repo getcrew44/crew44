@@ -28,16 +28,16 @@ into this repo. The suite expects exactly two detected runtimes today:
 ## Test Commands
 
 ```bash
-./test-utils/api-e2e.sh reset
-./test-utils/api-e2e.sh setup
-./test-utils/api-e2e.sh run
-./test-utils/api-e2e.sh destroy
+./docs/e2e-test/api-e2e.sh reset
+./docs/e2e-test/api-e2e.sh setup
+./docs/e2e-test/api-e2e.sh run
+./docs/e2e-test/api-e2e.sh destroy
 ```
 
 Or run the whole suite in one go:
 
 ```bash
-./test-utils/api-e2e.sh all
+./docs/e2e-test/api-e2e.sh all
 ```
 
 Artifacts are written under `/tmp/crewai-api-e2e` by default. Override with

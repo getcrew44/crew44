@@ -1,6 +1,5 @@
 .DS_Store
 /bin/
-/crewai-cli
 /crewai-server
 /crewai-daemon
 /node_modules/

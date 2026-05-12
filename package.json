@@ -5,14 +5,11 @@
   "main": "electron/main.cjs",
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "vite build",
-    "build:electron": "npm run build && node scripts/build-electron.cjs",
-    "electron": "node scripts/run-electron.cjs",
-    "electron:dev": "node scripts/electron-dev.cjs",
-    "preview": "vite preview",
-    "test": "vitest run",
-    "test:watch": "vitest"
+    "dev": "mkdir -p bin && cd daemon && go build -o ../bin/crewai-daemon ./cmd/crewai-daemon && cd .. && node electron/scripts/dev.cjs",
+    "build": "mkdir -p bin && cd daemon && go build -o ../bin/crewai-daemon ./cmd/crewai-daemon && cd .. && vite build && node electron/scripts/build.cjs",
+    "web:dev": "node daemon/scripts/web-dev.cjs",
+    "test": "cd daemon && go test ./... && cd .. && vitest run",
+    "clean": "rm -rf bin dist .electron-app crewai-server crewai-daemon"
   },
   "dependencies": {
     "react": "^18.3.1",
