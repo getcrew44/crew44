@@ -1,5 +1,5 @@
 const { spawn } = require('child_process');
-const { ensureDevApp } = require('./electron-app.cjs');
+const { ensureDevApp } = require('./app.cjs');
 
 function main() {
   const app = ensureDevApp();

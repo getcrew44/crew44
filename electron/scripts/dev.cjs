@@ -4,7 +4,8 @@ const path = require('path');
 
 const frontendPort = process.env.CREWAI_FRONTEND_PORT || '3000';
 const rendererUrl = process.env.CREWAI_RENDERER_URL || `http://127.0.0.1:${frontendPort}`;
-const cwd = path.resolve(__dirname, '..');
+const cwd = path.resolve(__dirname, '..', '..');
+const viteBin = path.join(cwd, 'node_modules', '.bin', process.platform === 'win32' ? 'vite.cmd' : 'vite');
 
 function waitFor(url, retries = 80) {
   return new Promise((resolve, reject) => {
@@ -36,7 +37,7 @@ function spawnLogged(command, args, env = {}) {
 }
 
 async function main() {
-  const vite = spawnLogged('npm', ['run', 'dev', '--', '--host', '127.0.0.1', '--port', frontendPort]);
+  const vite = spawnLogged(viteBin, ['--host', '127.0.0.1', '--port', frontendPort]);
 
   const cleanup = () => {
     if (!vite.killed) vite.kill();
@@ -53,7 +54,7 @@ async function main() {
 
   try {
     await waitFor(rendererUrl);
-    const electron = spawnLogged('npm', ['run', 'electron'], {
+    const electron = spawnLogged(process.execPath, [path.join(cwd, 'electron', 'scripts', 'run.cjs')], {
       CREWAI_RENDERER_URL: rendererUrl,
     });
     electron.on('exit', code => {

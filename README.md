@@ -8,17 +8,14 @@ This repository is structured as a standard Electron/Vite app at the top level, 
 
 ```text
 .
-├── electron/              Electron main process, preload, app assets
+├── electron/              Electron main process, preload, app assets, scripts
 ├── src/                   React renderer source
 ├── public/                Renderer static assets
-├── scripts/               Local Electron app build/run helpers
-├── daemon/                Go module for daemon, CLI, API tests, internals
+├── daemon/                Go module for daemon, API tests, internals
 │   ├── cmd/crewai-daemon  HTTP daemon entrypoint
-│   ├── cmd/crewai-cli     CLI entrypoint
 │   ├── internal/          app, httpapi, store, runtime, agent adapters
 │   └── test-utils/jsonq   helper used by e2e scripts
-├── test-utils/            Shell e2e harnesses
-├── Makefile
+├── docs/                  Design notes and manual e2e harnesses
 ├── package.json
 └── vite.config.js
 ```
@@ -52,16 +49,18 @@ Go dependencies are managed inside `daemon/`.
 
 ## Development
 
-Run the daemon manually for pure browser development:
+Run Electron development mode:
 
 ```bash
-make daemon:dev
+npm run dev
 ```
 
-In another terminal, run Vite:
+This builds `bin/crewai-daemon`, starts Vite, launches Electron, and lets Electron main start the daemon. The renderer waits because Electron does not create the window until `/health` is ready.
+
+Run bare browser development:
 
 ```bash
-make dev
+npm run web:dev
 ```
 
 Open:
@@ -72,20 +71,12 @@ http://localhost:3000
 
 The Vite dev server proxies `/api` to `http://localhost:8080` by default. Override with `CREWAI_BACKEND_URL` or `CREWAI_BASE_URL`.
 
-Run Electron development mode:
-
-```bash
-make electron:dev
-```
-
-This builds `bin/crewai-daemon`, starts Vite, launches Electron, and lets Electron main start the daemon. The renderer waits because Electron does not create the window until `/health` is ready.
-
 ## Build
 
 Build the local Electron app:
 
 ```bash
-make electron:build
+npm run build
 ```
 
 This builds:
@@ -93,18 +84,6 @@ This builds:
 - `bin/crewai-daemon`
 - `dist/`
 - `.electron-app/CrewAI Desktop.app`
-
-Run the built local app:
-
-```bash
-make electron
-```
-
-Build CLI plus Electron app:
-
-```bash
-make build
-```
 
 ## Daemon
 
@@ -115,12 +94,6 @@ Default:
 ```bash
 cd daemon
 go run ./cmd/crewai-daemon
-```
-
-Equivalent make target:
-
-```bash
-make daemon:dev
 ```
 
 Environment variables:
@@ -143,42 +116,14 @@ Authorization: Bearer <token>
 
 `/health` is intentionally unauthenticated so Electron can wait for readiness before exposing the renderer.
 
-## CLI
-
-Build:
-
-```bash
-make build-cli
-```
-
-Run:
-
-```bash
-./bin/crewai-cli runtimes list
-./bin/crewai-cli agents list
-./bin/crewai-cli projects list
-```
-
-Override backend URL:
-
-```bash
-./bin/crewai-cli --base-url http://127.0.0.1:18766 runtimes list
-```
-
 ## Common Commands
 
 ```bash
-make fmt              # gofmt daemon packages
-make test             # daemon Go tests and renderer tests
-make build-daemon     # build bin/crewai-daemon
-make build-cli        # build bin/crewai-cli
-make daemon:dev       # run daemon from source
-make dev              # run Vite only
-make electron:dev     # build daemon, run Vite, launch Electron
-make electron:build   # build daemon, renderer, local Electron app
-make e2e              # run API e2e suite
-make ui-e2e           # prepare and open UI e2e harness
-make clean            # remove local build artifacts
+npm run dev      # go build + Electron dev
+npm run build    # go build + renderer build + local Electron app
+npm run web:dev  # go run daemon + bare Vite dev
+npm run test     # daemon Go tests and renderer tests
+npm run clean    # remove local build artifacts
 ```
 
 ## Backend Packages
@@ -186,7 +131,6 @@ make clean            # remove local build artifacts
 | Package | Responsibility |
 |---|---|
 | `daemon/cmd/crewai-daemon` | HTTP daemon entrypoint. Reads env, creates `httpapi.Server`, listens on `HOST:PORT`. |
-| `daemon/cmd/crewai-cli` | CLI entrypoint. Calls `internal/cli.Run`. |
 | `daemon/internal/httpapi` | REST handlers and chat SSE streaming endpoint. |
 | `daemon/internal/app` | Business logic for runtimes, agents, skills, projects, chats, cancellation, and handoff loops. |
 | `daemon/internal/store` | File-backed JSON/JSONL persistence under `CREWAI_STATE_DIR`. |
@@ -257,16 +201,6 @@ Current storage layout:
 
 ## Tests
 
-API e2e:
-
 ```bash
-make e2e
+npm run test
 ```
-
-UI e2e harness:
-
-```bash
-make ui-e2e
-```
-
-The e2e suites use isolated state under `/tmp/crewai-api-e2e` and `/tmp/crewai-ui-e2e`.

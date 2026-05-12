@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 STATE_ROOT="${CREWAI_UI_E2E_ROOT:-/tmp/crewai-ui-e2e}"
+VITE_BIN="${ROOT_DIR}/node_modules/.bin/vite"
 STATE_DIR="${STATE_ROOT}/state"
 WORK_DIR="${STATE_ROOT}/workspace"
 BIN_PATH="${STATE_ROOT}/crewai-daemon"
@@ -168,7 +169,7 @@ start_frontend() {
   (
     cd "${ROOT_DIR}"
     CREWAI_BACKEND_URL="${BASE_URL}" \
-    nohup npm run dev -- --host 127.0.0.1 --port "${FRONTEND_PORT}" >"${VITE_LOG_FILE}" 2>&1 < /dev/null &
+    nohup "${VITE_BIN}" --host 127.0.0.1 --port "${FRONTEND_PORT}" >"${VITE_LOG_FILE}" 2>&1 < /dev/null &
     echo "$!" > "${VITE_PID_FILE}"
     disown || true
   )
@@ -181,7 +182,7 @@ open_electron() {
     cd "${ROOT_DIR}"
     CREWAI_RENDERER_URL="${RENDERER_URL}" \
     CREWAI_BACKEND_URL="${BASE_URL}" \
-    npm run electron
+    node electron/scripts/run.cjs
   )
 }
 

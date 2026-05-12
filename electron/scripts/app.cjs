@@ -2,7 +2,7 @@ const fs = require('fs');
 const path = require('path');
 
 const productName = 'CrewAI Desktop';
-const root = path.resolve(__dirname, '..');
+const root = path.resolve(__dirname, '..', '..');
 const sourceApp = path.join(root, 'node_modules', 'electron', 'dist', 'Electron.app');
 const appRoot = path.join(root, '.electron-app');
 const targetApp = path.join(appRoot, `${productName}.app`);
