@@ -35,10 +35,10 @@ build-cli:
 
 build-daemon:
 	mkdir -p $(BIN_DIR)
-	cd daemon && go build -o ../$(DAEMON_BIN) ./cmd/crewai-server
+	cd daemon && go build -o ../$(DAEMON_BIN) ./cmd/crewai-daemon
 
 daemon\:dev:
-	cd daemon && go run ./cmd/crewai-server
+	cd daemon && go run ./cmd/crewai-daemon
 
 dev:
 	npm run dev

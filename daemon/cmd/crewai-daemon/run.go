@@ -40,7 +40,7 @@ func runServer(cfg serverConfig, logger *log.Logger) error {
 	}
 
 	logger.Printf(
-		"crewai-server listening addr=%s state_dir=%s runtime_scan_dir=%s auth=%t",
+		"crewai-daemon listening addr=%s state_dir=%s runtime_scan_dir=%s auth=%t",
 		listener.Addr().String(),
 		cfg.StateDir,
 		cfg.RuntimeScanDir,

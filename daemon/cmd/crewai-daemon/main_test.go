@@ -49,7 +49,7 @@ func TestRunServerLogsListeningAddress(t *testing.T) {
 	}
 
 	output := logs.String()
-	if !strings.Contains(output, "crewai-server listening") {
+	if !strings.Contains(output, "crewai-daemon listening") {
 		t.Fatalf("expected listening log, got %q", output)
 	}
 	if !strings.Contains(output, "state_dir=/tmp/crewai-state") {

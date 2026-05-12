@@ -13,7 +13,7 @@ This repository is structured as a standard Electron/Vite app at the top level, 
 ├── public/                Renderer static assets
 ├── scripts/               Local Electron app build/run helpers
 ├── daemon/                Go module for daemon, CLI, API tests, internals
-│   ├── cmd/crewai-server  HTTP daemon entrypoint
+│   ├── cmd/crewai-daemon  HTTP daemon entrypoint
 │   ├── cmd/crewai-cli     CLI entrypoint
 │   ├── internal/          app, httpapi, store, runtime, agent adapters
 │   └── test-utils/jsonq   helper used by e2e scripts
@@ -114,7 +114,7 @@ Default:
 
 ```bash
 cd daemon
-go run ./cmd/crewai-server
+go run ./cmd/crewai-daemon
 ```
 
 Equivalent make target:
@@ -185,7 +185,7 @@ make clean            # remove local build artifacts
 
 | Package | Responsibility |
 |---|---|
-| `daemon/cmd/crewai-server` | HTTP daemon entrypoint. Reads env, creates `httpapi.Server`, listens on `HOST:PORT`. |
+| `daemon/cmd/crewai-daemon` | HTTP daemon entrypoint. Reads env, creates `httpapi.Server`, listens on `HOST:PORT`. |
 | `daemon/cmd/crewai-cli` | CLI entrypoint. Calls `internal/cli.Run`. |
 | `daemon/internal/httpapi` | REST handlers and chat SSE streaming endpoint. |
 | `daemon/internal/app` | Business logic for runtimes, agents, skills, projects, chats, cancellation, and handoff loops. |

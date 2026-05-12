@@ -148,7 +148,7 @@ build_binaries() {
   step "Build crewai-daemon and jsonq"
   (
     cd "${ROOT_DIR}/daemon"
-    go build -o "${BIN_PATH}" ./cmd/crewai-server
+    go build -o "${BIN_PATH}" ./cmd/crewai-daemon
     go build -o "${JSONQ_BIN}" ./test-utils/jsonq
   )
 }
