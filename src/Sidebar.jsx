@@ -47,13 +47,13 @@ function NavItem({ icon, label, active, onClick, testId }) {
       style={{
         display: 'flex', alignItems: 'center', gap: 10,
         padding: '6px 10px', margin: '1px 8px',
-        borderRadius: 7, fontSize: 13, color: '#1C1A17',
+        borderRadius: 7, fontSize: 14.5, color: '#1C1A17', fontWeight: 400,
         background: active ? '#EBE5D6' : hover ? '#EFE9DB' : 'transparent',
         cursor: 'pointer', userSelect: 'none',
       }}
     >
       <span style={{ color: '#5C544B', display: 'flex' }}><Icon name={icon} /></span>
-      <span style={{ fontWeight: active ? 500 : 400 }}>{label}</span>
+      <span>{label}</span>
     </div>
   );
 }
@@ -78,7 +78,7 @@ function FixedTooltip({ text, anchorRect }) {
 }
 
 // Project row context menu
-function ProjectMenu({ rect, onClose, onRename, onShowInFinder }) {
+function ProjectMenu({ rect, onClose, onRename, onShowInFinder, onRemove }) {
   const ref = React.useRef(null);
 
   React.useEffect(() => {
@@ -108,7 +108,7 @@ function ProjectMenu({ rect, onClose, onRename, onShowInFinder }) {
       label: 'Remove',
       icon: <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M2 3.5h9M5 3.5V2h3v1.5M3.5 3.5l.5 7h5l.5-7" stroke="currentColor" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round"/></svg>,
       danger: true,
-      action: onClose,
+      action: () => { onClose(); onRemove?.(); },
     },
   ];
 
@@ -153,7 +153,7 @@ function MenuRow({ icon, label, danger, onClick }) {
   );
 }
 
-function ProjectGroup({ project, openIds, currentChatId, onToggle, onPick, onNewChat, onRename, onShowInFinder }) {
+function ProjectGroup({ project, openIds, currentChatId, onToggle, onPick, onNewChat, onRename, onShowInFinder, onRemove }) {
   const open = openIds.has(project.id);
   const [hover, setHover] = React.useState(false);
   const [newChatTooltipRect, setNewChatTooltipRect] = React.useState(null);
@@ -198,7 +198,7 @@ function ProjectGroup({ project, openIds, currentChatId, onToggle, onPick, onNew
           style={{
             flex: 1, display: 'flex', alignItems: 'center', gap: 8,
             padding: '5px 10px', borderRadius: 7, cursor: 'pointer',
-            userSelect: 'none', fontSize: 12.5, color: '#3A352E', fontWeight: 500,
+            userSelect: 'none', fontSize: 14, color: '#3A352E', fontWeight: 400,
             background: hover || menuRect ? '#EFE9DB' : 'transparent',
             transition: 'background 0.1s',
           }}
@@ -227,8 +227,8 @@ function ProjectGroup({ project, openIds, currentChatId, onToggle, onPick, onNew
               style={{
                 flex: 1, border: 'none', outline: '1.5px solid #C4644A',
                 borderRadius: 4, background: '#FFFEF8',
-                fontFamily: 'inherit', fontSize: 12.5, color: '#1C1A17',
-                fontWeight: 500, padding: '1px 4px', minWidth: 0,
+                fontFamily: 'inherit', fontSize: 14, color: '#1C1A17',
+                fontWeight: 400, padding: '1px 4px', minWidth: 0,
               }}
             />
           ) : (
@@ -293,6 +293,7 @@ function ProjectGroup({ project, openIds, currentChatId, onToggle, onPick, onNew
           onClose={() => setMenuRect(null)}
           onRename={() => { setRenameVal(project.name); setRenaming(true); }}
           onShowInFinder={() => onShowInFinder?.(project.workdir)}
+          onRemove={() => onRemove?.(project.id)}
         />
       )}
 
@@ -308,13 +309,38 @@ function ProjectGroup({ project, openIds, currentChatId, onToggle, onPick, onNew
             />
           ))}
           {project.sessions.length === 0 && (
-            <div style={{ padding: '4px 10px 4px 32px', fontSize: 12, color: '#A89F92', fontStyle: 'italic', margin: '1px 8px' }}>
+            <div style={{ padding: '4px 10px 4px 32px', fontSize: 13, color: '#A89F92', fontStyle: 'italic', margin: '1px 8px' }}>
               No chats yet
             </div>
           )}
         </div>
       )}
     </div>
+  );
+}
+
+function SessionProgress({ title }) {
+  return (
+    <svg
+      role="progressbar"
+      aria-label={`${title} is waiting`}
+      width="14"
+      height="14"
+      viewBox="0 0 14 14"
+      style={{ flexShrink: 0, animation: 'sidebarProgressSpin 0.9s linear infinite' }}
+    >
+      <circle cx="7" cy="7" r="5" fill="none" stroke="rgba(196,100,74,0.22)" strokeWidth="2" />
+      <circle
+        cx="7"
+        cy="7"
+        r="5"
+        fill="none"
+        stroke="#C4644A"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeDasharray="14 31.4"
+      />
+    </svg>
   );
 }
 
@@ -330,24 +356,20 @@ function SessionItem({ session, active, onPick }) {
         display: 'flex', alignItems: 'center', gap: 8,
         padding: '5px 10px 5px 32px', margin: '1px 8px',
         borderRadius: 7, cursor: 'pointer', userSelect: 'none',
-        fontSize: 12.5,
+        fontSize: 14,
         background: active ? '#EBE5D6' : hover ? '#EFE9DB' : 'transparent',
         color: active ? '#1C1A17' : '#3A352E',
-        fontWeight: active ? 500 : 400,
+        fontWeight: 400,
       }}
     >
       <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
         {session.title}
       </span>
       {session.age && (
-        <span style={{ color: '#A89F92', fontSize: 11, flexShrink: 0 }}>{session.age}</span>
+        <span style={{ color: '#A89F92', fontSize: 12.5, flexShrink: 0 }}>{session.age}</span>
       )}
       {session.status === 'running' && (
-        <span style={{
-          width: 6, height: 6, borderRadius: '50%',
-          background: '#C4644A', flexShrink: 0,
-          boxShadow: '0 0 0 2px #FAF5E8',
-        }} />
+        <SessionProgress title={session.title} />
       )}
     </div>
   );
@@ -413,7 +435,7 @@ function ProjectsHeading({ openIds, setOpenIds, projectIds, onNewBlank, onExisti
       onMouseLeave={() => { setHover(false); setTooltip(null); }}
       style={{
         padding: '14px 10px 4px 18px', display: 'flex', alignItems: 'center',
-        fontSize: 11, fontWeight: 500, color: '#A89F92',
+        fontSize: 12, fontWeight: 500, color: '#A89F92',
         letterSpacing: 0.3, textTransform: 'uppercase',
       }}
     >
@@ -524,12 +546,13 @@ function DropItem({ icon, label, onClick }) {
   );
 }
 
-export default function Sidebar({ projects, currentChatId, route, setRoute, onPick, deskName, backendOnline, onNewProject, onNewChat, onRenameProject, onShowInFinder, onCreateProject, onResetOnboarding }) {
+export default function Sidebar({ projects, currentChatId, route, setRoute, onPick, deskName, backendOnline, onNewProject, onNewChat, onRenameProject, onShowInFinder, onCreateProject, onRemoveProject, onResetOnboarding }) {
   const [openIds, setOpenIds] = React.useState(() => new Set(projects.map(p => p.id)));
   const [creatingProject, setCreatingProject] = React.useState(false);
   const [newProjectName, setNewProjectName] = React.useState('');
   const newProjectInputRef = React.useRef(null);
   const knownProjectIds = React.useRef(new Set(projects.map(p => p.id)));
+  const activeChatId = route === 'task' ? currentChatId : null;
 
   // Auto-open newly added projects
   React.useEffect(() => {
@@ -623,14 +646,14 @@ export default function Sidebar({ projects, currentChatId, route, setRoute, onPi
               style={{
                 flex: 1, border: 'none', outline: '1.5px solid #C4644A',
                 borderRadius: 4, background: '#FFFEF8',
-                fontFamily: 'inherit', fontSize: 12.5, color: '#1C1A17',
-                fontWeight: 500, padding: '2px 5px', minWidth: 0,
+                fontFamily: 'inherit', fontSize: 14, color: '#1C1A17',
+                fontWeight: 400, padding: '2px 5px', minWidth: 0,
               }}
             />
           </div>
         )}
         {projects.length === 0 && !creatingProject ? (
-          <div style={{ padding: '8px 18px', fontSize: 12.5, color: '#A89F92', fontStyle: 'italic' }}>
+          <div style={{ padding: '8px 18px', fontSize: 13, color: '#A89F92', fontStyle: 'italic' }}>
             {backendOnline ? 'No projects yet' : 'Backend offline'}
           </div>
         ) : (
@@ -639,12 +662,13 @@ export default function Sidebar({ projects, currentChatId, route, setRoute, onPi
               key={p.id}
               project={p}
               openIds={openIds}
-              currentChatId={currentChatId}
+              currentChatId={activeChatId}
               onToggle={toggle}
               onPick={(sid) => { onPick(sid); setRoute('task'); }}
               onNewChat={onNewChat}
               onRename={onRenameProject}
               onShowInFinder={onShowInFinder}
+              onRemove={onRemoveProject}
             />
           ))
         )}
@@ -658,7 +682,7 @@ export default function Sidebar({ projects, currentChatId, route, setRoute, onPi
       }}>
         <button style={iconBtnStyle} title="Settings"><Icon name="gear" /></button>
         <span style={{
-          flex: 1, fontSize: 12.5, color: '#5C544B', fontWeight: 500,
+          flex: 1, fontSize: 14, color: '#5C544B', fontWeight: 400,
           textAlign: 'center', letterSpacing: 0.1,
         }}>{deskName || 'CrewAI Desktop'}</span>
         <button style={iconBtnStyle} title="Mobile app"><Icon name="phone" /></button>
@@ -668,6 +692,7 @@ export default function Sidebar({ projects, currentChatId, route, setRoute, onPi
           onClick={onResetOnboarding}
         ><Icon name="reset" /></button>
       </div>
+      <style>{`@keyframes sidebarProgressSpin { to { transform: rotate(360deg); } }`}</style>
     </div>
   );
 }

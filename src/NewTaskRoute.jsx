@@ -191,7 +191,7 @@ export default function NewTaskRoute({ projects, agents, onNewTask, onExistingFo
                 fontWeight: 500, padding: '6px 14px',
               }}
             >
-              {submitting ? 'Starting…' : 'Start crew →'}
+              {submitting ? 'Starting…' : 'Start →'}
             </button>
           </div>
         </div>

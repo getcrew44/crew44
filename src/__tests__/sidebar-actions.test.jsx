@@ -81,6 +81,22 @@ describe('Sidebar project rendering', () => {
     expect(screen.getByText('chat one')).toBeInTheDocument();
   });
 
+  it('shows a circular progress indicator for running sessions', () => {
+    render(
+      <Sidebar
+        {...baseProps}
+        projects={[{
+          id: 'p1',
+          name: 'first-project',
+          workdir: '/tmp/p1',
+          sessions: [{ id: 'c1', title: 'chat one', status: 'running', age: '1h' }],
+        }]}
+      />
+    );
+
+    expect(screen.getByRole('progressbar', { name: /chat one is waiting/i })).toBeInTheDocument();
+  });
+
   it('renders "No chats yet" for projects with empty sessions', () => {
     render(<Sidebar {...baseProps} projects={sampleProjects} />);
     expect(screen.getByText('No chats yet')).toBeInTheDocument();
@@ -115,6 +131,34 @@ describe('Sidebar project rendering', () => {
 
     expect(screen.getByText('chat one')).toBeInTheDocument();
     expect(screen.getByText('chat two')).toBeInTheDocument();
+  });
+
+  it('calls onRemoveProject from the project Remove menu item', () => {
+    const onRemoveProject = vi.fn();
+    render(<Sidebar {...baseProps} projects={sampleProjects} onRemoveProject={onRemoveProject} />);
+
+    const projectLabel = screen.getByText('first-project');
+    const projectContainer = projectLabel.parentElement.parentElement;
+    const [menuButton] = projectContainer.querySelectorAll('button');
+
+    fireEvent.click(menuButton);
+    fireEvent.click(screen.getByText('Remove'));
+
+    expect(onRemoveProject).toHaveBeenCalledWith('p1');
+  });
+
+  it('uses a refined sidebar font scale', () => {
+    render(<Sidebar {...baseProps} projects={sampleProjects} />);
+
+    expect(screen.getByTestId('nav-new-task')).toHaveStyle({
+      fontSize: '14.5px',
+      fontWeight: '400',
+    });
+    expect(screen.getByText('first-project').parentElement).toHaveStyle({
+      fontSize: '14px',
+      fontWeight: '400',
+    });
+    expect(screen.getByTestId('chat-c1')).toHaveStyle({ fontSize: '14px' });
   });
 });
 

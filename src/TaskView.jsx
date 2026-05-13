@@ -186,7 +186,13 @@ const headerBtn = {
   cursor: 'pointer', fontFamily: UI_FONT, WebkitAppRegion: 'no-drag',
 };
 
-function TaskHeader({ chat, agentsMap, isStreaming, onCancel }) {
+const conversationColumn = {
+  width: '100%',
+  maxWidth: 880,
+  margin: '0 auto',
+};
+
+function TaskHeader({ chat, agentsMap }) {
   if (!chat) return null;
   const leadAgent = agentsMap[chat.main_agent_id] || agentsMap[chat.current_agent_id];
   const age = relativeTime(chat.created_at);
@@ -205,11 +211,6 @@ function TaskHeader({ chat, agentsMap, isStreaming, onCancel }) {
           color: '#1C1A17', letterSpacing: -0.2, lineHeight: 1.2,
         }}>{chat.title || 'Untitled chat'}</h1>
         <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
-          {isStreaming ? (
-            <button style={headerBtn} onClick={onCancel}>Cancel</button>
-          ) : (
-            <button style={headerBtn}>Pause crew</button>
-          )}
           <button style={headerBtn}>Share…</button>
         </div>
       </div>
@@ -238,9 +239,74 @@ const chip = {
   cursor: 'pointer', fontFamily: UI_FONT,
 };
 
-function Composer({ onSend, disabled }) {
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function mentionBounds(value, cursor) {
+  const before = value.slice(0, cursor);
+  const match = before.match(/(^|\s)@([^\s@]*)$/);
+  if (!match) return null;
+  const start = before.length - match[0].length + match[1].length;
+  return { start, end: cursor, query: match[2] || '' };
+}
+
+function mentionDeleteBounds(value, cursor, agents) {
+  const names = agents.map(a => a.name).filter(Boolean).sort((a, b) => b.length - a.length);
+  if (names.length === 0 || cursor <= 0) return null;
+
+  const before = value.slice(0, cursor);
+  const mentionRe = new RegExp(`(^|\\s)@(${names.map(escapeRegExp).join('|')})\\s?$`);
+  const match = before.match(mentionRe);
+  if (!match) return null;
+
+  const start = before.length - match[0].length + match[1].length;
+  return { start, end: cursor };
+}
+
+function HighlightedComposerText({ text, agents }) {
+  if (!text) return null;
+  const names = agents.map(a => a.name).filter(Boolean).sort((a, b) => b.length - a.length);
+  if (names.length === 0) return text;
+
+  const mentionRe = new RegExp(`@(${names.map(escapeRegExp).join('|')})(?=$|\\s|[.,!?;:])`, 'g');
+  const parts = [];
+  let last = 0;
+  let match;
+  while ((match = mentionRe.exec(text))) {
+    if (match.index > last) parts.push({ kind: 'text', value: text.slice(last, match.index) });
+    parts.push({ kind: 'mention', value: match[0] });
+    last = match.index + match[0].length;
+  }
+  if (last < text.length) parts.push({ kind: 'text', value: text.slice(last) });
+
+  return (
+    <>
+      {parts.map((part, index) => part.kind === 'mention' ? (
+        <span
+          key={index}
+          data-testid="composer-mention-highlight"
+          style={{ color: '#2F79D8', fontWeight: 'inherit' }}
+        >
+          {part.value}
+        </span>
+      ) : (
+        <React.Fragment key={index}>{part.value}</React.Fragment>
+      ))}
+    </>
+  );
+}
+
+function Composer({ onSend, isStreaming, onCancel, agentsMap }) {
   const [val, setVal] = React.useState('');
+  const [cursor, setCursor] = React.useState(0);
+  const [activeSuggestion, setActiveSuggestion] = React.useState(0);
   const ta = React.useRef(null);
+  const agents = React.useMemo(() => (
+    Object.values(agentsMap || {})
+      .filter(agent => agent?.id !== '__human__' && agent?.name)
+      .sort((a, b) => a.name.localeCompare(b.name))
+  ), [agentsMap]);
 
   React.useEffect(() => {
     if (!ta.current) return;
@@ -248,56 +314,191 @@ function Composer({ onSend, disabled }) {
     ta.current.style.height = Math.min(160, ta.current.scrollHeight) + 'px';
   }, [val]);
 
+  const activeMention = React.useMemo(() => mentionBounds(val, cursor), [val, cursor]);
+  const mentionOptions = React.useMemo(() => {
+    if (!activeMention) return [];
+    const q = activeMention.query.toLowerCase();
+    return agents.filter(agent => agent.name.toLowerCase().includes(q)).slice(0, 6);
+  }, [activeMention, agents]);
+
+  React.useEffect(() => {
+    setActiveSuggestion(0);
+  }, [activeMention?.query]);
+
+  const updateCursor = (node) => {
+    setCursor(node?.selectionStart ?? val.length);
+  };
+
+  const selectMention = (agent) => {
+    if (!activeMention) return;
+    const next = `${val.slice(0, activeMention.start)}@${agent.name} ${val.slice(activeMention.end)}`;
+    const nextCursor = activeMention.start + agent.name.length + 2;
+    setVal(next);
+    setCursor(nextCursor);
+    window.requestAnimationFrame?.(() => {
+      ta.current?.focus();
+      ta.current?.setSelectionRange(nextCursor, nextCursor);
+    });
+  };
+
   const send = () => {
     const text = val.trim();
-    if (!text || disabled) return;
+    if (!text || isStreaming) return;
     setVal('');
     onSend(text);
   };
 
   const onKeyDown = (e) => {
+    if (
+      e.key === 'Backspace' &&
+      e.currentTarget.selectionStart === e.currentTarget.selectionEnd
+    ) {
+      const bounds = mentionDeleteBounds(val, e.currentTarget.selectionStart, agents);
+      if (bounds) {
+        e.preventDefault();
+        const next = val.slice(0, bounds.start) + val.slice(bounds.end);
+        setVal(next);
+        setCursor(bounds.start);
+        window.requestAnimationFrame?.(() => {
+          ta.current?.setSelectionRange(bounds.start, bounds.start);
+        });
+        return;
+      }
+    }
+
+    if (mentionOptions.length > 0) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        setActiveSuggestion(i => (i + 1) % mentionOptions.length);
+        return;
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        setActiveSuggestion(i => (i - 1 + mentionOptions.length) % mentionOptions.length);
+        return;
+      }
+      if (e.key === 'Enter' || e.key === 'Tab') {
+        e.preventDefault();
+        selectMention(mentionOptions[activeSuggestion] || mentionOptions[0]);
+        return;
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        setCursor(-1);
+        return;
+      }
+    }
     if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); send(); }
   };
 
+  const canSend = Boolean(val.trim()) && !isStreaming;
+
   return (
-    <div style={{ borderTop: '1px solid #ECE6D5', background: '#FCFAF1', padding: '14px 36px 16px' }}>
-      <div style={{
-        border: '1px solid #DCD3BC', borderRadius: 12, background: '#FFFEF8',
-        padding: '10px 12px 8px', boxShadow: '0 1px 0 rgba(0,0,0,0.02)',
-      }}>
-        <textarea
-          data-testid="composer-input"
-          ref={ta}
-          value={val}
-          onChange={(e) => setVal(e.target.value)}
-          onKeyDown={onKeyDown}
-          disabled={disabled}
-          placeholder={disabled ? 'Crew is working…' : 'Steer the crew — @agent to direct, ⌘↵ to send'}
-          rows={1}
-          style={{
-            width: '100%', border: 'none', outline: 'none', resize: 'none',
-            background: 'transparent', fontFamily: UI_FONT, fontSize: 14,
-            color: '#1C1A17', lineHeight: 1.5, padding: 4,
-            opacity: disabled ? 0.5 : 1,
-          }}
-        />
+    <div style={{ background: '#FAF5E8', padding: '0 36px 16px' }}>
+      <div
+        data-testid="composer-column"
+        style={{
+          ...conversationColumn,
+          border: '1px solid #DCD3BC', borderRadius: 12, background: '#FFFEF8',
+          padding: '10px 12px 8px', boxShadow: '0 1px 0 rgba(0,0,0,0.02)',
+        }}
+      >
+        <div style={{ position: 'relative' }}>
+          {mentionOptions.length > 0 && (
+            <div
+              role="listbox"
+              aria-label="Agent suggestions"
+              style={{
+                position: 'absolute',
+                left: 0,
+                right: 0,
+                bottom: 'calc(100% + 8px)',
+                zIndex: 5,
+                background: '#FFFEF8',
+                border: '1px solid #DCD3BC',
+                borderRadius: 10,
+                boxShadow: '0 8px 24px rgba(28,26,23,0.14)',
+                padding: 4,
+              }}
+            >
+              {mentionOptions.map((agent, index) => (
+                <div
+                  key={agent.id}
+                  role="option"
+                  aria-selected={index === activeSuggestion}
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => selectMention(agent)}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 8,
+                    padding: '7px 9px', borderRadius: 7,
+                    cursor: 'pointer',
+                    background: index === activeSuggestion ? '#EFE9DB' : 'transparent',
+                    color: '#1C1A17', fontSize: 13,
+                  }}
+                >
+                  <Avatar agent={agent} size={18} />
+                  <span style={{ fontWeight: 500 }}>{agent.name}</span>
+                </div>
+              ))}
+            </div>
+          )}
+          {val && (
+            <div
+              aria-hidden="true"
+              style={{
+                position: 'absolute',
+                inset: 0,
+                pointerEvents: 'none',
+                whiteSpace: 'pre-wrap',
+                overflowWrap: 'break-word',
+                fontFamily: UI_FONT,
+                fontSize: 14,
+                lineHeight: 1.5,
+                padding: 4,
+                color: '#1C1A17',
+              }}
+            >
+              <HighlightedComposerText text={val} agents={agents} />
+            </div>
+          )}
+          <textarea
+            data-testid="composer-input"
+            ref={ta}
+            value={val}
+            onChange={(e) => { setVal(e.target.value); updateCursor(e.target); }}
+            onSelect={(e) => updateCursor(e.target)}
+            onClick={(e) => updateCursor(e.target)}
+            onKeyUp={(e) => updateCursor(e.target)}
+            onKeyDown={onKeyDown}
+            disabled={isStreaming}
+            placeholder={isStreaming ? 'Crew is working…' : 'Steer the crew — @agent to direct, ⌘↵ to send'}
+            rows={1}
+            style={{
+              position: 'relative', zIndex: 1,
+              width: '100%', minHeight: 22, border: 'none', outline: 'none', resize: 'none',
+              background: 'transparent', fontFamily: UI_FONT, fontSize: 14,
+              color: val ? 'transparent' : '#1C1A17', caretColor: '#1C1A17',
+              lineHeight: 1.5, padding: 4,
+              opacity: isStreaming ? 0.5 : 1,
+            }}
+          />
+        </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6 }}>
-          <button style={chip}>@ @agent</button>
           <button style={chip}>Plan ▾</button>
           <div style={{ flex: 1 }} />
           <span style={{ fontSize: 11.5, color: '#A89F92' }}>⌘↵ send</span>
           <button
             data-testid="composer-send"
-            onClick={send}
-            disabled={disabled || !val.trim()}
+            onClick={isStreaming ? onCancel : send}
+            disabled={!isStreaming && !val.trim()}
             style={{
               ...chip,
-              background: val.trim() && !disabled ? '#1C1A17' : '#F0EAD8',
-              color: val.trim() && !disabled ? '#FCFBF7' : '#A89F92',
-              border: '1px solid ' + (val.trim() && !disabled ? '#1C1A17' : '#E6DFCC'),
+              background: isStreaming || canSend ? '#1C1A17' : '#F0EAD8',
+              color: isStreaming || canSend ? '#FCFBF7' : '#A89F92',
+              border: '1px solid ' + (isStreaming || canSend ? '#1C1A17' : '#E6DFCC'),
               fontWeight: 500,
             }}
-          >↑ Send</button>
+          >{isStreaming ? 'Stop' : '↑ Send'}</button>
         </div>
       </div>
     </div>
@@ -306,7 +507,7 @@ function Composer({ onSend, disabled }) {
 
 // ─── TaskView ─────────────────────────────────────────────────────────────────
 
-export default function TaskView({ chatId, agentsMap }) {
+export default function TaskView({ chatId, agentsMap, onStreamingChange }) {
   const [chat, setChat] = React.useState(null);
   const [events, setEvents] = React.useState([]);
   const [isStreaming, setIsStreaming] = React.useState(false);
@@ -316,11 +517,17 @@ export default function TaskView({ chatId, agentsMap }) {
   const sseCleanupRef = React.useRef(() => {});
 
   // Auto-scroll when events change
-  React.useEffect(() => {
+  React.useLayoutEffect(() => {
     if (timelineRef.current) {
       timelineRef.current.scrollTop = timelineRef.current.scrollHeight;
     }
-  }, [events.length]);
+  }, [events.length, isStreaming]);
+
+  React.useEffect(() => {
+    if (!chatId) return;
+    onStreamingChange?.(chatId, isStreaming);
+    return () => onStreamingChange?.(chatId, false);
+  }, [chatId, isStreaming, onStreamingChange]);
 
   const connectSSE = React.useCallback((id, after) => {
     sseCleanupRef.current();
@@ -335,6 +542,20 @@ export default function TaskView({ chatId, agentsMap }) {
           lastSeqRef.current = Math.max(lastSeqRef.current, event.seq);
           const mapped = mapBackendEvent(event);
           if (!mapped) return prev;
+
+          if (mapped.kind === 'message' && mapped.author === '__human__') {
+            const optimisticIndex = prev.findIndex(e =>
+              e._optimistic &&
+              e.kind === 'message' &&
+              e.author === '__human__' &&
+              e.body === mapped.body
+            );
+            if (optimisticIndex !== -1) {
+              const updated = [...prev];
+              updated[optimisticIndex] = mapped;
+              return updated;
+            }
+          }
 
           // Merge tool_call_result into preceding tool event
           if (mapped.kind === 'tool_result') {
@@ -400,6 +621,7 @@ export default function TaskView({ chatId, agentsMap }) {
       time: ts,
       body: text,
       _seq: -Date.now(),
+      _optimistic: true,
     }]);
 
     try {
@@ -438,11 +660,13 @@ export default function TaskView({ chatId, agentsMap }) {
       <TaskHeader
         chat={chat}
         agentsMap={agentsMap}
-        isStreaming={isStreaming}
-        onCancel={handleCancel}
       />
-      <div ref={timelineRef} style={{ flex: 1, overflow: 'auto', padding: '8px 36px 16px' }}>
-        <div style={{ maxWidth: 880 }}>
+      <div
+        ref={timelineRef}
+        data-testid="conversation-scroll"
+        style={{ flex: 1, overflow: 'auto', padding: '8px 36px 0' }}
+      >
+        <div data-testid="conversation-column" style={conversationColumn}>
           {events.map((e, i) => <EventRouter key={e._seq ?? i} event={e} agentsMap={agentsMap} />)}
           {isStreaming && events.length > 0 && (
             <StreamingIndicator agentsMap={agentsMap} currentAgentId={chat?.current_agent_id} />
@@ -454,7 +678,7 @@ export default function TaskView({ chatId, agentsMap }) {
           )}
         </div>
       </div>
-      <Composer onSend={handleSend} disabled={isStreaming} />
+      <Composer onSend={handleSend} isStreaming={isStreaming} onCancel={handleCancel} agentsMap={agentsMap} />
       <style>{`@keyframes pulse { 0%,100%{opacity:.3} 50%{opacity:1} }`}</style>
     </div>
   );

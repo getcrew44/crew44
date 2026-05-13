@@ -143,6 +143,7 @@ export default function App() {
   // Backend data
   const [projects, setProjects] = React.useState([]);
   const [projectChats, setProjectChats] = React.useState({});
+  const [chatStatusOverrides, setChatStatusOverrides] = React.useState({});
   const [agentsMap, setAgentsMap] = React.useState({ '__human__': HUMAN_USER });
   const [skills, setSkills] = React.useState([]);
   const [runtimes, setRuntimes] = React.useState([]);
@@ -218,6 +219,16 @@ export default function App() {
     loadData();
   }, [loadData]);
 
+  const handleChatStreamingChange = React.useCallback((chatId, isStreaming) => {
+    setChatStatusOverrides(prev => {
+      if (isStreaming) return { ...prev, [chatId]: 'running' };
+      if (!prev[chatId]) return prev;
+      const next = { ...prev };
+      delete next[chatId];
+      return next;
+    });
+  }, []);
+
   const handleDataRefresh = React.useCallback(() => {
     loadData();
   }, [loadData]);
@@ -274,6 +285,20 @@ export default function App() {
     }
   }, [projects, loadData]);
 
+  const handleRemoveProject = React.useCallback(async (id) => {
+    const removedProjectChats = projectChats[id] || [];
+    try {
+      await api.deleteProject(id);
+      if (removedProjectChats.some(chat => chat.id === currentChatId)) {
+        setCurrentChatId(null);
+        setRoute('new');
+      }
+      loadData();
+    } catch (err) {
+      showToast(`Failed to remove project: ${err.message}`);
+    }
+  }, [currentChatId, projectChats, loadData, showToast]);
+
   const handleShowInFinder = React.useCallback(async (workdir) => {
     if (!workdir) {
       showToast('No folder path set for this project');
@@ -321,11 +346,11 @@ export default function App() {
       sessions: (projectChats[p.id] || []).map(c => ({
         id: c.id,
         title: c.title || 'Untitled',
-        status: c.status || 'active',
+        status: chatStatusOverrides[c.id] || c.status || 'active',
         age: relativeTime(c.updated_at),
       })),
     })),
-    [projects, projectChats]
+    [projects, projectChats, chatStatusOverrides]
   );
 
   const deskName = runtimes[0]?.name || 'CrewAI Desktop';
@@ -360,7 +385,7 @@ export default function App() {
   if (loading) {
     content = <LoadingScreen />;
   } else if (route === 'task' && currentChatId) {
-    content = <TaskView chatId={currentChatId} agentsMap={agentsMap} />;
+    content = <TaskView chatId={currentChatId} agentsMap={agentsMap} onStreamingChange={handleChatStreamingChange} />;
   } else if (route === 'new') {
     content = (
       <NewTaskRoute
@@ -380,6 +405,7 @@ export default function App() {
         runtimes={runtimes}
         initialTab={route === 'skills' ? 'skills' : route === 'runtimes' ? 'runtimes' : 'agents'}
         onDataRefresh={handleDataRefresh}
+        onToast={showToast}
       />
     );
   } else if (route === 'search') {
@@ -423,6 +449,7 @@ export default function App() {
         onRenameProject={handleRenameProject}
         onShowInFinder={handleShowInFinder}
         onCreateProject={handleCreateProject}
+        onRemoveProject={handleRemoveProject}
         onResetOnboarding={resetOnboarding}
       />
       <div style={{ flex: 1, minWidth: 0, height: '100%', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>

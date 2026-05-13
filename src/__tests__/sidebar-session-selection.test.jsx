@@ -73,6 +73,21 @@ describe('Sidebar session selection', () => {
       expect(screen.getByTestId(`chat-${s.id}`).style.background).not.toBe(SELECTED_BG);
     }
   });
+
+  it('highlights no session while the new task route is shown', () => {
+    render(
+      <Sidebar
+        {...baseProps}
+        route="new"
+        projects={PROJECTS}
+        currentChatId="chat-bbb"
+      />
+    );
+
+    for (const s of SESSIONS) {
+      expect(screen.getByTestId(`chat-${s.id}`).style.background).not.toBe(SELECTED_BG);
+    }
+  });
 });
 
 // ── Mapping unit test ──────────────────────────────────────────────────────────
