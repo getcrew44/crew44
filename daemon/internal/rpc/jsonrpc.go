@@ -89,6 +89,8 @@ func mapError(err error) *Error {
 		return rpcError(CodeNotFound, err.Error())
 	case errors.Is(err, app.ErrConflict):
 		return rpcError(CodeConflict, err.Error())
+	case errors.Is(err, app.ErrUnauthorized):
+		return rpcError(CodeUnauthorized, err.Error())
 	default:
 		return rpcError(CodeInternalError, err.Error())
 	}

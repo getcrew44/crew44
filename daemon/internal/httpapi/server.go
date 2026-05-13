@@ -1,10 +1,12 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 
 	"github.com/sqtech/crew-ai/crewai-repo/internal/app"
+	"github.com/sqtech/crew-ai/crewai-repo/internal/remote"
 	"github.com/sqtech/crew-ai/crewai-repo/internal/rpc"
 	"github.com/sqtech/crew-ai/crewai-repo/internal/runtime"
 )
@@ -18,9 +20,10 @@ type ServerConfig struct {
 }
 
 type Server struct {
-	app *app.App
-	rpc *rpc.Server
-	mux *http.ServeMux
+	app    *app.App
+	remote *remote.Manager
+	rpc    *rpc.Server
+	mux    *http.ServeMux
 }
 
 func NewServer(cfg ServerConfig) (http.Handler, error) {
@@ -33,14 +36,24 @@ func NewServer(cfg ServerConfig) (http.Handler, error) {
 	if err != nil {
 		return nil, err
 	}
+	remoteManager, err := remote.NewManager(cfg.StateDir)
+	if err != nil {
+		return nil, err
+	}
 
 	server := &Server{
-		app: application,
-		rpc: rpc.NewServer(rpc.Config{
-			App:       application,
-			AuthToken: cfg.AuthToken,
-		}),
-		mux: http.NewServeMux(),
+		app:    application,
+		remote: remoteManager,
+		mux:    http.NewServeMux(),
+	}
+	server.rpc = rpc.NewServer(rpc.Config{
+		App:       application,
+		Remote:    remoteManager,
+		AuthToken: cfg.AuthToken,
+	})
+	remoteManager.SetRPCServer(server.rpc)
+	if err := remoteManager.Start(context.Background()); err != nil {
+		return nil, err
 	}
 	server.routes()
 	return server, nil

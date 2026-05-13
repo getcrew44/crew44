@@ -23,7 +23,7 @@ func SeedDefaultCrew(store Store, runtime model.RuntimeRecord) error {
 	return err
 }
 
-// MergeDefaultCrew is the manual-add path (POST /api/presets/default-crew/seed).
+// MergeDefaultCrew is the manual-add path used by presets.defaultCrew.seed.
 // It creates any preset agents that are missing by preset_key/mapping, skips
 // those that already exist, and reports per-agent results. Idempotent.
 func MergeDefaultCrew(store Store, runtime model.RuntimeRecord) (SeedResult, error) {

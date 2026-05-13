@@ -13,6 +13,10 @@ type methodHandler func(context.Context, Peer, json.RawMessage) (any, error)
 func (s *Server) registerMethods() {
 	s.methods = map[string]methodHandler{
 		"system.health":             s.systemHealth,
+		"remote.status":             s.remoteStatus,
+		"remote.pairing.create":     s.remotePairingCreate,
+		"remote.devices.list":       s.remoteDevicesList,
+		"remote.devices.delete":     s.remoteDevicesDelete,
 		"onboarding.get":            s.onboardingGet,
 		"onboarding.complete":       s.onboardingComplete,
 		"runtimes.list":             s.runtimesList,
@@ -70,6 +74,46 @@ func (s *Server) Handle(ctx context.Context, conn Peer, req Request) (any, error
 
 func (s *Server) systemHealth(context.Context, Peer, json.RawMessage) (any, error) {
 	return map[string]string{"status": "ok"}, nil
+}
+
+func (s *Server) remoteStatus(ctx context.Context, _ Peer, _ json.RawMessage) (any, error) {
+	if s.remote == nil {
+		return nil, errMethodNotFound
+	}
+	return s.remote.Status(ctx)
+}
+
+func (s *Server) remotePairingCreate(ctx context.Context, _ Peer, params json.RawMessage) (any, error) {
+	if s.remote == nil {
+		return nil, errMethodNotFound
+	}
+	var body struct {
+		RelayURL string `json:"relay_url"`
+	}
+	if err := decodeParams(params, &body); err != nil {
+		return nil, err
+	}
+	return s.remote.CreatePairing(ctx, body.RelayURL)
+}
+
+func (s *Server) remoteDevicesList(ctx context.Context, _ Peer, _ json.RawMessage) (any, error) {
+	if s.remote == nil {
+		return nil, errMethodNotFound
+	}
+	return s.remote.ListDevices(ctx)
+}
+
+func (s *Server) remoteDevicesDelete(ctx context.Context, _ Peer, params json.RawMessage) (any, error) {
+	if s.remote == nil {
+		return nil, errMethodNotFound
+	}
+	var body struct {
+		DeviceID string `json:"device_id"`
+	}
+	if err := decodeParams(params, &body); err != nil {
+		return nil, err
+	}
+	return s.remote.DeleteDevice(ctx, body.DeviceID)
 }
 
 func (s *Server) onboardingGet(context.Context, Peer, json.RawMessage) (any, error) {

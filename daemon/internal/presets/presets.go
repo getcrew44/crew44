@@ -63,7 +63,7 @@ type ManifestAgent struct {
 }
 
 // PresetView is the public-facing description of a preset agent, used by
-// GET /api/presets to render the "Add starter crew" UI.
+// presets.list to render the "Add starter crew" UI.
 type PresetView struct {
 	PresetID  string `json:"preset_id"`
 	PresetKey string `json:"preset_key"`
@@ -104,7 +104,7 @@ func LoadDefaultCrewManifest() (Manifest, error) {
 }
 
 // ListPresetViews returns metadata for the default crew, including which
-// presets currently have a user copy. Used by GET /api/presets.
+// presets currently have a user copy. Used by presets.list.
 func ListPresetViews(store Store) ([]PresetView, error) {
 	manifest, err := LoadDefaultCrewManifest()
 	if err != nil {
