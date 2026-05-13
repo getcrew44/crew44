@@ -106,23 +106,6 @@ func TestPrepareSkillEnvironmentCodexUsesIsolatedHome(t *testing.T) {
 	}
 }
 
-func TestAppendSkillSummary(t *testing.T) {
-	got := appendSkillSummary("Base instruction", "claude", []SkillContext{{Name: "Review Helper"}})
-	if !strings.Contains(got, "Base instruction") || !strings.Contains(got, "Review Helper") {
-		t.Fatalf("summary missing content: %q", got)
-	}
-}
-
-func TestAppendSummaryReferenceUsesPathNotContent(t *testing.T) {
-	got := appendSummaryReference("Base instruction", "/tmp/chat-summary.md")
-	if !strings.Contains(got, "Base instruction") || !strings.Contains(got, "/tmp/chat-summary.md") {
-		t.Fatalf("summary reference missing content: %q", got)
-	}
-	if strings.Contains(got, "Conversation summary:\nUser:") {
-		t.Fatalf("summary reference should not inline summary content: %q", got)
-	}
-}
-
 func assertFileContains(t *testing.T, path, want string) {
 	t.Helper()
 	data, err := os.ReadFile(path)

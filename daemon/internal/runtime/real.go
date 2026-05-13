@@ -26,10 +26,6 @@ func (RealEngine) Run(ctx context.Context, request RunRequest, emit func(StreamE
 	}
 
 	systemPrompt := strings.TrimSpace(request.Agent.Instruction)
-	systemPrompt = appendSkillSummary(systemPrompt, request.Runtime.Provider, request.AgentSkills)
-	if request.SummaryPath != "" {
-		systemPrompt = appendSummaryReference(systemPrompt, request.SummaryPath)
-	}
 
 	modelName := request.Agent.Model
 	if modelName == "" && request.Runtime.Metadata != nil {
@@ -57,7 +53,7 @@ func (RealEngine) Run(ctx context.Context, request RunRequest, emit func(StreamE
 				session.Messages = nil
 				continue
 			}
-			event, ok := mapAgentMessage(msg)
+			event, ok := mapAgentMessage(msg, request.Runtime)
 			if !ok {
 				continue
 			}
@@ -85,15 +81,7 @@ func (RealEngine) Run(ctx context.Context, request RunRequest, emit func(StreamE
 	}
 }
 
-func appendSummaryReference(systemPrompt, summaryPath string) string {
-	summaryPath = strings.TrimSpace(summaryPath)
-	if summaryPath == "" {
-		return strings.TrimSpace(systemPrompt)
-	}
-	return strings.TrimSpace(systemPrompt + "\n\nConversation summary file:\n" + summaryPath + "\nRead this file if you need prior conversation context.")
-}
-
-func mapAgentMessage(msg backendagent.Message) (StreamEvent, bool) {
+func mapAgentMessage(msg backendagent.Message, runtimeRecord model.RuntimeRecord) (StreamEvent, bool) {
 	switch msg.Type {
 	case backendagent.MessageText:
 		return StreamEvent{
@@ -124,6 +112,19 @@ func mapAgentMessage(msg backendagent.Message) (StreamEvent, bool) {
 			ToolCallResult: &model.ToolCallResultPayload{
 				Name:   msg.Tool,
 				Output: msg.Output,
+			},
+		}, true
+	case backendagent.MessageStatus:
+		if msg.SessionID == "" {
+			return StreamEvent{}, false
+		}
+		return StreamEvent{
+			Type: model.EventTypeRuntimeSession,
+			RuntimeSession: &model.RuntimeSessionPayload{
+				RuntimeID: runtimeRecord.ID,
+				Provider:  runtimeRecord.Provider,
+				SessionID: msg.SessionID,
+				Status:    msg.Status,
 			},
 		}, true
 	default:

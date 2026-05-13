@@ -28,9 +28,10 @@
 - `~/.crewai/chats/chat-<uuid>/chat.json`
   - 合并 meta + state，包含：`id`、`project_id`、`title`、`main_agent_id`、`current_agent_id`、`pending_handover_agent_id`、`participant_agent_ids`、`status`、`active_turn_id`、`last_runtime_session { agent_id, session_id, updated_at }`、`stream { status, agent_id, started_at, cancel_requested, last_error }`、`created_at`、`updated_at`、`archived_at`。
 - `~/.crewai/chats/chat-<uuid>/events.jsonl`
-  - append-only 事件流，事件类型保留：`message`、`thinking`、`tool_call`、`tool_call_result`、`handover`。
+  - append-only 事件流，事件类型保留：`message`、`thinking`、`tool_call`、`tool_call_result`、`handover`、`error`。
   - 每条事件至少包含：`seq`、`type`、`ts`、`turn_id`、`actor_agent_id` 以及该类型自己的 payload。
   - `handover` payload 为 `{ subtype, agent_id, agent_name, note }`，其中 `subtype` 使用英文枚举 `scheduled` 或 `occurred`，`note` 来自 handover 标记内给下一位 agent 的一句话。
+  - `error` payload 为 `{ subtype, code, message, agent_id, agent_name, target_agent_id, target_agent_name }`，用于前端弹出可观察错误并停止当前响应。
   - 不必冗余 `chat_id`，因为文件路径已限定 chat；保留 `turn_id` 是必要的，用于区分一次响应链路、恢复流状态、处理 handoff 后的下一次自动响应。
 - `~/.crewai/chats/chat-<uuid>/summary.md`
   - 不增量维护。
@@ -94,15 +95,22 @@
   - 另外在该次内部 turn 上记录 `target_agent_id`，由 runtime 执行时使用；mention 不改变 `target_agent_id`。
 - 响应前的 session 选择：
   - 若 `target_agent_id == last_runtime_session.agent_id` 且 session 仍可 resume，则直接复用底层 runtime session。
-  - 若 agent 变化，则先重建 `summary.md`，再用“新 agent instruction + summary.md 路径 + 所有可用 agents 列表”启动新 runtime session。
+  - 若 agent 变化，则先重建 `summary.md`，再通过统一 system prompt 模板启动新 runtime session。
+- runtime system prompt 模板：
+  - 所有 agent 每轮运行时都使用同一个结构化模板，不再由 app/runtime 在多个位置临时拼接说明。
+  - 模板 section 包含：`CrewAI Context`、`Agent Identity`、`Agent Instructions`、可选 `Handover Task`、可选 `Conversation Summary`、可选 `Available Skills`、`Available Agents For Handover`、`Handover Output Protocol`。
+  - `CrewAI Context` 放在开头，说明 CrewAI Desktop 是本地优先的 multi-agent workteam，以及 `~/.crewai` 中的用户状态需要谨慎对待。
+  - `Agent Identity` 明确当前 agent 的 `name`、`uuid`、runtime/provider/model，避免 agent 不知道自己是谁。
+  - `Conversation Summary` 只提供 `summary.md` 文件路径，不内联 summary 内容。
 - handover 规则：
-  - 每次 runtime system prompt 都注入当前可用 agent list，包含 `uuid`、`name`、`description`，并说明 handover 输出格式。
+  - 每次 runtime system prompt 都注入当前可用 agent list，包含 `uuid`、`name`、`description`，并说明 handover 输出格式；当前 agent 自己不出现在 handover targets 中。
   - agent 输出中若出现独立一行 `<CREWAI_AGENT_HANDOVER agent_id="agent_uuid">one sentence for the next agent</CREWAI_AGENT_HANDOVER>`，服务端会立刻从 assistant message 正文中移除该行。
-  - `agent_id` 必须使用目标 agent 的 uuid；标记正文必须是一句给下一位 agent 的简短指令，会作为 `Handover note` 传给目标 agent。
+  - `agent_id` 必须使用目标 agent 的 uuid；标记正文必须是一句给下一位 agent 的简短指令，会作为目标 agent system prompt 中的 `Handover Task` 传入。
   - 同一条 assistant message 里允许多个 handover 标记；每个有效目标都会产生 `handover{subtype:"scheduled"}` 事件，最终以最后一个有效目标为准。
   - 当前 turn 完成后，如果存在 pending handover，服务端清空 pending 字段、把 `current_agent_id` 切到目标 agent、产生一次 `handover{subtype:"occurred"}` 事件，并立即启动目标 agent 的下一次内部响应。
-  - 下一位 agent 的 prompt 始终包含触发 handover 的原始用户请求；handover 标记正文作为 `Handover note` 传入；如果 source agent 在 marker 外还有正文，该正文作为 `Previous agent message` 一并传给目标 agent。
-  - 无效目标、自转交、归档 agent、runtime missing 不加 fallback；标记仍会被吃掉，不进入 message、summary 或前端消息气泡。
+  - 下一位 agent 的 user prompt 始终包含触发 handover 的原始用户请求；如果 source agent 在 marker 外还有正文，该正文作为 `Previous agent message` 一并传给目标 agent。
+  - 无效目标、自转交、归档 agent、runtime missing 会产生 `error` 事件并停止当前响应；标记仍会被吃掉，不进入 message、summary 或前端消息气泡。
+  - runtime 报错、assistant 空白输出也会产生 `error` 事件并停止当前响应。
 - SSE 事件传输层只需要：
   - `chat.event`：承载业务事件
   - `done`：当前流式响应结束
@@ -146,14 +154,20 @@
   - 旧 `CREWAI_HANDOFF` 标记不再触发 handover。
   - assistant message 持久化内容、summary、SSE message payload 都不包含 handover 原始标记。
   - 有效目标触发 `handover.scheduled`；turn 结束后有 pending handover 时触发一次 `handover.occurred` 并更新 `current_agent_id`；两个 handover 事件都携带 `note`。
-  - 多个有效目标以最后一个为准；无效/归档/runtime missing/自转交目标不安排 handover。
-  - marker-only handover、ack + marker handover 都会把原始 prompt 和 handover note 传给目标 agent。
-  - runtime 收到的 system prompt 包含可用 agent list 和 handover 输出说明。
+  - 多个有效目标以最后一个为准；无效/归档/runtime missing/自转交目标会产生 `error` 事件并停止响应，不安排 handover。
+  - marker-only handover、ack + marker handover 都会把原始 prompt 传给目标 agent，并把 handover note 放进 system prompt 的 `Handover Task` section。
+  - runtime 收到的 system prompt 包含 CrewAI context、agent identity、可用 agent list、handover task 和 handover 输出说明。
+- Error
+  - runtime 报错产生 `error{subtype:"runtime", code:"runtime_error"}`。
+  - assistant 空白输出产生 `error{subtype:"message", code:"empty_assistant_output"}`。
+  - 自转交产生 `error{subtype:"handover", code:"self_handover"}`。
+  - 无效/归档/runtime unavailable handover target 产生 `error{subtype:"handover"}`，并在 payload 中带上 target agent 信息（若可解析）。
 
 ## Frontend TODO
 - Composer 支持插入 agent mention：`[@Name](mention://agent/<uuid>)`。
 - SSE/事件流支持渲染 `handover.scheduled`：显示“已安排转交给 {agentName}”。
 - SSE/事件流支持渲染 `handover.occurred`：显示“已转交，现在由 {agentName} 为你服务”。
+- SSE/事件流支持渲染 `error`：用 `error.message` 弹出错误，并停止当前响应 UI。
 - 前端消息渲染不需要处理原始 handover 标记，因为后端已经在持久化与推送前吃掉。
 - 本次调整只记录前端 TODO，不实际修改前端代码。
 
@@ -164,4 +178,4 @@
 - 初版不做 token 级流式，也不做 `messages` 精简视图接口。
 - skill 注入到 runtime 的 provider 细节以“能对齐 multica 的先对齐，对不齐的标 TODO”作为默认策略。
 - 当前可用 agent list 指未归档且 runtime 状态为 `available` 的 agent。
-- 无效 handover 目标不产生 fallback 事件或错误提示。
+- 无效 handover 目标不做 fallback；直接产生 `error` 事件并停止响应。

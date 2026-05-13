@@ -124,7 +124,9 @@ const (
 	EventTypeThinking       EventType = "thinking"
 	EventTypeToolCall       EventType = "tool_call"
 	EventTypeToolCallResult EventType = "tool_call_result"
+	EventTypeRuntimeSession EventType = "runtime_session"
 	EventTypeHandover       EventType = "handover"
+	EventTypeError          EventType = "error"
 )
 
 type MessageRole string
@@ -144,7 +146,9 @@ type Event struct {
 	Thinking       *ThinkingPayload       `json:"thinking,omitempty"`
 	ToolCall       *ToolCallPayload       `json:"tool_call,omitempty"`
 	ToolCallResult *ToolCallResultPayload `json:"tool_call_result,omitempty"`
+	RuntimeSession *RuntimeSessionPayload `json:"runtime_session,omitempty"`
 	Handover       *HandoverPayload       `json:"handover,omitempty"`
+	Error          *ErrorPayload          `json:"error,omitempty"`
 }
 
 type MessagePayload struct {
@@ -166,9 +170,26 @@ type ToolCallResultPayload struct {
 	Output string `json:"output"`
 }
 
+type RuntimeSessionPayload struct {
+	RuntimeID string `json:"runtime_id,omitempty"`
+	Provider  string `json:"provider,omitempty"`
+	SessionID string `json:"session_id"`
+	Status    string `json:"status,omitempty"`
+}
+
 type HandoverPayload struct {
 	Subtype   string `json:"subtype"`
 	AgentID   string `json:"agent_id"`
 	AgentName string `json:"agent_name"`
 	Note      string `json:"note,omitempty"`
+}
+
+type ErrorPayload struct {
+	Subtype         string `json:"subtype"`
+	Code            string `json:"code"`
+	Message         string `json:"message"`
+	AgentID         string `json:"agent_id,omitempty"`
+	AgentName       string `json:"agent_name,omitempty"`
+	TargetAgentID   string `json:"target_agent_id,omitempty"`
+	TargetAgentName string `json:"target_agent_name,omitempty"`
 }

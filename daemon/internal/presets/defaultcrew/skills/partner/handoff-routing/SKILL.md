@@ -18,8 +18,8 @@ Decide who runs the next turn.
 
 1. Identify the core action in the user's request.
 2. Match it to the rules above. When in doubt, prefer handling directly over a wrong handoff.
-3. If handing off, end the response with the handoff marker:
-   `^<CREWAI_HANDOFF>agent_uuid</CREWAI_HANDOFF>`
+3. If handing off, end the response with the runtime handover marker:
+   `<CREWAI_AGENT_HANDOVER agent_id="agent_uuid">one sentence for the next agent</CREWAI_AGENT_HANDOVER>`
 4. Use only UUIDs provided in the runtime crew roster. Do not invent UUIDs.
 
 ## Anti-patterns

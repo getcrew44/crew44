@@ -88,7 +88,7 @@ func TestDefaultCrewPartnerAgentUsesExpectedPresetSkills(t *testing.T) {
 	}
 }
 
-func TestDefaultCrewCodingAgentInstructionIncludesCrewAIContextAndSkills(t *testing.T) {
+func TestDefaultCrewCodingAgentInstructionKeepsCodingSpecificContextAndSkills(t *testing.T) {
 	manifest, err := LoadDefaultCrewManifest()
 	if err != nil {
 		t.Fatalf("load default crew manifest: %v", err)
@@ -111,16 +111,9 @@ func TestDefaultCrewCodingAgentInstructionIncludesCrewAIContextAndSkills(t *test
 	}
 
 	required := []string{
-		"CrewAI Desktop",
-		"local-first",
 		"daemon/",
 		"src/",
 		"electron/",
-		"~/.crewai",
-		"agents",
-		"skills",
-		"runtimes",
-		"chats",
 		"Available skills",
 		"brainstorming",
 		"systematic-debugging",
@@ -132,5 +125,8 @@ func TestDefaultCrewCodingAgentInstructionIncludesCrewAIContextAndSkills(t *test
 		if !strings.Contains(instruction, want) {
 			t.Fatalf("coding instruction missing %q\ninstruction:\n%s", want, instruction)
 		}
+	}
+	if strings.Contains(instruction, "CrewAI Desktop is a local-first multi-agent workteam") {
+		t.Fatalf("common CrewAI context should be injected by runtime prompt builder, not preset agent instruction:\n%s", instruction)
 	}
 }
