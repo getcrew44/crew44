@@ -51,6 +51,43 @@ func TestDefaultCrewCodingAgentUsesExpectedPresetSkills(t *testing.T) {
 	}
 }
 
+func TestDefaultCrewPartnerAgentUsesExpectedPresetSkills(t *testing.T) {
+	manifest, err := LoadDefaultCrewManifest()
+	if err != nil {
+		t.Fatalf("load default crew manifest: %v", err)
+	}
+
+	var partner ManifestAgent
+	for _, agent := range manifest.Agents {
+		if agent.PresetKey == "partner" {
+			partner = agent
+			break
+		}
+	}
+	if partner.PresetKey == "" {
+		t.Fatalf("partner preset agent not found")
+	}
+
+	want := []string{
+		"partner/problem-framing",
+		"partner/handoff-routing",
+		"partner/session-skill-mining",
+	}
+	if !reflect.DeepEqual(partner.SkillRefs, want) {
+		t.Fatalf("partner skill refs mismatch\nwant: %#v\n got: %#v", want, partner.SkillRefs)
+	}
+
+	for _, ref := range want {
+		files, err := readEmbeddedSkillFiles(ref)
+		if err != nil {
+			t.Fatalf("read embedded skill %q: %v", ref, err)
+		}
+		if files["SKILL.md"] == "" {
+			t.Fatalf("skill %q has empty SKILL.md", ref)
+		}
+	}
+}
+
 func TestDefaultCrewCodingAgentInstructionIncludesCrewAIContextAndSkills(t *testing.T) {
 	manifest, err := LoadDefaultCrewManifest()
 	if err != nil {

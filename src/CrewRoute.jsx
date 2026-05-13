@@ -639,7 +639,7 @@ function MenuRow({ icon, label, danger, onClick }) {
   );
 }
 
-function AgentMenu({ isPreset, onRename, onResetPreset, onDelete, onClose }) {
+function AgentMenu({ isPreset, canDelete = true, onRename, onResetPreset, onDelete, onClose }) {
   const ref = React.useRef(null);
 
   React.useEffect(() => {
@@ -662,13 +662,15 @@ function AgentMenu({ isPreset, onRename, onResetPreset, onDelete, onClose }) {
         action: () => { onClose(); onResetPreset?.(); },
       },
     ] : []),
-    { divider: true },
-    {
-      label: 'Remove',
-      icon: <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M2 3.5h9M5 3.5V2h3v1.5M3.5 3.5l.5 7h5l.5-7" stroke="currentColor" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round"/></svg>,
-      danger: true,
-      action: () => { onClose(); onDelete?.(); },
-    },
+    ...(canDelete ? [
+      { divider: true },
+      {
+        label: 'Remove',
+        icon: <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M2 3.5h9M5 3.5V2h3v1.5M3.5 3.5l.5 7h5l.5-7" stroke="currentColor" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round"/></svg>,
+        danger: true,
+        action: () => { onClose(); onDelete?.(); },
+      },
+    ] : []),
   ];
 
   return (
@@ -689,9 +691,17 @@ function AgentMenu({ isPreset, onRename, onResetPreset, onDelete, onClose }) {
   );
 }
 
+function canDeleteAgent(agent) {
+  return !(agent?.preset_id === 'default-crew' && agent?.preset_key === 'partner');
+}
+
+function displayModel(model) {
+  return model || 'auto';
+}
+
 // ─── Agents grid ──────────────────────────────────────────────────────────────
 
-function AgentsSection({ agents, runtimes, onPickAgent, onDataRefresh, onToast }) {
+function AgentsSection({ agents, runtimes, onPickAgent, onDataRefresh, onToast, onViewRuntimes }) {
   const runtimeMap = Object.fromEntries(runtimes.map(r => [r.id, r]));
   const [menuOpenId, setMenuOpenId] = React.useState(null);
   const [renameFor, setRenameFor] = React.useState(null);
@@ -710,6 +720,9 @@ function AgentsSection({ agents, runtimes, onPickAgent, onDataRefresh, onToast }
 
   const missingPresets = presets.filter(p => !p.has_copy);
   const hasMissingPresets = missingPresets.length > 0;
+  const noRuntimes = runtimes.length === 0;
+  const noAgents = agents.length === 0;
+  const needsRuntimeSetup = noRuntimes && noAgents;
 
   const handleCreate = async ({ name, runtime_id, model }) => {
     await api.createAgent(name, '', runtime_id, model || '');
@@ -765,7 +778,7 @@ function AgentsSection({ agents, runtimes, onPickAgent, onDataRefresh, onToast }
 
   const headerAction = (
     <div style={{ display: 'flex', gap: 8 }}>
-      {hasMissingPresets && (
+      {hasMissingPresets && !noRuntimes && (
         <button
           style={{ ...primaryBtn, background: '#FCFAF1', color: '#5C544B', border: '1px solid #ECE6D5' }}
           onClick={handleSeed}
@@ -774,7 +787,7 @@ function AgentsSection({ agents, runtimes, onPickAgent, onDataRefresh, onToast }
           {seedBusy ? 'Adding…' : '+ Add starter crew'}
         </button>
       )}
-      <button style={primaryBtn} onClick={() => setShowCreate(true)}>+ New agent</button>
+      {!noRuntimes && <button style={primaryBtn} onClick={() => setShowCreate(true)}>+ New agent</button>}
     </div>
   );
 
@@ -785,7 +798,21 @@ function AgentsSection({ agents, runtimes, onPickAgent, onDataRefresh, onToast }
         hint="· the crew"
         action={headerAction}
       />
-      {agents.length === 0 && (
+      {needsRuntimeSetup ? (
+        <div style={{
+          padding: '18px 0 4px',
+          borderTop: '1px solid #ECE6D5',
+          color: '#807972',
+        }}>
+          <div style={{ fontSize: 14, fontWeight: 600, color: '#1C1A17', marginBottom: 6 }}>
+            Install a runtime to get started.
+          </div>
+          <div style={{ fontSize: 13, lineHeight: 1.55, maxWidth: 480, marginBottom: 12 }}>
+            Install Claude Code, Codex, Cursor, or another supported runtime, then rescan from Runtimes.
+          </div>
+          <button style={ghostBtn} onClick={onViewRuntimes}>View runtimes</button>
+        </div>
+      ) : noAgents && (
         <div style={{ fontSize: 13, color: '#A89F92', fontStyle: 'italic', padding: '8px 0' }}>
           No agents yet. Create one to get started.
         </div>
@@ -862,6 +889,7 @@ function AgentsSection({ agents, runtimes, onPickAgent, onDataRefresh, onToast }
                   {menuOpen && (
                     <AgentMenu
                       isPreset={!!a.preset_key}
+                      canDelete={canDeleteAgent(a)}
                       onClose={() => setMenuOpenId(null)}
                       onRename={() => { setMenuOpenId(null); setRenameFor(a); }}
                       onResetPreset={() => { setMenuOpenId(null); setResetFor(a); }}
@@ -934,11 +962,27 @@ function AgentsSection({ agents, runtimes, onPickAgent, onDataRefresh, onToast }
 
 // ─── Agent detail ─────────────────────────────────────────────────────────────
 
+const INSTRUCTION_EDITOR_MAX_HEIGHT = 560;
+
+function resizeInstructionEditor(editor) {
+  if (!editor) return;
+
+  editor.style.height = 'auto';
+  const nextHeight = Math.min(editor.scrollHeight || 52, INSTRUCTION_EDITOR_MAX_HEIGHT);
+  editor.style.height = `${nextHeight}px`;
+  editor.style.overflowY = editor.scrollHeight > INSTRUCTION_EDITOR_MAX_HEIGHT ? 'auto' : 'hidden';
+}
+
 function AgentDetail({ agent, skills, runtimes, agentsMap, onBack, onSave, onRefresh, onOpenSkill }) {
   const [tab, setTab] = React.useState('instructions');
   const [instruction, setInstruction] = React.useState(agent.instruction || '');
   const [saving, setSaving] = React.useState(false);
   const [confirmDelete, setConfirmDelete] = React.useState(false);
+  const instructionEditorRef = React.useRef(null);
+
+  React.useLayoutEffect(() => {
+    resizeInstructionEditor(instructionEditorRef.current);
+  }, [instruction, tab]);
 
   const agentSkills = skills.filter(s => (agent.skill_ids || []).includes(s.id));
   const nonAgentSkills = skills.filter(s => !(agent.skill_ids || []).includes(s.id));
@@ -985,6 +1029,8 @@ function AgentDetail({ agent, skills, runtimes, agentsMap, onBack, onSave, onRef
 
   const runtimeOptions = runtimes || [];
   const runtimeSelectable = runtimeOptions.length > 0;
+  const deleteAllowed = canDeleteAgent(agent);
+  const modelLabel = displayModel(agent.model);
 
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column', background: '#FAF5E8' }}>
@@ -1010,10 +1056,10 @@ function AgentDetail({ agent, skills, runtimes, agentsMap, onBack, onSave, onRef
               fontSize: 22, fontWeight: 600, marginBottom: 14,
             }}>{agent.initial}</div>
             <div style={{ fontSize: 18, fontWeight: 600, color: '#1C1A17' }}>{agent.name}</div>
-            <div style={{ fontSize: 13, color: '#807972', marginBottom: 16 }}>{agent.model || 'No model'}</div>
+            <div style={{ fontSize: 13, color: '#807972', marginBottom: 16 }}>{modelLabel}</div>
 
             <div style={{ fontSize: 11.5, color: '#A89F92', textTransform: 'uppercase', letterSpacing: 0.4, fontWeight: 500, marginBottom: 8 }}>Properties</div>
-            <PropRow label="Model" value={<code style={{ fontFamily: MONO_FONT, fontSize: 12 }}>{agent.model || '—'}</code>} />
+            <PropRow label="Model" value={<code style={{ fontFamily: MONO_FONT, fontSize: 12 }}>{modelLabel}</code>} />
             <PropRow label="Runtime" value={
               runtimeSelectable ? (
                 <CustomSelect
@@ -1055,24 +1101,26 @@ function AgentDetail({ agent, skills, runtimes, agentsMap, onBack, onSave, onRef
               )}
             </div>
 
-            <button
-              onClick={() => setConfirmDelete(true)}
-              style={{
-                marginTop: 28,
-                display: 'inline-flex', alignItems: 'center', gap: 6,
-                border: '1px solid #E8C9BD', background: '#FCFAF1',
-                color: '#C4644A', borderRadius: 6,
-                padding: '6px 11px', fontSize: 12.5, fontFamily: UI_FONT,
-                cursor: 'pointer',
-              }}
-              onMouseEnter={e => { e.currentTarget.style.background = '#FEF3EE'; }}
-              onMouseLeave={e => { e.currentTarget.style.background = '#FCFAF1'; }}
-            >
-              <svg width="12" height="12" viewBox="0 0 13 13" fill="none">
-                <path d="M2 3.5h9M5 3.5V2h3v1.5M3.5 3.5l.5 7h5l.5-7" stroke="currentColor" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round"/>
-              </svg>
-              Delete agent
-            </button>
+            {deleteAllowed && (
+              <button
+                onClick={() => setConfirmDelete(true)}
+                style={{
+                  marginTop: 28,
+                  display: 'inline-flex', alignItems: 'center', gap: 6,
+                  border: '1px solid #E8C9BD', background: '#FCFAF1',
+                  color: '#C4644A', borderRadius: 6,
+                  padding: '6px 11px', fontSize: 12.5, fontFamily: UI_FONT,
+                  cursor: 'pointer',
+                }}
+                onMouseEnter={e => { e.currentTarget.style.background = '#FEF3EE'; }}
+                onMouseLeave={e => { e.currentTarget.style.background = '#FCFAF1'; }}
+              >
+                <svg width="12" height="12" viewBox="0 0 13 13" fill="none">
+                  <path d="M2 3.5h9M5 3.5V2h3v1.5M3.5 3.5l.5 7h5l.5-7" stroke="currentColor" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
+                Delete agent
+              </button>
+            )}
           </aside>
 
           {/* Right: tabs */}
@@ -1100,10 +1148,13 @@ function AgentDetail({ agent, skills, runtimes, agentsMap, onBack, onSave, onRef
                   </button>
                 </div>
                 <textarea
+                  ref={instructionEditorRef}
+                  data-testid="agent-instruction-input"
                   value={instruction}
                   onChange={e => setInstruction(e.target.value)}
+                  rows={1}
                   style={{
-                    width: '100%', minHeight: 280, border: 'none', outline: 'none', resize: 'vertical',
+                    width: '100%', maxHeight: INSTRUCTION_EDITOR_MAX_HEIGHT, border: 'none', outline: 'none', resize: 'none',
                     padding: 16, background: 'transparent', fontFamily: MONO_FONT, fontSize: 12.5,
                     color: '#1C1A17', lineHeight: 1.6,
                   }}
@@ -1234,7 +1285,7 @@ export default function CrewRoute({ agents, agentsMap, skills, runtimes, initial
         <h1 style={{ fontSize: 22, fontWeight: 600, margin: '0 0 4px', color: '#1C1A17', letterSpacing: -0.2 }}>Crew</h1>
         <div style={{ fontSize: 13, color: '#807972', marginBottom: 18 }}>{meta?.subtitle}</div>
         <CrewTabs tab={tab} setTab={setTab} />
-        {tab === 'agents'   && <AgentsSection agents={agents} runtimes={runtimes} onPickAgent={setOpenAgentId} onDataRefresh={onDataRefresh} onToast={onToast} />}
+        {tab === 'agents'   && <AgentsSection agents={agents} runtimes={runtimes} onPickAgent={setOpenAgentId} onDataRefresh={onDataRefresh} onToast={onToast} onViewRuntimes={() => setTab('runtimes')} />}
         {tab === 'skills'   && <SkillsSection skills={skills} agentsMap={agentsMap} onOpenSkill={(s) => setOpenSkillId(s.id)} />}
         {tab === 'runtimes' && <RuntimesSection runtimes={runtimes} onDataRefresh={onDataRefresh} onToast={onToast} />}
       </div>
