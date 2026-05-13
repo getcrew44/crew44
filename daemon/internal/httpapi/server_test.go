@@ -1,21 +1,25 @@
 package httpapi
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/sqtech/crew-ai/crewai-repo/internal/app"
 	"github.com/sqtech/crew-ai/crewai-repo/internal/model"
+	rpctest "github.com/sqtech/crew-ai/crewai-repo/internal/rpc"
 	"github.com/sqtech/crew-ai/crewai-repo/internal/runtime"
 )
 
@@ -190,7 +194,7 @@ func TestCorruptAppStateDoesNotRequireOnboarding(t *testing.T) {
 	}
 }
 
-func TestChatMessageReplayAndFollowSSE(t *testing.T) {
+func TestChatMessageReplayAndEventList(t *testing.T) {
 	env := newTestEnv(t)
 	postJSON(t, env.server, http.MethodPost, "/api/runtimes/rescan", nil, http.StatusOK, nil)
 
@@ -202,33 +206,7 @@ func TestChatMessageReplayAndFollowSSE(t *testing.T) {
 		"content":         "/slow /tool please review",
 		"target_agent_id": agentID,
 	}, http.StatusAccepted, nil)
-
-	req := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/chat/sessions/%s/events?after=0&follow=1", chatID), nil)
-	req.Header.Set("Accept", "text/event-stream")
-	rec := httptest.NewRecorder()
-
-	done := make(chan struct{})
-	go func() {
-		env.server.ServeHTTP(rec, req)
-		close(done)
-	}()
-
-	select {
-	case <-done:
-	case <-time.After(3 * time.Second):
-		t.Fatal("timed out waiting for SSE stream to finish")
-	}
-
-	body := rec.Body.String()
-	if !strings.Contains(body, "event: chat.event") {
-		t.Fatalf("expected chat.event entries, got %q", body)
-	}
-	if !strings.Contains(body, "\"type\":\"tool_call\"") {
-		t.Fatalf("expected tool_call payload in replay/follow stream, got %q", body)
-	}
-	if !strings.Contains(body, "event: done") {
-		t.Fatalf("expected done event in SSE stream, got %q", body)
-	}
+	waitForChatIdle(t, env.server, chatID)
 
 	var replay map[string]any
 	getJSON(t, env.server, fmt.Sprintf("/api/chat/sessions/%s/events?after=0", chatID), http.StatusOK, &replay)
@@ -1182,6 +1160,11 @@ func waitForChatIdle(t *testing.T, handler http.Handler, chatID string) {
 func postJSON(t *testing.T, handler http.Handler, method, path string, body any, wantStatus int, out any) {
 	t.Helper()
 
+	if strings.HasPrefix(path, "/api/") {
+		postRPCJSON(t, handler, method, path, body, wantStatus, out)
+		return
+	}
+
 	var reader io.Reader
 	if body != nil {
 		data, err := json.Marshal(body)
@@ -1215,18 +1198,185 @@ func getJSON(t *testing.T, handler http.Handler, path string, wantStatus int, ou
 	postJSON(t, handler, http.MethodGet, path, nil, wantStatus, out)
 }
 
+func postRPCJSON(t *testing.T, handler http.Handler, httpMethod, httpPath string, body any, wantStatus int, out any) {
+	t.Helper()
+
+	server, ok := handler.(*Server)
+	if !ok {
+		t.Fatalf("test RPC helper expected *Server, got %T", handler)
+	}
+	rpcMethod, params := mapAPIRequestToRPC(t, httpMethod, httpPath, body)
+	rawParams, err := json.Marshal(params)
+	if err != nil {
+		t.Fatalf("marshal rpc params: %v", err)
+	}
+	result, err := server.rpc.Handle(context.Background(), nil, rpctest.Request{
+		JSONRPC: rpctest.Version,
+		Method:  rpcMethod,
+		Params:  rawParams,
+	})
+	status := rpcHTTPStatus(err)
+	if status != wantStatus && !(err == nil && wantStatus >= 200 && wantStatus < 300) {
+		t.Fatalf("%s %s: expected %d, got %d: %v", httpMethod, httpPath, wantStatus, status, err)
+	}
+	if err != nil || out == nil {
+		return
+	}
+	data, err := json.Marshal(result)
+	if err != nil {
+		t.Fatalf("marshal rpc result: %v", err)
+	}
+	if err := json.Unmarshal(data, out); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+}
+
+func rpcHTTPStatus(err error) int {
+	switch {
+	case err == nil:
+		return http.StatusOK
+	case errors.Is(err, app.ErrBadRequest):
+		return http.StatusBadRequest
+	case errors.Is(err, app.ErrNotFound):
+		return http.StatusNotFound
+	case errors.Is(err, app.ErrConflict):
+		return http.StatusConflict
+	default:
+		return http.StatusInternalServerError
+	}
+}
+
+func mapAPIRequestToRPC(t *testing.T, httpMethod, rawPath string, body any) (string, map[string]any) {
+	t.Helper()
+
+	u, err := url.Parse(rawPath)
+	if err != nil {
+		t.Fatalf("parse path: %v", err)
+	}
+	params := bodyMap(t, body)
+	trimmed := strings.TrimPrefix(u.Path, "/api/")
+	parts := strings.Split(trimmed, "/")
+
+	switch {
+	case trimmed == "onboarding" && httpMethod == http.MethodGet:
+		return "onboarding.get", params
+	case trimmed == "onboarding/complete" && httpMethod == http.MethodPost:
+		return "onboarding.complete", params
+	case trimmed == "runtimes" && httpMethod == http.MethodGet:
+		return "runtimes.list", params
+	case trimmed == "runtimes/rescan" && httpMethod == http.MethodPost:
+		return "runtimes.rescan", params
+	case len(parts) == 2 && parts[0] == "runtimes" && httpMethod == http.MethodGet:
+		params["id"] = parts[1]
+		return "runtimes.get", params
+	case len(parts) == 3 && parts[0] == "runtimes" && parts[2] == "update" && httpMethod == http.MethodPost:
+		return "runtimes.update", map[string]any{"id": parts[1], "patch": params}
+	case trimmed == "agents" && httpMethod == http.MethodGet:
+		return "agents.list", params
+	case trimmed == "agents" && httpMethod == http.MethodPost:
+		return "agents.create", params
+	case len(parts) == 2 && parts[0] == "agents" && httpMethod == http.MethodGet:
+		params["id"] = parts[1]
+		return "agents.get", params
+	case len(parts) == 2 && parts[0] == "agents" && httpMethod == http.MethodPut:
+		params["id"] = parts[1]
+		return "agents.update", params
+	case len(parts) == 3 && parts[0] == "agents" && parts[2] == "archive":
+		return "agents.archive", map[string]any{"id": parts[1]}
+	case len(parts) == 3 && parts[0] == "agents" && parts[2] == "restore":
+		return "agents.restore", map[string]any{"id": parts[1]}
+	case len(parts) == 3 && parts[0] == "agents" && parts[2] == "skills":
+		params["id"] = parts[1]
+		return "agents.skills.replace", params
+	case len(parts) == 3 && parts[0] == "agents" && parts[2] == "reset-preset":
+		return "agents.preset.reset", map[string]any{"id": parts[1]}
+	case trimmed == "presets":
+		return "presets.list", params
+	case trimmed == "presets/default-crew/seed":
+		return "presets.defaultCrew.seed", params
+	case trimmed == "presets/default-crew/reset":
+		return "presets.defaultCrew.reset", params
+	case trimmed == "skills" && httpMethod == http.MethodGet:
+		return "skills.list", params
+	case trimmed == "skills" && httpMethod == http.MethodPost:
+		return "skills.create", params
+	case len(parts) == 2 && parts[0] == "skills" && httpMethod == http.MethodGet:
+		params["id"] = parts[1]
+		return "skills.get", params
+	case len(parts) == 2 && parts[0] == "skills" && httpMethod == http.MethodPut:
+		params["id"] = parts[1]
+		return "skills.update", params
+	case len(parts) == 2 && parts[0] == "skills" && httpMethod == http.MethodDelete:
+		return "skills.delete", map[string]any{"id": parts[1]}
+	case len(parts) == 3 && parts[0] == "skills" && parts[2] == "files" && httpMethod == http.MethodGet:
+		return "skills.files.list", map[string]any{"id": parts[1]}
+	case len(parts) == 3 && parts[0] == "skills" && parts[2] == "files" && httpMethod == http.MethodPut:
+		params["id"] = parts[1]
+		return "skills.files.put", params
+	case strings.HasPrefix(trimmed, "skills/") && strings.Contains(trimmed, "/files/") && httpMethod == http.MethodDelete:
+		skillID := parts[1]
+		fileID, _ := url.PathUnescape(strings.TrimPrefix(trimmed, "skills/"+skillID+"/files/"))
+		return "skills.files.delete", map[string]any{"id": skillID, "file_id": fileID}
+	case trimmed == "projects" && httpMethod == http.MethodGet:
+		return "projects.list", params
+	case trimmed == "projects" && httpMethod == http.MethodPost:
+		return "projects.create", params
+	case len(parts) == 2 && parts[0] == "projects" && httpMethod == http.MethodGet:
+		return "projects.get", map[string]any{"id": parts[1]}
+	case len(parts) == 2 && parts[0] == "projects" && httpMethod == http.MethodPut:
+		params["id"] = parts[1]
+		return "projects.update", params
+	case len(parts) == 2 && parts[0] == "projects" && httpMethod == http.MethodDelete:
+		return "projects.delete", map[string]any{"id": parts[1]}
+	case len(parts) == 3 && parts[0] == "projects" && parts[2] == "chats":
+		return "projects.chats.list", map[string]any{"id": parts[1]}
+	case trimmed == "chat/sessions" && httpMethod == http.MethodPost:
+		return "chats.create", params
+	case trimmed == "chat/sessions" && httpMethod == http.MethodGet:
+		if projectID := u.Query().Get("project_id"); projectID != "" {
+			params["project_id"] = projectID
+		}
+		return "chats.list", params
+	case len(parts) == 3 && parts[0] == "chat" && parts[1] == "sessions" && httpMethod == http.MethodGet:
+		return "chats.get", map[string]any{"id": parts[2]}
+	case len(parts) == 3 && parts[0] == "chat" && parts[1] == "sessions" && httpMethod == http.MethodPut:
+		params["id"] = parts[2]
+		return "chats.update", params
+	case len(parts) == 3 && parts[0] == "chat" && parts[1] == "sessions" && httpMethod == http.MethodDelete:
+		return "chats.delete", map[string]any{"id": parts[2]}
+	case len(parts) == 4 && parts[0] == "chat" && parts[1] == "sessions" && parts[3] == "messages":
+		params["id"] = parts[2]
+		return "chats.messages.post", params
+	case len(parts) == 4 && parts[0] == "chat" && parts[1] == "sessions" && parts[3] == "events":
+		after, _ := strconv.ParseInt(u.Query().Get("after"), 10, 64)
+		return "chats.events.list", map[string]any{"chat_id": parts[2], "after": after}
+	case len(parts) == 4 && parts[0] == "chat" && parts[1] == "sessions" && parts[3] == "cancel":
+		return "chats.cancel", map[string]any{"id": parts[2]}
+	default:
+		t.Fatalf("unmapped API test request %s %s", httpMethod, rawPath)
+	}
+	return "", nil
+}
+
+func bodyMap(t *testing.T, body any) map[string]any {
+	t.Helper()
+	if body == nil {
+		return map[string]any{}
+	}
+	data, err := json.Marshal(body)
+	if err != nil {
+		t.Fatalf("marshal body: %v", err)
+	}
+	var out map[string]any
+	if err := json.Unmarshal(data, &out); err != nil {
+		t.Fatalf("body must be object: %v", err)
+	}
+	return out
+}
+
 func assertFileExists(t *testing.T, path string) {
 	t.Helper()
 	if _, err := os.Stat(path); err != nil {
 		t.Fatalf("expected file %s to exist: %v", path, err)
 	}
-}
-
-func readSSELines(body string) []string {
-	scanner := bufio.NewScanner(strings.NewReader(body))
-	var lines []string
-	for scanner.Scan() {
-		lines = append(lines, scanner.Text())
-	}
-	return lines
 }

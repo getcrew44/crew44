@@ -94,7 +94,7 @@ describe('Sidebar session selection', () => {
 // Verifies the sidebarProjects computation uses c.id (ChatRecord field),
 // not c.chat_id (ChatIndexEntry field — does not exist on ChatRecord).
 describe('sidebarProjects chat ID mapping', () => {
-  // Simulate what GET /api/projects/{id}/chats actually returns:
+  // Simulate what projects.chats.list actually returns:
   // ListProjectChats returns []ChatRecord, not []ChatIndexEntry.
   const chatRecord = {
     id: 'real-uuid-123',

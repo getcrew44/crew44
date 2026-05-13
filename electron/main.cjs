@@ -12,6 +12,7 @@ const appName = 'CrewAI Desktop';
 const appIcon = path.join(__dirname, 'assets', 'crewai.icns');
 const bundledDaemon = path.join(__dirname, '..', 'bin', process.platform === 'win32' ? 'crewai-daemon.exe' : 'crewai-daemon');
 const configuredBackendUrl = (process.env.CREWAI_BACKEND_URL || process.env.CREWAI_BASE_URL || '').replace(/\/$/, '');
+const configuredRpcUrl = process.env.CREWAI_RPC_URL || '';
 const configuredAuthToken = process.env.AUTH_TOKEN || process.env.CREWAI_AUTH_TOKEN || process.env.CREWAI_API_TOKEN || '';
 const preferredPort = Number(process.env.CREWAI_DAEMON_PORT || process.env.PORT || 18766);
 const cliPathEntries = [
@@ -30,6 +31,7 @@ const cliPathEntries = [
 let mainWindow;
 let daemonProcess;
 let backendUrl = configuredBackendUrl;
+let rpcUrl = configuredRpcUrl;
 let authToken = configuredAuthToken;
 
 app.setName(appName);
@@ -144,14 +146,25 @@ function waitForHealth(url, retries = 80) {
   });
 }
 
+function rpcUrlForBackend(url) {
+  const parsed = new URL(url);
+  parsed.protocol = parsed.protocol === 'https:' ? 'wss:' : 'ws:';
+  parsed.pathname = '/rpc';
+  parsed.search = '';
+  parsed.hash = '';
+  return parsed.toString();
+}
+
 async function ensureBackend() {
   if (backendUrl) {
+    rpcUrl = rpcUrl || rpcUrlForBackend(backendUrl);
     await waitForHealth(backendUrl);
     return;
   }
 
   if (!fs.existsSync(bundledDaemon)) {
     backendUrl = 'http://127.0.0.1:8080';
+    rpcUrl = configuredRpcUrl || rpcUrlForBackend(backendUrl);
     authToken = configuredAuthToken;
     console.log(`[crewai] bundled daemon missing at ${bundledDaemon}; using ${backendUrl}`);
     await waitForHealth(backendUrl);
@@ -160,6 +173,7 @@ async function ensureBackend() {
 
   const port = await choosePort();
   backendUrl = `http://127.0.0.1:${port}`;
+  rpcUrl = configuredRpcUrl || rpcUrlForBackend(backendUrl);
   authToken = configuredAuthToken || makeAuthToken();
 
   daemonProcess = spawn(bundledDaemon, [], {
@@ -239,6 +253,8 @@ async function uniqueProjectFolderPath(baseDir, name) {
 
 ipcMain.handle('backend:get-config', async () => ({
   url: isDev && configuredBackendUrl ? configuredBackendUrl : backendUrl,
+  healthUrl: `${isDev && configuredBackendUrl ? configuredBackendUrl : backendUrl}/health`,
+  rpcUrl: isDev && configuredRpcUrl ? configuredRpcUrl : rpcUrl,
   token: authToken,
 }));
 

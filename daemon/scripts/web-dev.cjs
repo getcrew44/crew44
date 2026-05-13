@@ -6,6 +6,7 @@ const root = path.resolve(__dirname, '..', '..');
 const daemonDir = path.join(root, 'daemon');
 const frontendPort = process.env.CREWAI_FRONTEND_PORT || '3000';
 const backendUrl = process.env.CREWAI_BACKEND_URL || process.env.CREWAI_BASE_URL || 'http://127.0.0.1:8080';
+const rpcUrl = process.env.CREWAI_RPC_URL || backendUrl.replace(/^http:/, 'ws:').replace(/^https:/, 'wss:') + '/rpc';
 const viteBin = path.join(root, 'node_modules', '.bin', process.platform === 'win32' ? 'vite.cmd' : 'vite');
 
 function spawnLogged(command, args, options = {}) {
@@ -57,7 +58,12 @@ async function main() {
   try {
     await waitFor(`${backendUrl}/health`);
     const vite = spawnLogged(viteBin, ['--host', '127.0.0.1', '--port', frontendPort], {
-      env: { ...process.env, CREWAI_BACKEND_URL: backendUrl },
+      env: {
+        ...process.env,
+        CREWAI_BACKEND_URL: backendUrl,
+        VITE_CREWAI_RPC_URL: rpcUrl,
+        VITE_CREWAI_AUTH_TOKEN: process.env.AUTH_TOKEN || process.env.CREWAI_AUTH_TOKEN || '',
+      },
     });
     vite.on('exit', code => {
       cleanup();
