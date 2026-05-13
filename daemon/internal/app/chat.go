@@ -49,6 +49,7 @@ func (a *App) PostMessage(chatID, content, targetAgentID string) (model.ChatReco
 		AgentID:   targetAgentID,
 		StartedAt: now,
 	}
+	chat.PendingHandoverAgentID = ""
 	chat.ParticipantAgentIDs = appendUnique(chat.ParticipantAgentIDs, targetAgentID)
 	if err := a.store.SaveChat(chat); err != nil {
 		return model.ChatRecord{}, err
@@ -112,6 +113,12 @@ func (a *App) runChat(ctx context.Context, chatID, agentID, turnID, prompt strin
 			a.finishChatWithError(chatID, err.Error())
 			return
 		}
+		availableAgents, err := a.availableHandoverAgents()
+		if err != nil {
+			a.finishChatWithError(chatID, err.Error())
+			return
+		}
+		runtimeAgent := withHandoverInstructions(agent, availableAgents)
 
 		resumeSessionID := ""
 		if chat.LastRuntimeSession.AgentID == currentAgentID {
@@ -119,9 +126,11 @@ func (a *App) runChat(ctx context.Context, chatID, agentID, turnID, prompt strin
 		}
 
 		var lastAssistant string
+		var pendingHandoverAgent model.AgentConfig
+		var pendingHandoverNote string
 		result, err := a.engine.Run(ctx, runtime.RunRequest{
 			Runtime:         runtimeRecord,
-			Agent:           agent,
+			Agent:           runtimeAgent,
 			AgentSkills:     agentSkills,
 			Prompt:          currentPrompt,
 			SummaryPath:     a.store.SummaryPath(chatID),
@@ -140,7 +149,34 @@ func (a *App) runChat(ctx context.Context, chatID, agentID, turnID, prompt strin
 				ToolCallResult: streamEvent.ToolCallResult,
 			}
 			if streamEvent.Message != nil && streamEvent.Message.Role == model.MessageRoleAssistant {
-				lastAssistant = streamEvent.Message.Content
+				cleaned, handoverTargets := model.ExtractAgentHandoverMarkers(streamEvent.Message.Content)
+				lastAssistant = cleaned
+				for _, handover := range handoverTargets {
+					target, ok := a.validHandoverTarget(handover.AgentID, currentAgentID)
+					if !ok {
+						continue
+					}
+					pendingHandoverAgent = target
+					pendingHandoverNote = handover.Note
+					latestChat, err := a.store.GetChat(chatID)
+					if err != nil {
+						return err
+					}
+					latestChat.PendingHandoverAgentID = target.ID
+					latestChat.UpdatedAt = time.Now().UTC()
+					if err := a.store.SaveChat(latestChat); err != nil {
+						return err
+					}
+					if err := a.appendHandoverEvent(chatID, currentTurnID, currentAgentID, handoverSubtypeScheduled, target, handover.Note); err != nil {
+						return err
+					}
+				}
+				if cleaned == "" {
+					return nil
+				}
+				message := *streamEvent.Message
+				message.Content = cleaned
+				event.Message = &message
 			}
 			persisted, err := a.store.AppendEvent(chatID, event)
 			if err != nil {
@@ -154,6 +190,11 @@ func (a *App) runChat(ctx context.Context, chatID, agentID, turnID, prompt strin
 			return
 		}
 
+		chat, err = a.store.GetChat(chatID)
+		if err != nil {
+			a.finishChatWithError(chatID, err.Error())
+			return
+		}
 		chat.LastRuntimeSession = model.LastRuntimeSession{
 			AgentID:   currentAgentID,
 			SessionID: result.SessionID,
@@ -161,19 +202,21 @@ func (a *App) runChat(ctx context.Context, chatID, agentID, turnID, prompt strin
 		}
 		chat.CurrentAgentID = currentAgentID
 		chat.UpdatedAt = time.Now().UTC()
+		if pendingHandoverAgent.ID == "" {
+			chat.PendingHandoverAgentID = ""
+		}
 		if err := a.store.SaveChat(chat); err != nil {
 			a.finishChatWithError(chatID, err.Error())
 			return
 		}
 
-		handoffTo := model.ExtractHandoffTarget(lastAssistant)
-		if handoffTo == "" {
+		if pendingHandoverAgent.ID == "" {
 			break
 		}
-		if handoffTo == currentAgentID {
-			break
-		}
-		if _, err := a.store.GetAgent(handoffTo); err != nil {
+		if _, ok := a.validHandoverTarget(pendingHandoverAgent.ID, currentAgentID); !ok {
+			chat.PendingHandoverAgentID = ""
+			chat.UpdatedAt = time.Now().UTC()
+			_ = a.store.SaveChat(chat)
 			break
 		}
 		events, err := a.store.ListEvents(chatID, 0)
@@ -181,23 +224,29 @@ func (a *App) runChat(ctx context.Context, chatID, agentID, turnID, prompt strin
 			_ = a.store.WriteSummary(chatID, model.BuildChatSummary(events))
 		}
 
-		nextPrompt := model.StripHandoffMarker(lastAssistant)
-		currentAgentID = handoffTo
-		currentPrompt = nextPrompt
-		currentTurnID = id.New()
-		chat.ActiveTurnID = currentTurnID
-		chat.CurrentAgentID = currentAgentID
+		nextPrompt := buildHandoverPrompt(currentPrompt, pendingHandoverNote, lastAssistant)
+		nextTurnID := id.New()
+		chat.PendingHandoverAgentID = ""
+		chat.CurrentAgentID = pendingHandoverAgent.ID
 		chat.UpdatedAt = time.Now().UTC()
+		chat.ActiveTurnID = nextTurnID
 		chat.Stream = model.ChatStreamState{
 			Status:    "streaming",
-			AgentID:   currentAgentID,
+			AgentID:   pendingHandoverAgent.ID,
 			StartedAt: time.Now().UTC(),
 		}
-		chat.ParticipantAgentIDs = appendUnique(chat.ParticipantAgentIDs, currentAgentID)
+		chat.ParticipantAgentIDs = appendUnique(chat.ParticipantAgentIDs, pendingHandoverAgent.ID)
 		if err := a.store.SaveChat(chat); err != nil {
 			a.finishChatWithError(chatID, err.Error())
 			return
 		}
+		if err := a.appendHandoverEvent(chatID, currentTurnID, pendingHandoverAgent.ID, handoverSubtypeOccurred, pendingHandoverAgent, pendingHandoverNote); err != nil {
+			a.finishChatWithError(chatID, err.Error())
+			return
+		}
+		currentAgentID = pendingHandoverAgent.ID
+		currentPrompt = nextPrompt
+		currentTurnID = nextTurnID
 	}
 
 	a.finishChatSuccess(chatID)
@@ -211,6 +260,7 @@ func (a *App) finishChatSuccess(chatID string) {
 	chat.Stream.Status = "idle"
 	chat.Stream.LastError = ""
 	chat.Stream.CancelRequested = false
+	chat.PendingHandoverAgentID = ""
 	chat.UpdatedAt = time.Now().UTC()
 	_ = a.store.SaveChat(chat)
 	a.broker.Publish(chatID, broker.Notification[model.Event]{Kind: broker.KindDone})
@@ -222,6 +272,7 @@ func (a *App) finishChatWithError(chatID, message string) {
 		chat.Stream.Status = "idle"
 		chat.Stream.LastError = message
 		chat.Stream.CancelRequested = true
+		chat.PendingHandoverAgentID = ""
 		chat.UpdatedAt = time.Now().UTC()
 		_ = a.store.SaveChat(chat)
 	}

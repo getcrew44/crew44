@@ -225,17 +225,17 @@ replay, and live SSE follow.
 The suite creates a second chat, then instructs the main Codex agent to:
 
 - emit a plain-language instruction for another agent
-- append an exact `^<CREWAI_HANDOFF>...</CREWAI_HANDOFF>` marker
+- append an exact standalone `<CREWAI_AGENT_HANDOVER agent_id="...">one sentence for the next agent</CREWAI_AGENT_HANDOVER>` marker
 
-The worker Codex agent must then, after the handoff:
+The worker Codex agent must then, after the handover:
 
 - read `.crewai-e2e-signal.txt`
 - write `.crewai-handoff-result.txt` with exact content `HANDOFF_OK`
 
 Assertions:
 
-- handoff marker exists in persisted `events.jsonl`
-- `summary.md` keeps the worker instruction but strips the marker
+- `events.jsonl` contains `handover.scheduled` and `handover.occurred` events
+- persisted assistant message content and `summary.md` keep the worker instruction but strip the marker
 - chat `current_agent_id` becomes the worker agent
 - `workspace/.crewai-handoff-result.txt` exists with exact expected content
 - file `ctime` is later than the persisted handoff-event timestamp
@@ -260,7 +260,7 @@ Assertions:
 - second chat still points at the worker agent
 - persisted runtime session id for the first chat survives restart
 - persisted events survive restart
-- handoff marker is still present in persisted chat history
+- handover events are still present in persisted chat history
 
 If any of these fail after restart, that indicates improper in-memory state
 coupling or incomplete disk persistence.

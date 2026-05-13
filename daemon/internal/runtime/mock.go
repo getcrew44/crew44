@@ -118,8 +118,8 @@ func (MockEngine) Run(ctx context.Context, request RunRequest, emit func(StreamE
 		content = fmt.Sprintf("handoff received by %s", request.Agent.Name)
 	}
 	content = fmt.Sprintf("%s reply: %s", request.Agent.Name, content)
-	if target := extractDirectiveValue(request.Prompt, "/handoff:"); target != "" {
-		content += " ^<CREWAI_HANDOFF>" + target + "</CREWAI_HANDOFF>"
+	if target := extractDirectiveValue(request.Prompt, "/handover:"); target != "" {
+		content += "\n<CREWAI_AGENT_HANDOVER agent_id=\"" + target + "\">Continue the user's request.</CREWAI_AGENT_HANDOVER>"
 	}
 	if err := emit(StreamEvent{
 		Type: model.EventTypeMessage,
@@ -142,7 +142,7 @@ func cleanPrompt(prompt string) string {
 	parts := strings.Fields(prompt)
 	out := make([]string, 0, len(parts))
 	for _, part := range parts {
-		if part == "/slow" || part == "/tool" || strings.HasPrefix(part, "/handoff:") {
+		if part == "/slow" || part == "/tool" || strings.HasPrefix(part, "/handover:") {
 			continue
 		}
 		out = append(out, part)

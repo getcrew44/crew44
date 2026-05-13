@@ -87,19 +87,20 @@ type ChatStreamState struct {
 }
 
 type ChatRecord struct {
-	ID                  string             `json:"id"`
-	ProjectID           string             `json:"project_id"`
-	Title               string             `json:"title"`
-	MainAgentID         string             `json:"main_agent_id"`
-	CurrentAgentID      string             `json:"current_agent_id"`
-	ParticipantAgentIDs []string           `json:"participant_agent_ids"`
-	Status              string             `json:"status"`
-	ActiveTurnID        string             `json:"active_turn_id,omitempty"`
-	LastRuntimeSession  LastRuntimeSession `json:"last_runtime_session"`
-	Stream              ChatStreamState    `json:"stream"`
-	CreatedAt           time.Time          `json:"created_at"`
-	UpdatedAt           time.Time          `json:"updated_at"`
-	ArchivedAt          time.Time          `json:"archived_at,omitempty"`
+	ID                     string             `json:"id"`
+	ProjectID              string             `json:"project_id"`
+	Title                  string             `json:"title"`
+	MainAgentID            string             `json:"main_agent_id"`
+	CurrentAgentID         string             `json:"current_agent_id"`
+	PendingHandoverAgentID string             `json:"pending_handover_agent_id,omitempty"`
+	ParticipantAgentIDs    []string           `json:"participant_agent_ids"`
+	Status                 string             `json:"status"`
+	ActiveTurnID           string             `json:"active_turn_id,omitempty"`
+	LastRuntimeSession     LastRuntimeSession `json:"last_runtime_session"`
+	Stream                 ChatStreamState    `json:"stream"`
+	CreatedAt              time.Time          `json:"created_at"`
+	UpdatedAt              time.Time          `json:"updated_at"`
+	ArchivedAt             time.Time          `json:"archived_at,omitempty"`
 }
 
 type EventType string
@@ -109,6 +110,7 @@ const (
 	EventTypeThinking       EventType = "thinking"
 	EventTypeToolCall       EventType = "tool_call"
 	EventTypeToolCallResult EventType = "tool_call_result"
+	EventTypeHandover       EventType = "handover"
 )
 
 type MessageRole string
@@ -128,12 +130,12 @@ type Event struct {
 	Thinking       *ThinkingPayload       `json:"thinking,omitempty"`
 	ToolCall       *ToolCallPayload       `json:"tool_call,omitempty"`
 	ToolCallResult *ToolCallResultPayload `json:"tool_call_result,omitempty"`
+	Handover       *HandoverPayload       `json:"handover,omitempty"`
 }
 
 type MessagePayload struct {
-	Role             MessageRole `json:"role"`
-	Content          string      `json:"content"`
-	HandoffToAgentID string      `json:"handoff_to_agent_id,omitempty"`
+	Role    MessageRole `json:"role"`
+	Content string      `json:"content"`
 }
 
 type ThinkingPayload struct {
@@ -148,4 +150,11 @@ type ToolCallPayload struct {
 type ToolCallResultPayload struct {
 	Name   string `json:"name"`
 	Output string `json:"output"`
+}
+
+type HandoverPayload struct {
+	Subtype   string `json:"subtype"`
+	AgentID   string `json:"agent_id"`
+	AgentName string `json:"agent_name"`
+	Note      string `json:"note,omitempty"`
 }

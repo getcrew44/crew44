@@ -14,7 +14,7 @@ func TestBuildChatSummaryKeepsUserAndFinalAssistantMessages(t *testing.T) {
 			ActorAgentID: "agent-a",
 			Message: &MessagePayload{
 				Role:    MessageRoleUser,
-				Content: "please investigate [@Aria](mention://agent/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa) ^<CREWAI_HANDOFF>cccccccc-cccc-cccc-cccc-cccccccccccc</CREWAI_HANDOFF>",
+				Content: "please investigate [@Aria](mention://agent/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa)\n<CREWAI_AGENT_HANDOVER agent_id=\"cccccccc-cccc-cccc-cccc-cccccccccccc\">Investigate this.</CREWAI_AGENT_HANDOVER>",
 			},
 		},
 		{
@@ -62,7 +62,7 @@ func TestBuildChatSummaryKeepsUserAndFinalAssistantMessages(t *testing.T) {
 			ActorAgentID: "agent-a",
 			Message: &MessagePayload{
 				Role:    MessageRoleAssistant,
-				Content: "final answer ^<CREWAI_HANDOFF>bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb</CREWAI_HANDOFF>",
+				Content: "final answer\n<CREWAI_AGENT_HANDOVER agent_id=\"bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb\">Review the answer.</CREWAI_AGENT_HANDOVER>",
 			},
 		},
 	}
@@ -80,7 +80,7 @@ func TestBuildChatSummaryKeepsUserAndFinalAssistantMessages(t *testing.T) {
 	if strings.Contains(summary, "let me check") {
 		t.Fatalf("summary should omit intermediate assistant messages before the last tool call, got %q", summary)
 	}
-	if strings.Contains(summary, "<CREWAI_HANDOFF>") {
+	if strings.Contains(summary, "CREWAI_AGENT_HANDOVER") {
 		t.Fatalf("summary should strip handoff marker, got %q", summary)
 	}
 }
