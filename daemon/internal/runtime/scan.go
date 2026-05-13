@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"strings"
@@ -44,21 +45,25 @@ var localProviderSpecs = []providerSpec{
 func (LocalScanner) Scan(ctx context.Context) ([]model.RuntimeRecord, error) {
 	now := time.Now().UTC()
 	records := make([]model.RuntimeRecord, 0, len(localProviderSpecs))
+	debug := daemonDebugEnabled()
+	runtimeScanDebugf(debug, "start providers=%d PATH=%q", len(localProviderSpecs), os.Getenv("PATH"))
 	for _, spec := range localProviderSpecs {
-		bin := firstNonEmpty(
-			strings.TrimSpace(os.Getenv(spec.PathEnv)),
-			strings.TrimSpace(os.Getenv(spec.LegacyEnv)),
-			spec.DefaultBin,
-		)
+		bin, source := runtimePathCandidate(spec)
+		runtimeScanDebugf(debug, "provider=%s candidate=%q source=%s", spec.Provider, bin, source)
 		resolved, err := exec.LookPath(bin)
 		if err != nil {
+			runtimeScanDebugf(debug, "provider=%s look_path=failed error=%q", spec.Provider, err.Error())
 			continue
 		}
+		runtimeScanDebugf(debug, "provider=%s look_path=ok resolved=%q", spec.Provider, resolved)
 		version, err := backendagent.DetectVersion(ctx, resolved)
 		if err != nil {
+			runtimeScanDebugf(debug, "provider=%s version=failed error=%q", spec.Provider, err.Error())
 			continue
 		}
+		runtimeScanDebugf(debug, "provider=%s version=ok detected=%q", spec.Provider, version)
 		if err := backendagent.CheckMinVersion(spec.Provider, version); err != nil {
+			runtimeScanDebugf(debug, "provider=%s min_version=failed error=%q", spec.Provider, err.Error())
 			continue
 		}
 		modelName := firstNonEmpty(
@@ -78,8 +83,45 @@ func (LocalScanner) Scan(ctx context.Context) ([]model.RuntimeRecord, error) {
 			},
 		}
 		records = append(records, record)
+		runtimeScanDebugf(debug, "provider=%s available binary=%q version=%q model_set=%t", spec.Provider, resolved, version, modelName != "")
 	}
+	runtimeScanDebugf(debug, "done found=%d", len(records))
 	return records, nil
+}
+
+func runtimePathCandidate(spec providerSpec) (string, string) {
+	if value := strings.TrimSpace(os.Getenv(spec.PathEnv)); value != "" {
+		return value, spec.PathEnv
+	}
+	if value := strings.TrimSpace(os.Getenv(spec.LegacyEnv)); value != "" {
+		return value, spec.LegacyEnv
+	}
+	return spec.DefaultBin, "default"
+}
+
+func daemonDebugEnabled() bool {
+	for _, name := range []string{"daemon_debug", "DAEMON_DEBUG", "CREWAI_DAEMON_DEBUG"} {
+		if envTruthy(os.Getenv(name)) {
+			return true
+		}
+	}
+	return false
+}
+
+func envTruthy(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "", "0", "false", "no", "off":
+		return false
+	default:
+		return true
+	}
+}
+
+func runtimeScanDebugf(enabled bool, format string, args ...any) {
+	if !enabled {
+		return
+	}
+	fmt.Fprintf(os.Stderr, "daemon_debug runtime_scan "+format+"\n", args...)
 }
 
 func displayRuntimeName(provider string) string {

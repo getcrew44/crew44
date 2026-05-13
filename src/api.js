@@ -75,6 +75,14 @@ export async function listProjects() {
   return data.items || [];
 }
 
+export async function getOnboardingStatus() {
+  return get('/onboarding');
+}
+
+export async function completeOnboarding() {
+  return post('/onboarding/complete', {});
+}
+
 export async function createProject(name, workdir, mainAgentId) {
   return post('/projects', { name, workdir, main_agent_id: mainAgentId });
 }

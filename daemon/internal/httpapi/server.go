@@ -53,6 +53,9 @@ func (s *Server) routes() {
 		writeJSON(w, http.StatusOK, map[string]any{"status": "ok"})
 	})
 
+	s.mux.HandleFunc("GET /api/onboarding", s.handleGetOnboarding)
+	s.mux.HandleFunc("POST /api/onboarding/complete", s.handleCompleteOnboarding)
+
 	s.mux.HandleFunc("GET /api/runtimes", s.handleListRuntimes)
 	s.mux.HandleFunc("POST /api/runtimes/rescan", s.handleRescanRuntimes)
 	s.mux.HandleFunc("GET /api/runtimes/{id}", s.handleGetRuntime)

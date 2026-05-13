@@ -110,6 +110,69 @@ func TestArchivedAgentsAreHiddenFromList(t *testing.T) {
 	}
 }
 
+func TestOnboardingStatusPersistsInAppState(t *testing.T) {
+	env := newTestEnv(t)
+
+	var status map[string]any
+	getJSON(t, env.server, "/api/onboarding", http.StatusOK, &status)
+	if status["onboarding_required"] != true {
+		t.Fatalf("expected onboarding to be required initially, got %#v", status)
+	}
+	if status["last_onboarding_version"] != "" {
+		t.Fatalf("expected empty initial onboarding version, got %#v", status["last_onboarding_version"])
+	}
+
+	postJSON(t, env.server, http.MethodPost, "/api/onboarding/complete", map[string]any{}, http.StatusOK, &status)
+	if status["onboarding_required"] != false {
+		t.Fatalf("expected onboarding to be complete, got %#v", status)
+	}
+	if status["last_onboarding_version"] == "" {
+		t.Fatalf("expected non-empty onboarding version after completion, got %#v", status)
+	}
+
+	raw, err := os.ReadFile(filepath.Join(env.stateDir, "app.json"))
+	if err != nil {
+		t.Fatalf("read app.json: %v", err)
+	}
+	if !strings.Contains(string(raw), `"last_onboarding_version"`) {
+		t.Fatalf("expected app.json to store last_onboarding_version, got %s", raw)
+	}
+
+	restarted := newServerForState(t, env.stateDir, env.scanner)
+	getJSON(t, restarted, "/api/onboarding", http.StatusOK, &status)
+	if status["onboarding_required"] != false {
+		t.Fatalf("expected completed onboarding to survive restart, got %#v", status)
+	}
+}
+
+func TestCorruptAppStateDoesNotRequireOnboarding(t *testing.T) {
+	env := newTestEnv(t)
+	if err := os.WriteFile(filepath.Join(env.stateDir, "app.json"), []byte("{not-json"), 0o644); err != nil {
+		t.Fatalf("write corrupt app.json: %v", err)
+	}
+
+	var status map[string]any
+	getJSON(t, env.server, "/api/onboarding", http.StatusOK, &status)
+	if status["onboarding_required"] != false {
+		t.Fatalf("expected corrupt app state to be treated as already onboarded, got %#v", status)
+	}
+	if status["last_onboarding_version"] == "" {
+		t.Fatalf("expected non-empty onboarding version for corrupt app state, got %#v", status)
+	}
+
+	postJSON(t, env.server, http.MethodPost, "/api/onboarding/complete", map[string]any{}, http.StatusOK, &status)
+	if status["onboarding_required"] != false {
+		t.Fatalf("expected complete to overwrite corrupt app state, got %#v", status)
+	}
+	raw, err := os.ReadFile(filepath.Join(env.stateDir, "app.json"))
+	if err != nil {
+		t.Fatalf("read repaired app.json: %v", err)
+	}
+	if !json.Valid(raw) {
+		t.Fatalf("expected complete to rewrite valid app.json, got %s", raw)
+	}
+}
+
 func TestChatMessageReplayAndFollowSSE(t *testing.T) {
 	env := newTestEnv(t)
 	postJSON(t, env.server, http.MethodPost, "/api/runtimes/rescan", nil, http.StatusOK, nil)

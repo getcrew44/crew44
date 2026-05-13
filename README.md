@@ -115,6 +115,7 @@ Environment variables:
 | `AUTH_TOKEN`, `CREWAI_AUTH_TOKEN`, or `CREWAI_API_TOKEN` | empty | Optional bearer token. Empty enables development mode. |
 | `CREWAI_STATE_DIR` | `~/.crewai` | Root directory for persisted state. |
 | `CREWAI_RUNTIME_SCAN_DIR` | `$CREWAI_STATE_DIR/runtime-manifests` | Runtime manifest scan directory. |
+| `daemon_debug`, `DAEMON_DEBUG`, or `CREWAI_DAEMON_DEBUG` | empty | When truthy, prints runtime scan diagnostics to daemon stderr. |
 | `CREWAI_CLAUDE_PATH` | `claude` | Optional Claude executable override. |
 | `CREWAI_CODEX_PATH` | `codex` | Optional Codex executable override. |
 
@@ -239,6 +240,7 @@ Current storage layout:
 
 ```text
 ~/.crewai/
+  app.json
   runtimes.json
   agents/
   skills/
@@ -246,6 +248,18 @@ Current storage layout:
   chats/
   runtime-manifests/
 ```
+
+`app.json` stores app-level state such as `last_onboarding_version`. A missing
+or empty `last_onboarding_version` means onboarding is required; any non-empty
+value means onboarding has already been completed.
+
+In the desktop app, "New blank project" creates a real folder under the system
+Documents directory reported by Electron, at `Documents/CrewAI/<project-name>`.
+If the folder already exists, a numeric suffix is appended.
+
+TODO: corrupted `app.json` is currently treated as already onboarded because
+this path is rare and should not block app startup. Add an explicit repair/reset
+surface if app-state corruption becomes user-visible.
 
 ## Tests
 
