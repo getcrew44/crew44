@@ -1,0 +1,100 @@
+import { JsonRpcPeer } from "@/remote/rpc";
+import { Agent, BackendEvent, Chat, ChatIndexEntry, Project } from "./types";
+
+export class CrewApi {
+  constructor(private readonly rpc: JsonRpcPeer) {}
+
+  async listProjects(): Promise<Project[]> {
+    const data = await this.rpc.call<{ items?: Project[] }>("projects.list");
+    return data.items || [];
+  }
+
+  async listAgents(): Promise<Agent[]> {
+    const data = await this.rpc.call<{ items?: Agent[] }>("agents.list");
+    return data.items || [];
+  }
+
+  async listProjectChats(projectId: string): Promise<ChatIndexEntry[]> {
+    const data = await this.rpc.call<{ items?: ChatIndexEntry[] }>("projects.chats.list", { id: projectId });
+    return data.items || [];
+  }
+
+  async createChat(projectId: string, title: string, mainAgentId: string): Promise<Chat> {
+    return this.rpc.call<Chat>("chats.create", {
+      project_id: projectId,
+      title,
+      main_agent_id: mainAgentId
+    });
+  }
+
+  async getChat(id: string): Promise<Chat> {
+    return this.rpc.call<Chat>("chats.get", { id });
+  }
+
+  async listEvents(chatId: string, after = 0): Promise<BackendEvent[]> {
+    const data = await this.rpc.call<{ events?: BackendEvent[] }>("chats.events.list", {
+      chat_id: chatId,
+      after
+    });
+    return data.events || [];
+  }
+
+  async postMessage(chatId: string, content: string, targetAgentId: string): Promise<unknown> {
+    return this.rpc.call("chats.messages.post", {
+      id: chatId,
+      content,
+      target_agent_id: targetAgentId
+    });
+  }
+
+  async cancelChat(chatId: string): Promise<unknown> {
+    return this.rpc.call("chats.cancel", { id: chatId });
+  }
+
+  subscribeChatEvents(
+    chatId: string,
+    after: number,
+    onEvent: (event: BackendEvent) => void,
+    onDone: () => void,
+    onError: (err: Error) => void
+  ): () => void {
+    let disposed = false;
+    let subscriptionId = "";
+    const cleanups = [
+      this.rpc.on("chat.event", params => {
+        const body = params as { subscription_id?: string; chat_id?: string; event?: BackendEvent };
+        if (subscriptionId ? body.subscription_id !== subscriptionId : body.chat_id !== chatId) return;
+        if (body.event) onEvent(body.event);
+      }),
+      this.rpc.on("chat.done", params => {
+        const body = params as { subscription_id?: string; chat_id?: string };
+        if (subscriptionId ? body.subscription_id !== subscriptionId : body.chat_id !== chatId) return;
+        onDone();
+      }),
+      this.rpc.on("chat.error", params => {
+        const body = params as { subscription_id?: string; chat_id?: string; message?: string };
+        if (subscriptionId ? body.subscription_id !== subscriptionId : body.chat_id !== chatId) return;
+        onError(new Error(body.message || "Chat stream failed"));
+      })
+    ];
+
+    this.rpc.call<{ subscription_id: string }>("chats.events.subscribe", { chat_id: chatId, after })
+      .then(result => {
+        subscriptionId = result.subscription_id;
+        if (disposed && subscriptionId) {
+          this.rpc.call("chats.events.unsubscribe", { subscription_id: subscriptionId }).catch(() => {});
+        }
+      })
+      .catch(err => {
+        if (!disposed) onError(err);
+      });
+
+    return () => {
+      disposed = true;
+      for (const cleanup of cleanups) cleanup();
+      if (subscriptionId) {
+        this.rpc.call("chats.events.unsubscribe", { subscription_id: subscriptionId }).catch(() => {});
+      }
+    };
+  }
+}

@@ -4,6 +4,7 @@ import TaskView from './TaskView.jsx';
 import CrewRoute from './CrewRoute.jsx';
 import NewTaskRoute from './NewTaskRoute.jsx';
 import OnboardingRoute from './OnboardingRoute.jsx';
+import PairMobileDialog from './PairMobileDialog.jsx';
 import { Icon } from './components.jsx';
 import { displayAgent, relativeTime, HUMAN_USER } from './utils.js';
 import * as api from './api.js';
@@ -149,6 +150,7 @@ export default function App() {
   const [backendOnline, setBackendOnline] = React.useState(false);
   const [toast, setToast] = React.useState(null);
   const [folderPathDialogOpen, setFolderPathDialogOpen] = React.useState(false);
+  const [pairMobileOpen, setPairMobileOpen] = React.useState(false);
   const [onboardingRequired, setOnboardingRequired] = React.useState(false);
   const [forceOnboarding, setForceOnboarding] = React.useState(false);
   const showToast = React.useCallback((msg) => setToast(msg), []);
@@ -446,6 +448,7 @@ export default function App() {
         }}
       />
     )}
+    {pairMobileOpen && <PairMobileDialog onClose={() => setPairMobileOpen(false)} />}
     <div style={{ width: '100%', height: '100%', display: 'flex', background: '#FAF5E8', overflow: 'hidden' }}>
       <Sidebar
         projects={sidebarProjects}
@@ -462,6 +465,7 @@ export default function App() {
         onCreateProject={handleCreateProject}
         onRemoveProject={handleRemoveProject}
         onResetOnboarding={resetOnboarding}
+        onPairMobile={() => setPairMobileOpen(true)}
       />
       <div style={{ flex: 1, minWidth: 0, height: '100%', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
         {content}

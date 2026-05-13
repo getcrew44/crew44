@@ -1,0 +1,26 @@
+{
+  "expo": {
+    "name": "CrewAI Mobile",
+    "slug": "crewai-mobile",
+    "scheme": "crewai-mobile",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "plugins": [
+      "expo-router",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Allow CrewAI Mobile to scan pairing QR codes."
+        }
+      ]
+    ],
+    "ios": {
+      "supportsTablet": true
+    },
+    "android": {
+      "edgeToEdgeEnabled": true
+    }
+  }
+}

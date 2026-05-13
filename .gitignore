@@ -3,6 +3,9 @@
 /crewai-server
 /crewai-daemon
 /node_modules/
+node_modules/
+/packages/*/.expo/
+/packages/*/dist/
 /dist/
 /.electron-app/
 .gstack/

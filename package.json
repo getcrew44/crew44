@@ -4,16 +4,24 @@
   "version": "0.1.0",
   "main": "electron/main.cjs",
   "type": "module",
+  "workspaces": [
+    "packages/*"
+  ],
   "scripts": {
     "dev": "mkdir -p bin && cd daemon && go build -o ../bin/crewai-daemon ./cmd/crewai-daemon && cd .. && node electron/scripts/dev.cjs",
     "build": "mkdir -p bin && cd daemon && go build -o ../bin/crewai-daemon ./cmd/crewai-daemon && cd .. && vite build && node electron/scripts/build.cjs",
     "web:dev": "node daemon/scripts/web-dev.cjs",
-    "test": "cd daemon && go test ./... && cd .. && vitest run",
+    "mobile:start": "npm --workspace=@crewai/mobile run start --",
+    "mobile:android": "npm --workspace=@crewai/mobile run android --",
+    "mobile:ios": "npm --workspace=@crewai/mobile run ios --",
+    "test:mobile": "npm --workspace=@crewai/mobile run test",
+    "test": "cd daemon && go test ./... && cd .. && vitest run && npm run test:mobile",
     "clean": "rm -rf bin dist .electron-app crewai-server crewai-daemon"
   },
   "dependencies": {
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1"
+    "qrcode.react": "^4.2.0",
+    "react": "19.1.0",
+    "react-dom": "19.1.0"
   },
   "devDependencies": {
     "@testing-library/jest-dom": "^6.9.1",
