@@ -12,6 +12,7 @@ import (
 	"github.com/sqtech/crew-ai/crewai-repo/internal/broker"
 	"github.com/sqtech/crew-ai/crewai-repo/internal/id"
 	"github.com/sqtech/crew-ai/crewai-repo/internal/model"
+	"github.com/sqtech/crew-ai/crewai-repo/internal/presets"
 	"github.com/sqtech/crew-ai/crewai-repo/internal/runtime"
 	"github.com/sqtech/crew-ai/crewai-repo/internal/store"
 )
@@ -32,9 +33,11 @@ type App struct {
 
 	mu      sync.Mutex
 	cancels map[string]context.CancelFunc
-}
 
-const defaultAgentInstruction = "You are the default CrewAI assistant. Be concise, helpful, and use tools when you need facts from the workspace."
+	// presetMu serializes seed/reset operations on the same preset so two
+	// concurrent API calls cannot create duplicate records.
+	presetMu sync.Mutex
+}
 
 func New(cfg Config) (*App, error) {
 	st, err := store.New(cfg.StateDir)
@@ -97,18 +100,7 @@ func (a *App) bootstrapDefaultState() error {
 		return nil
 	}
 
-	now := time.Now().UTC()
-	agent := model.AgentConfig{
-		ID:          id.New(),
-		Name:        "Default Agent",
-		Instruction: defaultAgentInstruction,
-		RuntimeID:   runtimeRecord.ID,
-		Model:       defaultRuntimeModel(runtimeRecord),
-		SkillIDs:    []string{},
-		CreatedAt:   now,
-		UpdatedAt:   now,
-	}
-	return a.store.SaveAgent(agent)
+	return presets.SeedDefaultCrew(a.store, runtimeRecord)
 }
 
 func pickDefaultRuntime(records []model.RuntimeRecord) (model.RuntimeRecord, bool) {
@@ -349,7 +341,16 @@ func (a *App) ReplaceAgentSkills(id string, skillIDs []string) (model.AgentConfi
 }
 
 func (a *App) ListSkills() ([]model.SkillRecord, error) {
-	return a.store.ListSkills()
+	skills, err := a.store.ListSkills()
+	if err != nil {
+		return nil, err
+	}
+	for i := range skills {
+		if skills[i].PresetKey != "" {
+			skills[i].Name = presets.SkillDisplayName(skills[i].PresetKey)
+		}
+	}
+	return skills, nil
 }
 
 func (a *App) GetSkill(id string) (model.SkillRecord, error) {
@@ -424,6 +425,63 @@ func (a *App) PutSkillFile(id, fileID, content string) error {
 
 func (a *App) DeleteSkillFile(id, fileID string) error {
 	return a.mapError(a.store.DeleteSkillFile(id, fileID))
+}
+
+// ListPresets returns the catalog of factory presets and whether each one
+// currently has a user copy.
+func (a *App) ListPresets() ([]presets.PresetView, error) {
+	return presets.ListPresetViews(a.store)
+}
+
+// SeedDefaultCrew is the manual-add path. Creates any missing default-crew
+// agents/skills, returns a per-key summary. Idempotent.
+func (a *App) SeedDefaultCrew() (presets.SeedResult, error) {
+	a.presetMu.Lock()
+	defer a.presetMu.Unlock()
+	runtimeRecord, err := a.pickAvailableRuntime()
+	if err != nil {
+		return presets.SeedResult{}, err
+	}
+	return presets.MergeDefaultCrew(a.store, runtimeRecord)
+}
+
+// ResetDefaultCrew resets every default-crew agent's instruction, name,
+// skill_ids, and preset skills (SKILL.md only) back to factory.
+func (a *App) ResetDefaultCrew() (presets.ResetResult, error) {
+	a.presetMu.Lock()
+	defer a.presetMu.Unlock()
+	runtimeRecord, err := a.pickAvailableRuntime()
+	if err != nil {
+		return presets.ResetResult{}, err
+	}
+	return presets.ResetDefaultCrew(a.store, runtimeRecord)
+}
+
+// ResetAgentPreset resets one preset-backed agent. Returns ErrBadRequest if
+// the target agent has no preset metadata.
+func (a *App) ResetAgentPreset(agentID string) (presets.ResetResult, error) {
+	a.presetMu.Lock()
+	defer a.presetMu.Unlock()
+	runtimeRecord, err := a.pickAvailableRuntime()
+	if err != nil {
+		return presets.ResetResult{}, err
+	}
+	result, err := presets.ResetAgentPreset(a.store, agentID, runtimeRecord)
+	if err == presets.ErrNotPreset {
+		return presets.ResetResult{}, ErrBadRequest
+	}
+	return result, a.mapError(err)
+}
+
+func (a *App) pickAvailableRuntime() (model.RuntimeRecord, error) {
+	runtimes, err := a.store.ListRuntimes()
+	if err != nil {
+		return model.RuntimeRecord{}, err
+	}
+	if record, ok := pickDefaultRuntime(runtimes); ok {
+		return record, nil
+	}
+	return model.RuntimeRecord{}, ErrConflict
 }
 
 func (a *App) resolveAgentSkills(skillIDs []string) ([]runtime.SkillContext, error) {

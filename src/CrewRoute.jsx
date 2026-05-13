@@ -7,6 +7,12 @@ const CONTENT_MAX_WIDTH = 720;
 
 // ─── Atoms ────────────────────────────────────────────────────────────────────
 
+function relativeTimeAgo(isoString) {
+  const value = relativeTime(isoString);
+  if (!value) return '';
+  return value === 'just now' ? value : `${value} ago`;
+}
+
 function StatusDot({ on }) {
   return (
     <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12.5, color: on ? '#3E7A4A' : '#A89F92' }}>
@@ -123,9 +129,56 @@ function RuntimesSection({ runtimes, onDataRefresh, onToast }) {
 
 // ─── Skills ───────────────────────────────────────────────────────────────────
 
-function SkillsSection({ skills, agentsMap }) {
+function AgentChip({ agent, onClick }) {
+  const clickable = !!onClick;
+  return (
+    <span
+      onClick={clickable ? (e) => { e.stopPropagation(); onClick(); } : undefined}
+      role={clickable ? 'button' : undefined}
+      tabIndex={clickable ? 0 : undefined}
+      style={{
+        display: 'inline-flex', alignItems: 'center', gap: 5,
+        padding: '2px 8px 2px 2px', borderRadius: 999,
+        background: '#FCFAF1', border: '1px solid #ECE6D5',
+        fontSize: 12, color: '#1C1A17', maxWidth: '100%',
+        cursor: clickable ? 'pointer' : 'default',
+      }}
+      title={agent.name}
+    >
+      <span style={{
+        width: 16, height: 16, borderRadius: '50%',
+        background: agent.color, color: '#FCFBF7',
+        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+        fontSize: 9, fontWeight: 600, flexShrink: 0,
+      }}>{agent.initial}</span>
+      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        {agent.name}
+      </span>
+    </span>
+  );
+}
+
+function UsedByCell({ usedBy }) {
+  if (usedBy.length === 0) {
+    return <span style={{ color: '#A89F92', fontSize: 12.5 }}>— Unused</span>;
+  }
+  const MAX_INLINE = 2;
+  const visible = usedBy.slice(0, MAX_INLINE);
+  const overflow = usedBy.length - visible.length;
+  const overflowTitle = usedBy.slice(MAX_INLINE).map(a => a.name).join(', ');
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, flexWrap: 'wrap', minWidth: 0 }}>
+      {visible.map(a => <AgentChip key={a.id} agent={a} />)}
+      {overflow > 0 && (
+        <span title={overflowTitle} style={{ color: '#807972', fontSize: 12 }}>+{overflow}</span>
+      )}
+    </span>
+  );
+}
+
+function SkillsSection({ skills, agentsMap, onOpenSkill }) {
   const [filter, setFilter] = React.useState('all');
-  const grid = '1.8fr 1fr 0.6fr 24px';
+  const grid = '1.4fr 1.6fr 0.6fr 24px';
 
   const agentsArray = Object.values(agentsMap).filter(a => a.kind === 'agent');
 
@@ -178,26 +231,21 @@ function SkillsSection({ skills, agentsMap }) {
         {filtered.map(s => {
           const usedBy = skillUsedBy[s.id] || [];
           return (
-            <div key={s.id} style={{ ...tableRow, gridTemplateColumns: grid, cursor: 'pointer' }}
+            <div
+              key={s.id}
+              role="button"
+              tabIndex={0}
+              onClick={() => onOpenSkill?.(s)}
+              onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpenSkill?.(s); } }}
+              style={{ ...tableRow, gridTemplateColumns: grid, cursor: 'pointer' }}
               onMouseEnter={e => e.currentTarget.style.background = '#FAF5E8'}
-              onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+              onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+            >
               <span>
                 <div style={{ fontWeight: 500, marginBottom: 2 }}>{s.name}</div>
               </span>
-              <span>
-                {usedBy.length === 0
-                  ? <span style={{ color: '#A89F92', fontSize: 12.5 }}>— Unused</span>
-                  : <span style={{ display: 'inline-flex', gap: 4, alignItems: 'center' }}>
-                      {usedBy.map(a => (
-                        <div key={a.id} title={a.name} style={{
-                          width: 18, height: 18, borderRadius: '50%',
-                          background: a.color, color: '#FCFBF7',
-                          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                          fontSize: 9, fontWeight: 600,
-                        }}>{a.initial}</div>
-                      ))}
-                      <span style={{ color: '#807972', fontSize: 12, marginLeft: 4 }}>{usedBy.length}</span>
-                    </span>}
+              <span style={{ minWidth: 0 }}>
+                <UsedByCell usedBy={usedBy} />
               </span>
               <span style={{ color: '#807972', fontSize: 12.5 }}>{relativeTime(s.updated_at)}</span>
               <span style={{ color: '#A89F92', textAlign: 'right' }}>›</span>
@@ -206,6 +254,113 @@ function SkillsSection({ skills, agentsMap }) {
         })}
       </div>
     </section>
+  );
+}
+
+// ─── Skill detail dialog ──────────────────────────────────────────────────────
+
+function SkillDetailDialog({ skill, agentsMap, onClose }) {
+  const [files, setFiles] = React.useState(null);
+  const [loadError, setLoadError] = React.useState(null);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    setFiles(null);
+    setLoadError(null);
+    api.listSkillFiles(skill.id)
+      .then(items => { if (!cancelled) setFiles(items || []); })
+      .catch(err => { if (!cancelled) setLoadError(err?.message || 'Failed to load files.'); });
+    return () => { cancelled = true; };
+  }, [skill.id]);
+
+  const usedBy = React.useMemo(() => {
+    return Object.values(agentsMap)
+      .filter(a => a.kind === 'agent' && (a.skill_ids || []).includes(skill.id));
+  }, [agentsMap, skill.id]);
+
+  React.useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape') onClose?.(); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  return (
+    <div style={dialogBackdrop} onClick={onClose}>
+      <div role="dialog" aria-modal="true" aria-label={`Skill ${skill.name}`}
+        style={{ ...dialogSurface, width: 'min(640px, 100%)', maxHeight: '82vh', display: 'flex', flexDirection: 'column' }}
+        onClick={e => e.stopPropagation()}>
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, marginBottom: 12 }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 16, fontWeight: 650, color: '#1C1A17', wordBreak: 'break-word' }}>{skill.name}</div>
+            {skill.path && (
+              <div style={{ fontSize: 12, color: '#807972', fontFamily: MONO_FONT, marginTop: 4, wordBreak: 'break-all' }}>
+                {skill.path}
+              </div>
+            )}
+            <div style={{ fontSize: 12.5, color: '#807972', marginTop: 6 }}>
+              Updated {relativeTimeAgo(skill.updated_at) || '—'}
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            aria-label="Close"
+            style={{
+              border: 'none', background: 'transparent', color: '#807972',
+              cursor: 'pointer', fontSize: 18, lineHeight: 1, padding: 4, marginTop: -4, marginRight: -4,
+            }}
+          >×</button>
+        </div>
+
+        <div style={{ marginBottom: 14 }}>
+          <div style={{ fontSize: 11.5, color: '#A89F92', textTransform: 'uppercase', letterSpacing: 0.4, fontWeight: 500, marginBottom: 6 }}>
+            Used by <span style={{ color: '#807972' }}>{usedBy.length}</span>
+          </div>
+          {usedBy.length === 0 ? (
+            <div style={{ fontSize: 12.5, color: '#A89F92', fontStyle: 'italic' }}>No agents are using this skill.</div>
+          ) : (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+              {usedBy.map(a => <AgentChip key={a.id} agent={a} />)}
+            </div>
+          )}
+        </div>
+
+        <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+          <div style={{ fontSize: 11.5, color: '#A89F92', textTransform: 'uppercase', letterSpacing: 0.4, fontWeight: 500, marginBottom: 6 }}>
+            Instructions
+          </div>
+          <div style={{
+            ...card, padding: 0, flex: 1, minHeight: 120, maxHeight: '46vh', overflow: 'auto',
+          }}>
+            {files === null && !loadError && (
+              <div style={{ padding: '14px 16px', fontSize: 12.5, color: '#A89F92', fontStyle: 'italic' }}>Loading…</div>
+            )}
+            {loadError && (
+              <div style={{ padding: '14px 16px', fontSize: 12.5, color: '#C4644A' }}>{loadError}</div>
+            )}
+            {files && files.length === 0 && !loadError && (
+              <div style={{ padding: '14px 16px', fontSize: 12.5, color: '#A89F92', fontStyle: 'italic' }}>
+                No instruction files for this skill.
+              </div>
+            )}
+            {files && files.map(f => (
+              <div key={f.id} style={{ borderBottom: '1px solid #ECE6D5' }}>
+                <div style={{ padding: '8px 14px', fontFamily: MONO_FONT, fontSize: 11.5, color: '#807972', background: '#FAF5E8' }}>
+                  {f.id}
+                </div>
+                <pre style={{
+                  margin: 0, padding: '12px 14px', fontFamily: MONO_FONT, fontSize: 12,
+                  color: '#1C1A17', lineHeight: 1.55, whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+                }}>{f.content}</pre>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 16 }}>
+          <button onClick={onClose} style={ghostBtn}>Close</button>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -484,7 +639,7 @@ function MenuRow({ icon, label, danger, onClick }) {
   );
 }
 
-function AgentMenu({ onRename, onDelete, onClose }) {
+function AgentMenu({ isPreset, onRename, onResetPreset, onDelete, onClose }) {
   const ref = React.useRef(null);
 
   React.useEffect(() => {
@@ -499,6 +654,14 @@ function AgentMenu({ onRename, onDelete, onClose }) {
       icon: <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M2 10.5l.8-3 6-6a1.2 1.2 0 0 1 1.7 1.7l-6 6-2.5.3z" stroke="currentColor" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round"/></svg>,
       action: () => { onClose(); onRename?.(); },
     },
+    ...(isPreset ? [
+      { divider: true },
+      {
+        label: 'Reset to factory version',
+        icon: <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M2.5 4.5a4 4 0 1 1-.4 4M2.5 2.5v2h2" stroke="currentColor" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round"/></svg>,
+        action: () => { onClose(); onResetPreset?.(); },
+      },
+    ] : []),
     { divider: true },
     {
       label: 'Remove',
@@ -528,12 +691,25 @@ function AgentMenu({ onRename, onDelete, onClose }) {
 
 // ─── Agents grid ──────────────────────────────────────────────────────────────
 
-function AgentsSection({ agents, runtimes, onPickAgent, onDataRefresh }) {
+function AgentsSection({ agents, runtimes, onPickAgent, onDataRefresh, onToast }) {
   const runtimeMap = Object.fromEntries(runtimes.map(r => [r.id, r]));
   const [menuOpenId, setMenuOpenId] = React.useState(null);
   const [renameFor, setRenameFor] = React.useState(null);
   const [deleteFor, setDeleteFor] = React.useState(null);
+  const [resetFor, setResetFor] = React.useState(null);
   const [showCreate, setShowCreate] = React.useState(false);
+  const [presets, setPresets] = React.useState([]);
+  const [seedBusy, setSeedBusy] = React.useState(false);
+  const [resetBusy, setResetBusy] = React.useState(false);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    api.listPresets().then(items => { if (!cancelled) setPresets(items); }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [agents]);
+
+  const missingPresets = presets.filter(p => !p.has_copy);
+  const hasMissingPresets = missingPresets.length > 0;
 
   const handleCreate = async ({ name, runtime_id, model }) => {
     await api.createAgent(name, '', runtime_id, model || '');
@@ -553,12 +729,61 @@ function AgentsSection({ agents, runtimes, onPickAgent, onDataRefresh }) {
     onDataRefresh?.();
   };
 
+  const handleSeed = async () => {
+    setSeedBusy(true);
+    try {
+      const result = await api.seedDefaultCrew();
+      const created = (result?.created_agents || []).length;
+      const skipped = (result?.skipped_agents || []).length;
+      if (created === 0 && skipped > 0) {
+        onToast?.('Starter crew already present.');
+      } else {
+        onToast?.(`Added ${created} starter agent${created === 1 ? '' : 's'}.`);
+      }
+      onDataRefresh?.();
+    } catch (e) {
+      onToast?.('Could not add starter crew. Try again.');
+    } finally {
+      setSeedBusy(false);
+    }
+  };
+
+  const handleResetAgent = async () => {
+    if (!resetFor) return;
+    setResetBusy(true);
+    try {
+      await api.resetAgentPreset(resetFor.id);
+      onToast?.(`Reset "${resetFor.name}" to factory version.`);
+      setResetFor(null);
+      onDataRefresh?.();
+    } catch (e) {
+      onToast?.('Reset failed. Try again.');
+    } finally {
+      setResetBusy(false);
+    }
+  };
+
+  const headerAction = (
+    <div style={{ display: 'flex', gap: 8 }}>
+      {hasMissingPresets && (
+        <button
+          style={{ ...primaryBtn, background: '#FCFAF1', color: '#5C544B', border: '1px solid #ECE6D5' }}
+          onClick={handleSeed}
+          disabled={seedBusy}
+        >
+          {seedBusy ? 'Adding…' : '+ Add starter crew'}
+        </button>
+      )}
+      <button style={primaryBtn} onClick={() => setShowCreate(true)}>+ New agent</button>
+    </div>
+  );
+
   return (
     <section>
       <SectionHeader
         icon="agents" title="Agents" count={agents.length}
         hint="· the crew"
-        action={<button style={primaryBtn} onClick={() => setShowCreate(true)}>+ New agent</button>}
+        action={headerAction}
       />
       {agents.length === 0 && (
         <div style={{ fontSize: 13, color: '#A89F92', fontStyle: 'italic', padding: '8px 0' }}>
@@ -576,30 +801,35 @@ function AgentsSection({ agents, runtimes, onPickAgent, onDataRefresh }) {
             <div key={a.id}
               onClick={() => onPickAgent(a.id)}
               style={{
-                ...card, padding: '22px 22px 18px', cursor: 'pointer',
-                display: 'flex', flexDirection: 'column', gap: 16,
-                transition: 'background 0.12s, border-color 0.12s, transform 0.12s',
+                ...card, padding: '22px 22px 16px', cursor: 'pointer',
+                display: 'flex', flexDirection: 'column', gap: 18,
+                transition: 'background 0.12s, border-color 0.12s, transform 0.12s, box-shadow 0.12s',
                 minHeight: 132, position: 'relative',
+                boxShadow: '0 8px 22px rgba(92, 84, 75, 0.035)',
               }}
               onMouseEnter={e => {
                 e.currentTarget.style.background = '#FAF5E8';
                 e.currentTarget.style.borderColor = '#DCD3BC';
+                e.currentTarget.style.transform = 'translateY(-1px)';
+                e.currentTarget.style.boxShadow = '0 12px 28px rgba(92, 84, 75, 0.06)';
               }}
               onMouseLeave={e => {
                 e.currentTarget.style.background = '#FCFAF1';
                 e.currentTarget.style.borderColor = '#ECE6D5';
+                e.currentTarget.style.transform = 'translateY(0)';
+                e.currentTarget.style.boxShadow = '0 8px 22px rgba(92, 84, 75, 0.035)';
               }}
             >
-              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 14 }}>
-                <Avatar agent={a} size={44} />
+              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 16 }}>
+                <Avatar agent={a} size={48} />
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{
-                    fontSize: 15.5, fontWeight: 600, color: '#1C1A17',
+                    fontSize: 16.5, fontWeight: 600, color: '#1C1A17',
                     letterSpacing: -0.1, lineHeight: 1.25,
                     overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                   }}>{a.name}</div>
-                  <div style={{ fontSize: 12.5, color: '#A89F92', marginTop: 3 }}>
-                    {a.updated_at ? `Updated ${relativeTime(a.updated_at)} ago` : 'Never updated'}
+                  <div style={{ fontSize: 13, color: '#A89F92', marginTop: 4, fontWeight: 500 }}>
+                    {a.updated_at ? `Updated ${relativeTimeAgo(a.updated_at)}` : 'Never updated'}
                   </div>
                 </div>
                 <div style={{ position: 'relative' }} onClick={e => e.stopPropagation()}>
@@ -631,8 +861,10 @@ function AgentsSection({ agents, runtimes, onPickAgent, onDataRefresh }) {
                   </button>
                   {menuOpen && (
                     <AgentMenu
+                      isPreset={!!a.preset_key}
                       onClose={() => setMenuOpenId(null)}
                       onRename={() => { setMenuOpenId(null); setRenameFor(a); }}
+                      onResetPreset={() => { setMenuOpenId(null); setResetFor(a); }}
                       onDelete={() => { setMenuOpenId(null); setDeleteFor(a); }}
                     />
                   )}
@@ -640,13 +872,15 @@ function AgentsSection({ agents, runtimes, onPickAgent, onDataRefresh }) {
               </div>
               <div style={{
                 display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                paddingTop: 12, borderTop: '1px solid #ECE6D5',
+                paddingTop: 14, borderTop: '1px solid #E9E1CE',
                 marginTop: 'auto',
               }}>
                 {rt ? (
-                  <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }} title={rt.name}>
-                    <RuntimeBadge engine={rt.provider || rt.name} />
-                    <span style={{ fontSize: 12.5, color: '#5C544B', fontWeight: 500 }}>
+                  <div style={{ display: 'inline-flex', alignItems: 'center', minWidth: 0 }} title={rt.name}>
+                    <span style={{
+                      fontSize: 12.5, color: '#807972', fontWeight: 500,
+                      overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                    }}>
                       {rt.name || rt.id}
                     </span>
                   </div>
@@ -685,13 +919,22 @@ function AgentsSection({ agents, runtimes, onPickAgent, onDataRefresh }) {
           onConfirm={handleDelete}
         />
       )}
+      {resetFor && (
+        <ConfirmDialog
+          title={`Reset ${resetFor.name} to factory version?`}
+          message={`This overwrites the agent's instructions, name, and assigned skills with the original factory definition. Any edits you made to this agent will be lost. Chats and history are kept.`}
+          confirmLabel={resetBusy ? 'Resetting…' : 'Reset to factory'}
+          onCancel={resetBusy ? undefined : () => setResetFor(null)}
+          onConfirm={handleResetAgent}
+        />
+      )}
     </section>
   );
 }
 
 // ─── Agent detail ─────────────────────────────────────────────────────────────
 
-function AgentDetail({ agent, skills, runtimes, agentsMap, onBack, onSave, onRefresh }) {
+function AgentDetail({ agent, skills, runtimes, agentsMap, onBack, onSave, onRefresh, onOpenSkill }) {
   const [tab, setTab] = React.useState('instructions');
   const [instruction, setInstruction] = React.useState(agent.instruction || '');
   const [saving, setSaving] = React.useState(false);
@@ -782,18 +1025,28 @@ function AgentDetail({ agent, skills, runtimes, agentsMap, onBack, onSave, onRef
                 />
               ) : (agent.runtime_id || '—')
             } />
-            <PropRow label="Created" value={relativeTime(agent.created_at) + ' ago'} />
-            <PropRow label="Updated" value={relativeTime(agent.updated_at) + ' ago'} />
+            <PropRow label="Created" value={relativeTimeAgo(agent.created_at)} />
+            <PropRow label="Updated" value={relativeTimeAgo(agent.updated_at)} />
 
             <div style={{ marginTop: 20, fontSize: 11.5, color: '#A89F92', textTransform: 'uppercase', letterSpacing: 0.4, fontWeight: 500, marginBottom: 8 }}>
               Skills <span style={{ color: '#807972' }}>{agentSkills.length}</span>
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
               {agentSkills.map(s => (
-                <div key={s.id} style={{
-                  padding: '6px 10px', borderRadius: 6, background: '#FCFAF1',
-                  border: '1px solid #ECE6D5', fontSize: 12.5,
-                }}>
+                <div
+                  key={s.id}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => onOpenSkill?.(s)}
+                  onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpenSkill?.(s); } }}
+                  style={{
+                    padding: '6px 10px', borderRadius: 6, background: '#FCFAF1',
+                    border: '1px solid #ECE6D5', fontSize: 12.5, cursor: 'pointer',
+                  }}
+                  onMouseEnter={e => { e.currentTarget.style.background = '#F4EDD8'; e.currentTarget.style.borderColor = '#DCD3BC'; }}
+                  onMouseLeave={e => { e.currentTarget.style.background = '#FCFAF1'; e.currentTarget.style.borderColor = '#ECE6D5'; }}
+                  title="View skill details"
+                >
                   <span style={{ fontFamily: MONO_FONT, fontSize: 11, color: '#5C544B' }}>{s.name}</span>
                 </div>
               ))}
@@ -872,7 +1125,14 @@ function AgentDetail({ agent, skills, runtimes, agentsMap, onBack, onSave, onRef
                       padding: '12px 16px', borderBottom: '1px solid #ECE6D5',
                       display: 'flex', alignItems: 'center', gap: 14,
                     }}>
-                      <div style={{ flex: 1 }}>
+                      <div
+                        role="button"
+                        tabIndex={0}
+                        onClick={() => onOpenSkill?.(s)}
+                        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpenSkill?.(s); } }}
+                        style={{ flex: 1, cursor: 'pointer' }}
+                        title="View skill details"
+                      >
                         <div style={{ fontSize: 13.5, fontWeight: 500, color: '#1C1A17' }}>{s.name}</div>
                       </div>
                       <Toggle on={on} onChange={(v) => handleToggleSkill(s.id, v)} />
@@ -927,22 +1187,36 @@ function CrewTabs({ tab, setTab }) {
 export default function CrewRoute({ agents, agentsMap, skills, runtimes, initialTab, onDataRefresh, onToast }) {
   const [tab, setTab] = React.useState(initialTab || 'agents');
   const [openAgentId, setOpenAgentId] = React.useState(null);
+  const [openSkillId, setOpenSkillId] = React.useState(null);
 
   React.useEffect(() => {
     if (initialTab) setTab(initialTab);
   }, [initialTab]);
 
+  const openSkill = openSkillId ? skills.find(s => s.id === openSkillId) : null;
+  const skillDialog = openSkill ? (
+    <SkillDetailDialog
+      skill={openSkill}
+      agentsMap={agentsMap}
+      onClose={() => setOpenSkillId(null)}
+    />
+  ) : null;
+
   const detail = openAgentId ? agents.find(a => a.id === openAgentId) : null;
   if (detail) return (
-    <AgentDetail
-      agent={detail}
-      skills={skills}
-      runtimes={runtimes}
-      agentsMap={agentsMap}
-      onBack={() => setOpenAgentId(null)}
-      onSave={() => { setOpenAgentId(null); onDataRefresh?.(); }}
-      onRefresh={() => onDataRefresh?.()}
-    />
+    <>
+      <AgentDetail
+        agent={detail}
+        skills={skills}
+        runtimes={runtimes}
+        agentsMap={agentsMap}
+        onBack={() => setOpenAgentId(null)}
+        onSave={() => { setOpenAgentId(null); onDataRefresh?.(); }}
+        onRefresh={() => onDataRefresh?.()}
+        onOpenSkill={(s) => setOpenSkillId(s.id)}
+      />
+      {skillDialog}
+    </>
   );
 
   const meta = CREW_TABS.find(t => t.key === tab);
@@ -960,10 +1234,11 @@ export default function CrewRoute({ agents, agentsMap, skills, runtimes, initial
         <h1 style={{ fontSize: 22, fontWeight: 600, margin: '0 0 4px', color: '#1C1A17', letterSpacing: -0.2 }}>Crew</h1>
         <div style={{ fontSize: 13, color: '#807972', marginBottom: 18 }}>{meta?.subtitle}</div>
         <CrewTabs tab={tab} setTab={setTab} />
-        {tab === 'agents'   && <AgentsSection agents={agents} runtimes={runtimes} onPickAgent={setOpenAgentId} onDataRefresh={onDataRefresh} />}
-        {tab === 'skills'   && <SkillsSection skills={skills} agentsMap={agentsMap} />}
+        {tab === 'agents'   && <AgentsSection agents={agents} runtimes={runtimes} onPickAgent={setOpenAgentId} onDataRefresh={onDataRefresh} onToast={onToast} />}
+        {tab === 'skills'   && <SkillsSection skills={skills} agentsMap={agentsMap} onOpenSkill={(s) => setOpenSkillId(s.id)} />}
         {tab === 'runtimes' && <RuntimesSection runtimes={runtimes} onDataRefresh={onDataRefresh} onToast={onToast} />}
       </div>
+      {skillDialog}
     </div>
   );
 }

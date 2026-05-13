@@ -42,6 +42,14 @@ export const DEFAULT_CREW = [
     instruction:
       'You are a product manager and UX reviewer. Evaluate work from the end-user perspective: clarity, flow, copy, edge cases, accessibility. Propose specific improvements rather than vague feedback. Bias toward shipping the smallest valuable slice.',
   },
+  {
+    key: 'designer',
+    name: 'Designer',
+    role: 'Interaction & visual review',
+    blurb: 'Looks at layout, interaction states, visual hierarchy, accessibility, and consistency before work ships.',
+    instruction:
+      'You are a product designer and interaction reviewer. Evaluate interfaces for layout, visual hierarchy, interaction states, accessibility, and consistency with the existing product. Give concrete design changes.',
+  },
 ];
 
 // ─── Shared atoms ────────────────────────────────────────────────────────────
@@ -505,7 +513,7 @@ function CrewStep({ onBack, onFinish, runtimes, creating, error }) {
       <StepTitle
         eyebrow="Step 3 of 3"
         title="Meet your starter crew."
-        body="We’ve drafted three agents to get you moving. Keep the ones you want — you can tweak instructions, attach skills, or add more from the Crew tab anytime."
+        body="We’ve drafted four agents to get you moving. Keep the ones you want — you can tweak instructions, attach skills, or add more from the Crew tab anytime."
       />
 
       <div style={{ display: 'grid', gap: 10, marginBottom: 18 }}>
@@ -588,13 +596,9 @@ export default function OnboardingRoute({ runtimes: initialRuntimes, onComplete,
   const handleFinish = async (chosen, runtimeId) => {
     setCreating(true);
     setError(null);
-    const resolvedRuntimeId =
-      runtimeId === AUTO_RUNTIME
-        ? (runtimes.find(r => r.status === 'available')?.id || runtimes[0]?.id || '')
-        : (runtimeId || '');
     try {
-      for (const member of chosen) {
-        await api.createAgent(member.name, member.instruction, resolvedRuntimeId, '');
+      if (chosen.length > 0) {
+        await api.seedDefaultCrew();
       }
       await Promise.resolve(onComplete?.());
     } catch (err) {

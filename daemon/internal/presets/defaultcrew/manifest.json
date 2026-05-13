@@ -1,0 +1,55 @@
+{
+  "preset_id": "default-crew",
+  "version": 1,
+  "agents": [
+    {
+      "preset_key": "partner",
+      "name": "Partner",
+      "instruction_file": "agents/partner.md",
+      "is_default": true,
+      "skill_refs": [
+        "partner/problem-framing",
+        "partner/handoff-routing"
+      ]
+    },
+    {
+      "preset_key": "coding",
+      "name": "Coding Agent",
+      "instruction_file": "agents/coding.md",
+      "is_default": false,
+      "skill_refs": [
+        "coding/brainstorming",
+        "coding/executing-plans",
+        "coding/finishing-a-development-branch",
+        "coding/receiving-code-review",
+        "coding/requesting-code-review",
+        "coding/systematic-debugging",
+        "coding/test-driven-development",
+        "coding/using-git-worktrees",
+        "coding/verification-before-completion",
+        "coding/writing-plans",
+        "coding/writing-skills"
+      ]
+    },
+    {
+      "preset_key": "product",
+      "name": "Product Agent",
+      "instruction_file": "agents/product.md",
+      "is_default": false,
+      "skill_refs": [
+        "product/product-review",
+        "product/requirements-shaping"
+      ]
+    },
+    {
+      "preset_key": "designer",
+      "name": "Designer",
+      "instruction_file": "agents/designer.md",
+      "is_default": false,
+      "skill_refs": [
+        "designer/interaction-review",
+        "designer/visual-system-review"
+      ]
+    }
+  ]
+}
