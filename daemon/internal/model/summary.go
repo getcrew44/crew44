@@ -1,24 +1,6 @@
 package model
 
-import (
-	"regexp"
-	"strings"
-)
-
-var handoffRe = regexp.MustCompile(`\^<CREWAI_HANDOFF>([0-9a-fA-F-]+)</CREWAI_HANDOFF>`)
-
-func ExtractHandoffTarget(content string) string {
-	match := handoffRe.FindStringSubmatch(content)
-	if len(match) != 2 {
-		return ""
-	}
-	return match[1]
-}
-
-func StripHandoffMarker(content string) string {
-	cleaned := handoffRe.ReplaceAllString(content, "")
-	return strings.TrimSpace(cleaned)
-}
+import "strings"
 
 func BuildChatSummary(events []Event) string {
 	if len(events) == 0 {
@@ -46,7 +28,7 @@ func BuildChatSummary(events []Event) string {
 			state.lastToolIdx = len(state.events)
 		}
 		if event.Type == EventTypeMessage && event.Message != nil && event.Message.Role == MessageRoleUser {
-			state.userMessages = append(state.userMessages, StripHandoffMarker(event.Message.Content))
+			state.userMessages = append(state.userMessages, StripAgentHandoverMarkers(event.Message.Content))
 		}
 		state.events = append(state.events, event)
 	}
@@ -65,7 +47,7 @@ func BuildChatSummary(events []Event) string {
 			if state.lastToolIdx >= 0 && i < state.lastToolIdx {
 				continue
 			}
-			content := StripHandoffMarker(event.Message.Content)
+			content := StripAgentHandoverMarkers(event.Message.Content)
 			if content != "" {
 				turns = append(turns, "Assistant("+event.ActorAgentID+"): "+content)
 			}

@@ -244,6 +244,7 @@ func TestChatResolvesAgentSkillsIntoRuntimeRequest(t *testing.T) {
 	postJSON(t, env.server, http.MethodPost, "/api/runtimes/rescan", nil, http.StatusOK, nil)
 
 	agentID := createAgent(t, env, "Aria")
+	otherAgentID := createAgent(t, env, "Bex")
 	var skill map[string]any
 	postJSON(t, env.server, http.MethodPost, "/api/skills", map[string]any{
 		"name": "Review Helper",
@@ -283,6 +284,11 @@ func TestChatResolvesAgentSkillsIntoRuntimeRequest(t *testing.T) {
 		}
 		if req.RuntimeEnvDir == "" {
 			t.Fatalf("expected runtime env dir")
+		}
+		if !strings.Contains(req.Agent.Instruction, "Available agents for handover") ||
+			!strings.Contains(req.Agent.Instruction, model.AgentHandoverMarkerExample) ||
+			!strings.Contains(req.Agent.Instruction, otherAgentID) {
+			t.Fatalf("expected runtime agent instruction to include handover agent list, got %q", req.Agent.Instruction)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for runtime request")
@@ -339,7 +345,7 @@ func TestChatSwitchAgentRebuildsSummaryAndSupportsHandoff(t *testing.T) {
 	waitForChatIdle(t, env.server, chatID)
 
 	postJSON(t, env.server, http.MethodPost, fmt.Sprintf("/api/chat/sessions/%s/messages", chatID), map[string]any{
-		"content":         fmt.Sprintf("/tool /handoff:%s second pass", agentB),
+		"content":         fmt.Sprintf("/tool /handover:%s second pass", agentB),
 		"target_agent_id": agentA,
 	}, http.StatusAccepted, nil)
 	waitForChatIdle(t, env.server, chatID)
@@ -353,7 +359,7 @@ func TestChatSwitchAgentRebuildsSummaryAndSupportsHandoff(t *testing.T) {
 	if !strings.Contains(summary, "first pass") {
 		t.Fatalf("summary should contain earlier user message, got %q", summary)
 	}
-	if strings.Contains(summary, "<CREWAI_HANDOFF>") {
+	if strings.Contains(summary, "CREWAI_AGENT_HANDOVER") {
 		t.Fatalf("summary should not keep handoff marker, got %q", summary)
 	}
 
@@ -361,6 +367,180 @@ func TestChatSwitchAgentRebuildsSummaryAndSupportsHandoff(t *testing.T) {
 	getJSON(t, env.server, fmt.Sprintf("/api/chat/sessions/%s", chatID), http.StatusOK, &chat)
 	if chat["current_agent_id"] != agentB {
 		t.Fatalf("expected handoff to update current agent to %s, got %#v", agentB, chat["current_agent_id"])
+	}
+
+	var replay map[string]any
+	getJSON(t, env.server, fmt.Sprintf("/api/chat/sessions/%s/events?after=0", chatID), http.StatusOK, &replay)
+	replayBytes, _ := json.Marshal(replay)
+	replayText := string(replayBytes)
+	if strings.Contains(replayText, "CREWAI_AGENT_HANDOVER") {
+		t.Fatalf("persisted events should not keep handover marker, got %#v", replay)
+	}
+	if !strings.Contains(replayText, `"type":"handover"`) || !strings.Contains(replayText, `"subtype":"scheduled"`) || !strings.Contains(replayText, `"subtype":"occurred"`) {
+		t.Fatalf("expected scheduled and occurred handover events, got %#v", replay)
+	}
+	if !strings.Contains(replayText, `"note":"Continue the user's request."`) {
+		t.Fatalf("expected handover events to include marker note, got %#v", replay)
+	}
+}
+
+func TestHandoverUsesLastValidScheduledAgent(t *testing.T) {
+	engine := &multiHandoverEngine{}
+	env := newTestEnvWithEngine(t, engine)
+	postJSON(t, env.server, http.MethodPost, "/api/runtimes/rescan", nil, http.StatusOK, nil)
+
+	agentA := createAgent(t, env, "Aria")
+	agentB := createAgent(t, env, "Bex")
+	agentC := createAgent(t, env, "Cyra")
+	engine.targets = []string{agentB, agentC}
+	projectID := createProject(t, env, agentA)
+	chatID := createChat(t, env, projectID, agentA)
+
+	postJSON(t, env.server, http.MethodPost, fmt.Sprintf("/api/chat/sessions/%s/messages", chatID), map[string]any{
+		"content":         "choose the final handover target",
+		"target_agent_id": agentA,
+	}, http.StatusAccepted, nil)
+	waitForChatIdle(t, env.server, chatID)
+
+	var chat map[string]any
+	getJSON(t, env.server, fmt.Sprintf("/api/chat/sessions/%s", chatID), http.StatusOK, &chat)
+	if chat["current_agent_id"] != agentC {
+		t.Fatalf("expected last valid handover target %s, got %#v", agentC, chat["current_agent_id"])
+	}
+	if chat["pending_handover_agent_id"] != nil {
+		t.Fatalf("expected pending handover to be cleared, got %#v", chat["pending_handover_agent_id"])
+	}
+
+	var replay map[string]any
+	getJSON(t, env.server, fmt.Sprintf("/api/chat/sessions/%s/events?after=0", chatID), http.StatusOK, &replay)
+	replayBytes, _ := json.Marshal(replay)
+	replayText := string(replayBytes)
+	if strings.Count(replayText, `"subtype":"scheduled"`) != 2 {
+		t.Fatalf("expected both valid targets to emit scheduled events, got %#v", replay)
+	}
+	if strings.Count(replayText, `"subtype":"occurred"`) != 1 {
+		t.Fatalf("expected one occurred event for final target, got %#v", replay)
+	}
+}
+
+func TestMarkerOnlyHandoverPassesOriginalPromptToTarget(t *testing.T) {
+	engine := &markerOnlyHandoverEngine{}
+	env := newTestEnvWithEngine(t, engine)
+	postJSON(t, env.server, http.MethodPost, "/api/runtimes/rescan", nil, http.StatusOK, nil)
+
+	agentA := createAgent(t, env, "Aria")
+	agentB := createAgent(t, env, "Bex")
+	engine.target = agentB
+	projectID := createProject(t, env, agentA)
+	chatID := createChat(t, env, projectID, agentA)
+
+	postJSON(t, env.server, http.MethodPost, fmt.Sprintf("/api/chat/sessions/%s/messages", chatID), map[string]any{
+		"content":         "please tell me a short story",
+		"target_agent_id": agentA,
+	}, http.StatusAccepted, nil)
+	waitForChatIdle(t, env.server, chatID)
+
+	var replay map[string]any
+	getJSON(t, env.server, fmt.Sprintf("/api/chat/sessions/%s/events?after=0", chatID), http.StatusOK, &replay)
+	replayBytes, _ := json.Marshal(replay)
+	replayText := string(replayBytes)
+	if !strings.Contains(replayText, "target received: A previous agent handed this chat to you") || !strings.Contains(replayText, "please tell me a short story") || !strings.Contains(replayText, "Tell the requested story.") {
+		t.Fatalf("expected target agent to receive original prompt after marker-only handover, got %#v", replay)
+	}
+	if strings.Contains(replayText, "CREWAI_AGENT_HANDOVER") {
+		t.Fatalf("persisted events should strip marker-only handover marker, got %#v", replay)
+	}
+}
+
+func TestHandoverNotePreservesOriginalPromptForTarget(t *testing.T) {
+	engine := &noteHandoverEngine{}
+	env := newTestEnvWithEngine(t, engine)
+	postJSON(t, env.server, http.MethodPost, "/api/runtimes/rescan", nil, http.StatusOK, nil)
+
+	agentA := createAgent(t, env, "Aria")
+	agentB := createAgent(t, env, "Bex")
+	engine.target = agentB
+	projectID := createProject(t, env, agentA)
+	chatID := createChat(t, env, projectID, agentA)
+
+	postJSON(t, env.server, http.MethodPost, fmt.Sprintf("/api/chat/sessions/%s/messages", chatID), map[string]any{
+		"content":         "please write the requested file",
+		"target_agent_id": agentA,
+	}, http.StatusAccepted, nil)
+	waitForChatIdle(t, env.server, chatID)
+
+	var replay map[string]any
+	getJSON(t, env.server, fmt.Sprintf("/api/chat/sessions/%s/events?after=0", chatID), http.StatusOK, &replay)
+	replayBytes, _ := json.Marshal(replay)
+	replayText := string(replayBytes)
+	if !strings.Contains(replayText, "target saw original prompt") || !strings.Contains(replayText, "please write the requested file") {
+		t.Fatalf("expected target prompt to preserve original user request, got %#v", replay)
+	}
+	if !strings.Contains(replayText, "Handover note") || !strings.Contains(replayText, "Write the requested file") {
+		t.Fatalf("expected target prompt to include marker handover note, got %#v", replay)
+	}
+	if !strings.Contains(replayText, "Previous agent message") || !strings.Contains(replayText, "I will hand this to Bex") {
+		t.Fatalf("expected target prompt to include source agent message, got %#v", replay)
+	}
+}
+
+func TestInvalidHandoverTargetsAreStrippedWithoutScheduling(t *testing.T) {
+	scanner := &runtime.StaticScanner{
+		Records: []model.RuntimeRecord{
+			mockRuntimeRecord(),
+			{
+				ID:         "runtime-other",
+				Provider:   "mock",
+				Name:       "Other Mock Runtime",
+				Status:     model.RuntimeStatusAvailable,
+				BinaryPath: "builtin://mock-other",
+				Version:    "test",
+			},
+		},
+	}
+	engine := &invalidHandoverEngine{}
+	env := newTestEnvWithScannerAndEngine(t, scanner, engine)
+	postJSON(t, env.server, http.MethodPost, "/api/runtimes/rescan", nil, http.StatusOK, nil)
+
+	agentA := createAgent(t, env, "Aria")
+	archivedAgent := createAgent(t, env, "Archived")
+	postJSON(t, env.server, http.MethodPost, fmt.Sprintf("/api/agents/%s/archive", archivedAgent), nil, http.StatusOK, nil)
+
+	var missingRuntimeAgent map[string]any
+	postJSON(t, env.server, http.MethodPost, "/api/agents", map[string]any{
+		"name":        "Missing Runtime",
+		"instruction": "Be unavailable",
+		"runtime_id":  "runtime-other",
+		"model":       "mock-2",
+	}, http.StatusCreated, &missingRuntimeAgent)
+	scanner.Records = []model.RuntimeRecord{mockRuntimeRecord()}
+	postJSON(t, env.server, http.MethodPost, "/api/runtimes/rescan", nil, http.StatusOK, nil)
+
+	engine.targets = []string{archivedAgent, missingRuntimeAgent["id"].(string), agentA, "missing-agent"}
+	projectID := createProject(t, env, agentA)
+	chatID := createChat(t, env, projectID, agentA)
+
+	postJSON(t, env.server, http.MethodPost, fmt.Sprintf("/api/chat/sessions/%s/messages", chatID), map[string]any{
+		"content":         "invalid targets should not schedule",
+		"target_agent_id": agentA,
+	}, http.StatusAccepted, nil)
+	waitForChatIdle(t, env.server, chatID)
+
+	var chat map[string]any
+	getJSON(t, env.server, fmt.Sprintf("/api/chat/sessions/%s", chatID), http.StatusOK, &chat)
+	if chat["current_agent_id"] != agentA {
+		t.Fatalf("expected current agent to stay %s, got %#v", agentA, chat["current_agent_id"])
+	}
+
+	var replay map[string]any
+	getJSON(t, env.server, fmt.Sprintf("/api/chat/sessions/%s/events?after=0", chatID), http.StatusOK, &replay)
+	replayBytes, _ := json.Marshal(replay)
+	replayText := string(replayBytes)
+	if strings.Contains(replayText, `"type":"handover"`) {
+		t.Fatalf("expected invalid targets not to emit handover events, got %#v", replay)
+	}
+	if strings.Contains(replayText, "CREWAI_AGENT_HANDOVER") {
+		t.Fatalf("persisted events should strip invalid handover markers, got %#v", replay)
 	}
 }
 
@@ -509,9 +689,13 @@ func TestHandoffToCurrentAgentStopsLoop(t *testing.T) {
 
 	var replay map[string]any
 	getJSON(t, env.server, fmt.Sprintf("/api/chat/sessions/%s/events?after=0", chatID), http.StatusOK, &replay)
-	items, _ := replay["events"].([]any)
-	if len(items) != 3 {
-		t.Fatalf("expected loop guard to stop after one self-handoff, got %#v", replay)
+	replayBytes, _ := json.Marshal(replay)
+	replayText := string(replayBytes)
+	if strings.Count(replayText, `"type":"handover"`) != 2 {
+		t.Fatalf("expected only scheduled+occurred events for first handover, got %#v", replay)
+	}
+	if strings.Contains(replayText, "CREWAI_AGENT_HANDOVER") {
+		t.Fatalf("persisted events should not keep self-handover marker, got %#v", replay)
 	}
 
 	var chat map[string]any
@@ -649,6 +833,22 @@ type loopingHandoffEngine struct {
 	targetID string
 }
 
+type multiHandoverEngine struct {
+	targets []string
+}
+
+type invalidHandoverEngine struct {
+	targets []string
+}
+
+type markerOnlyHandoverEngine struct {
+	target string
+}
+
+type noteHandoverEngine struct {
+	target string
+}
+
 type captureRunRequestEngine struct {
 	requests chan runtime.RunRequest
 }
@@ -693,9 +893,9 @@ func (e *loopingHandoffEngine) Run(_ context.Context, request runtime.RunRequest
 	var content string
 	switch request.Agent.Name {
 	case "Aria":
-		content = "handoff to Bex ^<CREWAI_HANDOFF>" + e.targetID + "</CREWAI_HANDOFF>"
+		content = "handoff to Bex\n<CREWAI_AGENT_HANDOVER agent_id=\"" + e.targetID + "\">Continue the loop guard test.</CREWAI_AGENT_HANDOVER>"
 	default:
-		content = "repeat handoff ^<CREWAI_HANDOFF>" + request.Agent.ID + "</CREWAI_HANDOFF>"
+		content = "repeat handoff\n<CREWAI_AGENT_HANDOVER agent_id=\"" + request.Agent.ID + "\">Continue the loop guard test.</CREWAI_AGENT_HANDOVER>"
 	}
 	if err := emit(runtime.StreamEvent{
 		Type: model.EventTypeMessage,
@@ -707,6 +907,79 @@ func (e *loopingHandoffEngine) Run(_ context.Context, request runtime.RunRequest
 		return runtime.RunResult{}, err
 	}
 	return runtime.RunResult{SessionID: "loop-guard"}, nil
+}
+
+func (e *multiHandoverEngine) Run(_ context.Context, request runtime.RunRequest, emit func(runtime.StreamEvent) error) (runtime.RunResult, error) {
+	content := "received by " + request.Agent.Name
+	if request.Agent.Name == "Aria" {
+		var lines []string
+		lines = append(lines, "handover candidates")
+		for _, target := range e.targets {
+			lines = append(lines, "<CREWAI_AGENT_HANDOVER agent_id=\""+target+"\">Continue with this candidate.</CREWAI_AGENT_HANDOVER>")
+		}
+		content = strings.Join(lines, "\n")
+	}
+	if err := emit(runtime.StreamEvent{
+		Type: model.EventTypeMessage,
+		Message: &model.MessagePayload{
+			Role:    model.MessageRoleAssistant,
+			Content: content,
+		},
+	}); err != nil {
+		return runtime.RunResult{}, err
+	}
+	return runtime.RunResult{SessionID: "multi-handover"}, nil
+}
+
+func (e *invalidHandoverEngine) Run(_ context.Context, request runtime.RunRequest, emit func(runtime.StreamEvent) error) (runtime.RunResult, error) {
+	lines := []string{"invalid handover candidates"}
+	for _, target := range e.targets {
+		lines = append(lines, "<CREWAI_AGENT_HANDOVER agent_id=\""+target+"\">Try this invalid candidate.</CREWAI_AGENT_HANDOVER>")
+	}
+	if err := emit(runtime.StreamEvent{
+		Type: model.EventTypeMessage,
+		Message: &model.MessagePayload{
+			Role:    model.MessageRoleAssistant,
+			Content: strings.Join(lines, "\n"),
+		},
+	}); err != nil {
+		return runtime.RunResult{}, err
+	}
+	return runtime.RunResult{SessionID: "invalid-handover"}, nil
+}
+
+func (e *markerOnlyHandoverEngine) Run(_ context.Context, request runtime.RunRequest, emit func(runtime.StreamEvent) error) (runtime.RunResult, error) {
+	content := "<CREWAI_AGENT_HANDOVER agent_id=\"" + e.target + "\">Tell the requested story.</CREWAI_AGENT_HANDOVER>"
+	if request.Agent.Name != "Aria" {
+		content = "target received: " + request.Prompt
+	}
+	if err := emit(runtime.StreamEvent{
+		Type: model.EventTypeMessage,
+		Message: &model.MessagePayload{
+			Role:    model.MessageRoleAssistant,
+			Content: content,
+		},
+	}); err != nil {
+		return runtime.RunResult{}, err
+	}
+	return runtime.RunResult{SessionID: "marker-only-handover"}, nil
+}
+
+func (e *noteHandoverEngine) Run(_ context.Context, request runtime.RunRequest, emit func(runtime.StreamEvent) error) (runtime.RunResult, error) {
+	content := "I will hand this to Bex.\n<CREWAI_AGENT_HANDOVER agent_id=\"" + e.target + "\">Write the requested file.</CREWAI_AGENT_HANDOVER>"
+	if request.Agent.Name != "Aria" {
+		content = "target saw original prompt: " + request.Prompt
+	}
+	if err := emit(runtime.StreamEvent{
+		Type: model.EventTypeMessage,
+		Message: &model.MessagePayload{
+			Role:    model.MessageRoleAssistant,
+			Content: content,
+		},
+	}); err != nil {
+		return runtime.RunResult{}, err
+	}
+	return runtime.RunResult{SessionID: "note-handover"}, nil
 }
 
 func newServerForState(t *testing.T, stateDir string, scanner runtime.Scanner) http.Handler {

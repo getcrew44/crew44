@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"strings"
 
 	backendagent "github.com/sqtech/crew-ai/crewai-repo/internal/backendagent"
@@ -29,12 +28,7 @@ func (RealEngine) Run(ctx context.Context, request RunRequest, emit func(StreamE
 	systemPrompt := strings.TrimSpace(request.Agent.Instruction)
 	systemPrompt = appendSkillSummary(systemPrompt, request.Runtime.Provider, request.AgentSkills)
 	if request.SummaryPath != "" {
-		if summaryBytes, err := os.ReadFile(request.SummaryPath); err == nil {
-			summary := strings.TrimSpace(string(summaryBytes))
-			if summary != "" {
-				systemPrompt = strings.TrimSpace(systemPrompt + "\n\nConversation summary:\n" + summary)
-			}
-		}
+		systemPrompt = appendSummaryReference(systemPrompt, request.SummaryPath)
 	}
 
 	modelName := request.Agent.Model
@@ -89,6 +83,14 @@ func (RealEngine) Run(ctx context.Context, request RunRequest, emit func(StreamE
 			return RunResult{SessionID: result.SessionID}, nil
 		}
 	}
+}
+
+func appendSummaryReference(systemPrompt, summaryPath string) string {
+	summaryPath = strings.TrimSpace(summaryPath)
+	if summaryPath == "" {
+		return strings.TrimSpace(systemPrompt)
+	}
+	return strings.TrimSpace(systemPrompt + "\n\nConversation summary file:\n" + summaryPath + "\nRead this file if you need prior conversation context.")
 }
 
 func mapAgentMessage(msg backendagent.Message) (StreamEvent, bool) {

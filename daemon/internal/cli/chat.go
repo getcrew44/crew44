@@ -258,6 +258,12 @@ func printEvent(w io.Writer, event model.Event) error {
 		}
 		_, err := fmt.Fprintf(w, "[tool-result/%s] %s\n", event.ActorAgentID, event.ToolCallResult.Name)
 		return err
+	case model.EventTypeHandover:
+		if event.Handover == nil {
+			return nil
+		}
+		_, err := fmt.Fprintf(w, "[handover/%s] %s %s\n", event.Handover.Subtype, event.Handover.AgentID, event.Handover.AgentName)
+		return err
 	default:
 		return nil
 	}

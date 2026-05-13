@@ -113,6 +113,16 @@ func TestAppendSkillSummary(t *testing.T) {
 	}
 }
 
+func TestAppendSummaryReferenceUsesPathNotContent(t *testing.T) {
+	got := appendSummaryReference("Base instruction", "/tmp/chat-summary.md")
+	if !strings.Contains(got, "Base instruction") || !strings.Contains(got, "/tmp/chat-summary.md") {
+		t.Fatalf("summary reference missing content: %q", got)
+	}
+	if strings.Contains(got, "Conversation summary:\nUser:") {
+		t.Fatalf("summary reference should not inline summary content: %q", got)
+	}
+}
+
 func assertFileContains(t *testing.T, path, want string) {
 	t.Helper()
 	data, err := os.ReadFile(path)
