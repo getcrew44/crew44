@@ -245,7 +245,17 @@ func (a *App) UpdateRuntime(id string, patch map[string]any) (model.RuntimeRecor
 }
 
 func (a *App) ListAgents() ([]model.AgentConfig, error) {
-	return a.store.ListAgents()
+	agents, err := a.store.ListAgents()
+	if err != nil {
+		return nil, err
+	}
+	active := make([]model.AgentConfig, 0, len(agents))
+	for _, agent := range agents {
+		if agent.ArchivedAt.IsZero() {
+			active = append(active, agent)
+		}
+	}
+	return active, nil
 }
 
 func (a *App) GetAgent(id string) (model.AgentConfig, error) {

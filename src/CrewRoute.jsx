@@ -3,6 +3,8 @@ import { Avatar, Icon, Toggle, ghostBtn, primaryBtn, card, MONO_FONT, UI_FONT } 
 import { relativeTime } from './utils.js';
 import * as api from './api.js';
 
+const CONTENT_MAX_WIDTH = 720;
+
 // ─── Atoms ────────────────────────────────────────────────────────────────────
 
 function StatusDot({ on }) {
@@ -28,7 +30,7 @@ function RuntimeBadge({ engine }) {
 
 function PropRow({ label, value }) {
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: '90px 1fr', gap: 8, padding: '5px 0', fontSize: 13 }}>
+    <div style={{ display: 'grid', gridTemplateColumns: '90px 1fr', gap: 8, padding: '5px 0', fontSize: 13, alignItems: 'center' }}>
       <span style={{ color: '#807972' }}>{label}</span>
       <span style={{ color: '#1C1A17' }}>{value}</span>
     </div>
@@ -62,20 +64,41 @@ const tableRow = {
 
 // ─── Runtimes ─────────────────────────────────────────────────────────────────
 
-function RuntimesSection({ runtimes }) {
-  const grid = '1.4fr 0.8fr 0.6fr 1fr 24px';
+function RuntimesSection({ runtimes, onDataRefresh, onToast }) {
+  const [rescanning, setRescanning] = React.useState(false);
+  const grid = '1.4fr 0.8fr 0.6fr 1fr';
   const display = runtimes.length > 0 ? runtimes : [];
+
+  const handleRescan = async () => {
+    if (rescanning) return;
+    setRescanning(true);
+    try {
+      await api.rescanRuntimes();
+      await onDataRefresh?.();
+      onToast?.('Runtimes refreshed.');
+    } finally {
+      setRescanning(false);
+    }
+  };
 
   return (
     <section style={{ marginBottom: 28 }}>
       <SectionHeader
         icon="auto" title="Runtimes" count={display.length}
         hint="· environments your agents run in"
-        action={<button style={ghostBtn}>+ Add runtime</button>}
+        action={
+          <button
+            style={{ ...ghostBtn, opacity: rescanning ? 0.65 : 1, cursor: rescanning ? 'default' : 'pointer' }}
+            onClick={handleRescan}
+            disabled={rescanning}
+          >
+            {rescanning ? 'Scanning…' : 'Rescan'}
+          </button>
+        }
       />
       <div style={card}>
         <div style={{ ...tableHead, gridTemplateColumns: grid }}>
-          <span>Runtime</span><span>Health</span><span>Agents</span><span>CLI version</span><span />
+          <span>Runtime</span><span>Health</span><span>Agents</span><span>CLI version</span>
         </div>
         {display.length === 0 && (
           <div style={{ padding: '20px 16px', fontSize: 13, color: '#A89F92', fontStyle: 'italic' }}>
@@ -91,7 +114,6 @@ function RuntimesSection({ runtimes }) {
             <StatusDot on={r.status === 'available'} />
             <span style={{ color: '#A89F92' }}>—</span>
             <span style={{ fontFamily: MONO_FONT, fontSize: 12, color: '#5C544B' }}>{r.version || '—'}</span>
-            <span style={{ color: '#A89F92', cursor: 'pointer', textAlign: 'right' }}>···</span>
           </div>
         ))}
       </div>
@@ -187,17 +209,356 @@ function SkillsSection({ skills, agentsMap }) {
   );
 }
 
+// ─── Dialogs ──────────────────────────────────────────────────────────────────
+
+const dialogBackdrop = {
+  position: 'fixed', inset: 0, zIndex: 9999,
+  background: 'rgba(28,26,23,0.28)',
+  display: 'flex', alignItems: 'center', justifyContent: 'center',
+  padding: 24,
+};
+
+const dialogSurface = {
+  width: 'min(460px, 100%)',
+  background: '#FCFBF7',
+  border: '1px solid #E6DFCC',
+  borderRadius: 10,
+  boxShadow: '0 20px 60px rgba(28,26,23,0.22)',
+  padding: 20,
+};
+
+const inputStyle = {
+  width: '100%', boxSizing: 'border-box',
+  border: '1px solid #D8CFB8', borderRadius: 6,
+  background: '#FFFDF7', color: '#1C1A17',
+  fontSize: 13, padding: '9px 11px', outline: 'none',
+  fontFamily: UI_FONT,
+};
+
+function AgentFormDialog({ mode, initial, runtimes, onCancel, onSubmit }) {
+  const [name, setName] = React.useState(initial?.name || '');
+  const [runtimeId, setRuntimeId] = React.useState(initial?.runtime_id || runtimes[0]?.id || '');
+  const [model, setModel] = React.useState('');
+  const [submitting, setSubmitting] = React.useState(false);
+  const [error, setError] = React.useState(null);
+
+  const isCreate = mode === 'create';
+  const canSubmit = name.trim().length > 0 && (!isCreate || runtimeId);
+
+  const handleSubmit = async () => {
+    if (!canSubmit || submitting) return;
+    setSubmitting(true);
+    setError(null);
+    try {
+      await onSubmit({ name: name.trim(), runtime_id: runtimeId, model: model.trim() });
+    } catch (err) {
+      setError(err?.message || 'Something went wrong');
+      setSubmitting(false);
+    }
+  };
+
+  const runtimeOptions = runtimes.map(r => ({ value: r.id, label: r.name || r.id }));
+
+  return (
+    <div style={dialogBackdrop} onClick={onCancel}>
+      <div role="dialog" aria-modal="true" style={dialogSurface} onClick={e => e.stopPropagation()}>
+        <div style={{ fontSize: 16, fontWeight: 650, color: '#1C1A17', marginBottom: 4 }}>
+          {isCreate ? 'New agent' : 'Rename agent'}
+        </div>
+        <div style={{ fontSize: 13, color: '#807972', marginBottom: 16 }}>
+          {isCreate ? 'Give your agent a name, pick the runtime, and optionally a model.' : 'Choose a new name for this agent.'}
+        </div>
+
+        <label style={{ fontSize: 12, fontWeight: 500, color: '#5C544B', display: 'block', marginBottom: 6 }}>Name</label>
+        <input
+          autoFocus
+          value={name}
+          onChange={e => setName(e.target.value)}
+          onKeyDown={e => {
+            if (e.key === 'Enter' && canSubmit) handleSubmit();
+            if (e.key === 'Escape') onCancel();
+          }}
+          placeholder="e.g. Coding Agent"
+          style={{ ...inputStyle, marginBottom: isCreate ? 14 : 8 }}
+        />
+
+        {isCreate && (
+          <>
+            <label style={{ fontSize: 12, fontWeight: 500, color: '#5C544B', display: 'block', marginBottom: 6 }}>Runtime</label>
+            {runtimes.length === 0 ? (
+              <div style={{ fontSize: 12.5, color: '#A89F92', fontStyle: 'italic', marginBottom: 8 }}>
+                No runtimes available. Add one in the Runtimes tab first.
+              </div>
+            ) : (
+              <div style={{ marginBottom: 14 }}>
+                <CustomSelect
+                  value={runtimeId}
+                  options={runtimeOptions}
+                  onChange={setRuntimeId}
+                  placeholder="Pick a runtime…"
+                />
+              </div>
+            )}
+
+            <label style={{ fontSize: 12, fontWeight: 500, color: '#5C544B', display: 'block', marginBottom: 6 }}>Model</label>
+            <input
+              value={model}
+              onChange={e => setModel(e.target.value)}
+              onKeyDown={e => {
+                if (e.key === 'Enter' && canSubmit) handleSubmit();
+                if (e.key === 'Escape') onCancel();
+              }}
+              placeholder="Auto"
+              style={{ ...inputStyle, marginBottom: 4, fontFamily: MONO_FONT, fontSize: 12.5 }}
+            />
+            <div style={{ fontSize: 11.5, color: '#A89F92', marginBottom: 8 }}>
+              Leave blank to use the runtime's default model.
+            </div>
+          </>
+        )}
+
+        {error && (
+          <div style={{ fontSize: 12.5, color: '#C4644A', marginTop: 4, marginBottom: 4 }}>{error}</div>
+        )}
+
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 16 }}>
+          <button onClick={onCancel} style={ghostBtn}>Cancel</button>
+          <button
+            onClick={handleSubmit}
+            disabled={!canSubmit || submitting}
+            style={{
+              ...primaryBtn,
+              opacity: canSubmit && !submitting ? 1 : 0.6,
+              cursor: canSubmit && !submitting ? 'pointer' : 'default',
+            }}
+          >
+            {submitting ? (isCreate ? 'Creating…' : 'Saving…') : (isCreate ? 'Create agent' : 'Save')}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ConfirmDialog({ title, message, confirmLabel = 'Delete', danger = true, onCancel, onConfirm }) {
+  const [submitting, setSubmitting] = React.useState(false);
+  const handleConfirm = async () => {
+    setSubmitting(true);
+    try { await onConfirm(); } finally { setSubmitting(false); }
+  };
+  return (
+    <div style={dialogBackdrop} onClick={onCancel}>
+      <div role="dialog" aria-modal="true" style={dialogSurface} onClick={e => e.stopPropagation()}>
+        <div style={{ fontSize: 16, fontWeight: 650, color: '#1C1A17', marginBottom: 8 }}>{title}</div>
+        <div style={{ fontSize: 13, color: '#5C544B', lineHeight: 1.5, marginBottom: 18 }}>{message}</div>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+          <button onClick={onCancel} style={ghostBtn}>Cancel</button>
+          <button
+            onClick={handleConfirm}
+            disabled={submitting}
+            style={{
+              ...primaryBtn,
+              background: danger ? '#C4644A' : '#1C1A17',
+              borderColor: danger ? '#C4644A' : '#1C1A17',
+              opacity: submitting ? 0.7 : 1,
+            }}
+          >
+            {submitting ? 'Working…' : confirmLabel}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CustomSelect({ value, options, onChange, placeholder, disabled, size = 'md' }) {
+  const [open, setOpen] = React.useState(false);
+  const ref = React.useRef(null);
+
+  React.useEffect(() => {
+    if (!open) return;
+    const close = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener('mousedown', close);
+    return () => document.removeEventListener('mousedown', close);
+  }, [open]);
+
+  const selected = options.find(o => o.value === value);
+  const isCompact = size === 'sm';
+
+  return (
+    <div ref={ref} style={{ position: 'relative', width: '100%' }}>
+      <button
+        type="button"
+        onClick={() => !disabled && setOpen(v => !v)}
+        disabled={disabled}
+        style={{
+          width: '100%', boxSizing: 'border-box',
+          display: 'flex', alignItems: 'center', gap: 8,
+          border: '1px solid ' + (open ? '#C9BFA8' : '#E6DFCC'),
+          borderRadius: 6, background: '#FCFAF1', color: '#1C1A17',
+          fontSize: isCompact ? 12.5 : 13, fontFamily: UI_FONT,
+          padding: isCompact ? '4px 8px' : '8px 11px',
+          cursor: disabled ? 'default' : 'pointer',
+          outline: 'none', textAlign: 'left',
+          opacity: disabled ? 0.6 : 1,
+        }}
+      >
+        <span style={{
+          flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+          color: selected ? '#1C1A17' : '#A89F92',
+        }}>{selected ? selected.label : (placeholder || 'Select…')}</span>
+        <svg width="10" height="10" viewBox="0 0 10 10" fill="none" style={{ flexShrink: 0, color: '#807972' }}>
+          <path d="M2 4l3 3 3-3" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
+        </svg>
+      </button>
+      {open && (
+        <div style={{
+          position: 'absolute', top: 'calc(100% + 4px)', left: 0, right: 0, zIndex: 9999,
+          background: '#FFFFFF', borderRadius: 10,
+          boxShadow: '0 8px 24px rgba(0,0,0,0.14), 0 0 0 0.5px rgba(0,0,0,0.07)',
+          padding: 4, maxHeight: 240, overflowY: 'auto',
+          fontFamily: UI_FONT,
+        }}>
+          {options.length === 0 && (
+            <div style={{ padding: '7px 10px', fontSize: 12.5, color: '#A89F92', fontStyle: 'italic' }}>No options</div>
+          )}
+          {options.map(opt => (
+            <DropdownRow
+              key={opt.value}
+              label={opt.label}
+              hint={opt.hint}
+              selected={opt.value === value}
+              onClick={() => { onChange(opt.value); setOpen(false); }}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function DropdownRow({ label, hint, selected, onClick }) {
+  const [hover, setHover] = React.useState(false);
+  return (
+    <div
+      onClick={onClick}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      style={{
+        display: 'flex', alignItems: 'center', gap: 8,
+        padding: '7px 10px', borderRadius: 7, cursor: 'default',
+        background: hover ? '#F0EAD8' : 'transparent',
+        fontSize: 13, color: '#1C1A17',
+        userSelect: 'none',
+      }}
+    >
+      <span style={{ flex: 1, fontWeight: selected ? 500 : 400 }}>{label}</span>
+      {hint && <span style={{ fontSize: 12, color: '#A89F92' }}>{hint}</span>}
+      {selected && (
+        <svg width="12" height="12" viewBox="0 0 12 12" fill="none" style={{ color: '#5C544B' }}>
+          <path d="M2.5 6l2.5 2.5L9.5 3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
+        </svg>
+      )}
+    </div>
+  );
+}
+
+function MenuRow({ icon, label, danger, onClick }) {
+  const [hover, setHover] = React.useState(false);
+  return (
+    <div
+      onClick={onClick}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      style={{
+        display: 'flex', alignItems: 'center', gap: 8,
+        padding: '7px 10px', borderRadius: 7, cursor: 'default',
+        background: hover ? (danger ? '#FEF3EE' : '#F4F0E8') : 'transparent',
+        fontSize: 13, color: danger ? '#C4644A' : '#1C1A17',
+        userSelect: 'none',
+      }}
+    >
+      <span style={{ display: 'inline-flex', width: 14, height: 14, color: danger ? '#C4644A' : '#5C544B' }}>{icon}</span>
+      <span>{label}</span>
+    </div>
+  );
+}
+
+function AgentMenu({ onRename, onDelete, onClose }) {
+  const ref = React.useRef(null);
+
+  React.useEffect(() => {
+    const close = (e) => { if (ref.current && !ref.current.contains(e.target)) onClose(); };
+    document.addEventListener('mousedown', close);
+    return () => document.removeEventListener('mousedown', close);
+  }, [onClose]);
+
+  const items = [
+    {
+      label: 'Rename',
+      icon: <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M2 10.5l.8-3 6-6a1.2 1.2 0 0 1 1.7 1.7l-6 6-2.5.3z" stroke="currentColor" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round"/></svg>,
+      action: () => { onClose(); onRename?.(); },
+    },
+    { divider: true },
+    {
+      label: 'Remove',
+      icon: <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M2 3.5h9M5 3.5V2h3v1.5M3.5 3.5l.5 7h5l.5-7" stroke="currentColor" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round"/></svg>,
+      danger: true,
+      action: () => { onClose(); onDelete?.(); },
+    },
+  ];
+
+  return (
+    <div ref={ref} style={{
+      position: 'absolute', top: '100%', right: 0, marginTop: 4,
+      zIndex: 9999,
+      background: '#FFFFFF', borderRadius: 10,
+      boxShadow: '0 8px 24px rgba(0,0,0,0.14), 0 0 0 0.5px rgba(0,0,0,0.07)',
+      padding: '4px', minWidth: 172,
+      fontFamily: UI_FONT,
+    }}>
+      {items.map((item, i) => item.divider ? (
+        <div key={i} style={{ height: 1, background: '#ECE6D5', margin: '3px 0' }} />
+      ) : (
+        <MenuRow key={i} icon={item.icon} label={item.label} danger={item.danger} onClick={item.action} />
+      ))}
+    </div>
+  );
+}
+
 // ─── Agents grid ──────────────────────────────────────────────────────────────
 
-function AgentsSection({ agents, runtimes, onPickAgent }) {
+function AgentsSection({ agents, runtimes, onPickAgent, onDataRefresh }) {
   const runtimeMap = Object.fromEntries(runtimes.map(r => [r.id, r]));
+  const [menuOpenId, setMenuOpenId] = React.useState(null);
+  const [renameFor, setRenameFor] = React.useState(null);
+  const [deleteFor, setDeleteFor] = React.useState(null);
+  const [showCreate, setShowCreate] = React.useState(false);
+
+  const handleCreate = async ({ name, runtime_id, model }) => {
+    await api.createAgent(name, '', runtime_id, model || '');
+    setShowCreate(false);
+    onDataRefresh?.();
+  };
+
+  const handleRename = async ({ name }) => {
+    await api.updateAgent(renameFor.id, { ...renameFor, name });
+    setRenameFor(null);
+    onDataRefresh?.();
+  };
+
+  const handleDelete = async () => {
+    await api.archiveAgent(deleteFor.id);
+    setDeleteFor(null);
+    onDataRefresh?.();
+  };
 
   return (
     <section>
       <SectionHeader
         icon="agents" title="Agents" count={agents.length}
         hint="· the crew"
-        action={<button style={primaryBtn}>+ New agent</button>}
+        action={<button style={primaryBtn} onClick={() => setShowCreate(true)}>+ New agent</button>}
       />
       {agents.length === 0 && (
         <div style={{ fontSize: 13, color: '#A89F92', fontStyle: 'italic', padding: '8px 0' }}>
@@ -205,47 +566,136 @@ function AgentsSection({ agents, runtimes, onPickAgent }) {
         </div>
       )}
       <div style={{
-        display: 'grid', gap: 10,
-        gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
+        display: 'grid', gap: 14,
+        gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))',
       }}>
         {agents.map(a => {
           const rt = runtimeMap[a.runtime_id];
+          const menuOpen = menuOpenId === a.id;
           return (
             <div key={a.id}
               onClick={() => onPickAgent(a.id)}
-              style={{ ...card, padding: '14px 16px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 12, transition: 'background 0.12s' }}
-              onMouseEnter={e => e.currentTarget.style.background = '#FAF5E8'}
-              onMouseLeave={e => e.currentTarget.style.background = '#FCFAF1'}
+              style={{
+                ...card, padding: '22px 22px 18px', cursor: 'pointer',
+                display: 'flex', flexDirection: 'column', gap: 16,
+                transition: 'background 0.12s, border-color 0.12s, transform 0.12s',
+                minHeight: 132, position: 'relative',
+              }}
+              onMouseEnter={e => {
+                e.currentTarget.style.background = '#FAF5E8';
+                e.currentTarget.style.borderColor = '#DCD3BC';
+              }}
+              onMouseLeave={e => {
+                e.currentTarget.style.background = '#FCFAF1';
+                e.currentTarget.style.borderColor = '#ECE6D5';
+              }}
             >
-              <Avatar agent={a} size={36} />
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 14, fontWeight: 500, color: '#1C1A17' }}>{a.name}</div>
-                <div style={{ fontSize: 12.5, color: '#807972' }}>{a.model || 'No model set'}</div>
-              </div>
-              {rt && (
-                <div style={{
-                  display: 'inline-flex', alignItems: 'center', gap: 6,
-                  fontSize: 12, color: '#5C544B', padding: '3px 8px',
-                  borderRadius: 6, background: '#F0EAD8', border: '1px solid #E6DFCC',
-                }} title={rt.name}>
-                  <RuntimeBadge engine={rt.provider || rt.name} />
-                  <span style={{ fontFamily: MONO_FONT, fontSize: 11 }}>{(rt.name || rt.id).slice(0, 12)}</span>
+              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 14 }}>
+                <Avatar agent={a} size={44} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{
+                    fontSize: 15.5, fontWeight: 600, color: '#1C1A17',
+                    letterSpacing: -0.1, lineHeight: 1.25,
+                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                  }}>{a.name}</div>
+                  <div style={{ fontSize: 12.5, color: '#A89F92', marginTop: 3 }}>
+                    {a.updated_at ? `Updated ${relativeTime(a.updated_at)} ago` : 'Never updated'}
+                  </div>
                 </div>
-              )}
+                <div style={{ position: 'relative' }} onClick={e => e.stopPropagation()}>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setMenuOpenId(menuOpen ? null : a.id);
+                    }}
+                    aria-label="Agent options"
+                    aria-haspopup="menu"
+                    aria-expanded={menuOpen}
+                    style={{
+                      border: 'none',
+                      background: menuOpen ? '#ECE6D5' : 'transparent',
+                      padding: 4,
+                      color: menuOpen ? '#5C544B' : '#A89F92',
+                      cursor: 'pointer', display: 'inline-flex',
+                      borderRadius: 6, marginTop: -2, marginRight: -4,
+                    }}
+                    onMouseEnter={e => { e.currentTarget.style.background = '#ECE6D5'; e.currentTarget.style.color = '#5C544B'; }}
+                    onMouseLeave={e => {
+                      if (!menuOpen) {
+                        e.currentTarget.style.background = 'transparent';
+                        e.currentTarget.style.color = '#A89F92';
+                      }
+                    }}
+                  >
+                    <Icon name="more" size={16} />
+                  </button>
+                  {menuOpen && (
+                    <AgentMenu
+                      onClose={() => setMenuOpenId(null)}
+                      onRename={() => { setMenuOpenId(null); setRenameFor(a); }}
+                      onDelete={() => { setMenuOpenId(null); setDeleteFor(a); }}
+                    />
+                  )}
+                </div>
+              </div>
+              <div style={{
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                paddingTop: 12, borderTop: '1px solid #ECE6D5',
+                marginTop: 'auto',
+              }}>
+                {rt ? (
+                  <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }} title={rt.name}>
+                    <RuntimeBadge engine={rt.provider || rt.name} />
+                    <span style={{ fontSize: 12.5, color: '#5C544B', fontWeight: 500 }}>
+                      {rt.name || rt.id}
+                    </span>
+                  </div>
+                ) : (
+                  <span style={{ fontSize: 12.5, color: '#A89F92', fontStyle: 'italic' }}>No runtime</span>
+                )}
+              </div>
             </div>
           );
         })}
       </div>
+
+      {showCreate && (
+        <AgentFormDialog
+          mode="create"
+          runtimes={runtimes}
+          onCancel={() => setShowCreate(false)}
+          onSubmit={handleCreate}
+        />
+      )}
+      {renameFor && (
+        <AgentFormDialog
+          mode="rename"
+          initial={renameFor}
+          runtimes={runtimes}
+          onCancel={() => setRenameFor(null)}
+          onSubmit={handleRename}
+        />
+      )}
+      {deleteFor && (
+        <ConfirmDialog
+          title={`Delete ${deleteFor.name}?`}
+          message={`This will archive "${deleteFor.name}". Chats and sessions that referenced this agent will keep their history, but you won't be able to assign new work to it.`}
+          confirmLabel="Delete"
+          onCancel={() => setDeleteFor(null)}
+          onConfirm={handleDelete}
+        />
+      )}
     </section>
   );
 }
 
 // ─── Agent detail ─────────────────────────────────────────────────────────────
 
-function AgentDetail({ agent, skills, agentsMap, onBack, onSave }) {
+function AgentDetail({ agent, skills, runtimes, agentsMap, onBack, onSave, onRefresh }) {
   const [tab, setTab] = React.useState('instructions');
   const [instruction, setInstruction] = React.useState(agent.instruction || '');
   const [saving, setSaving] = React.useState(false);
+  const [confirmDelete, setConfirmDelete] = React.useState(false);
 
   const agentSkills = skills.filter(s => (agent.skill_ids || []).includes(s.id));
   const nonAgentSkills = skills.filter(s => !(agent.skill_ids || []).includes(s.id));
@@ -267,15 +717,34 @@ function AgentDetail({ agent, skills, agentsMap, onBack, onSave }) {
     const next = on ? [...current, skillId] : current.filter(id => id !== skillId);
     try {
       await api.replaceAgentSkills(agent.id, next);
-      onSave?.();
+      onRefresh?.();
     } catch (err) {
       console.error('Skill toggle failed:', err);
     }
   };
 
+  const handleRuntimeChange = async (nextRuntimeId) => {
+    if (!nextRuntimeId || nextRuntimeId === agent.runtime_id) return;
+    try {
+      await api.updateAgent(agent.id, { ...agent, runtime_id: nextRuntimeId });
+      onRefresh?.();
+    } catch (err) {
+      console.error('Runtime switch failed:', err);
+    }
+  };
+
+  const handleDelete = async () => {
+    await api.archiveAgent(agent.id);
+    setConfirmDelete(false);
+    onBack?.();
+    onRefresh?.();
+  };
+
+  const runtimeOptions = runtimes || [];
+  const runtimeSelectable = runtimeOptions.length > 0;
+
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column', background: '#FAF5E8' }}>
-      {/* Breadcrumb */}
       <div style={{
         padding: '16px 36px 12px', borderBottom: '1px solid #ECE6D5',
         display: 'flex', alignItems: 'center', gap: 8, fontSize: 13,
@@ -285,11 +754,10 @@ function AgentDetail({ agent, skills, agentsMap, onBack, onSave }) {
         <span style={{ color: '#C9BFA8' }}>›</span>
         <span style={{ color: '#1C1A17', fontWeight: 500 }}>{agent.name}</span>
         <div style={{ flex: 1 }} />
-        <button style={ghostBtn}>Archive</button>
       </div>
 
       <div style={{ flex: 1, overflow: 'auto', padding: '24px 36px' }}>
-        <div style={{ display: 'grid', gridTemplateColumns: '240px 1fr', gap: 24, maxWidth: 1100 }}>
+        <div data-testid="agent-detail-content" style={{ display: 'grid', gridTemplateColumns: '240px 1fr', gap: 24, maxWidth: CONTENT_MAX_WIDTH, margin: '0 auto', width: '100%' }}>
           {/* Left: identity */}
           <aside>
             <div style={{
@@ -303,7 +771,17 @@ function AgentDetail({ agent, skills, agentsMap, onBack, onSave }) {
 
             <div style={{ fontSize: 11.5, color: '#A89F92', textTransform: 'uppercase', letterSpacing: 0.4, fontWeight: 500, marginBottom: 8 }}>Properties</div>
             <PropRow label="Model" value={<code style={{ fontFamily: MONO_FONT, fontSize: 12 }}>{agent.model || '—'}</code>} />
-            <PropRow label="Runtime" value={agent.runtime_id || '—'} />
+            <PropRow label="Runtime" value={
+              runtimeSelectable ? (
+                <CustomSelect
+                  value={agent.runtime_id || ''}
+                  options={runtimeOptions.map(r => ({ value: r.id, label: r.name || r.id }))}
+                  onChange={handleRuntimeChange}
+                  placeholder="Pick a runtime…"
+                  size="sm"
+                />
+              ) : (agent.runtime_id || '—')
+            } />
             <PropRow label="Created" value={relativeTime(agent.created_at) + ' ago'} />
             <PropRow label="Updated" value={relativeTime(agent.updated_at) + ' ago'} />
 
@@ -323,6 +801,25 @@ function AgentDetail({ agent, skills, agentsMap, onBack, onSave }) {
                 <div style={{ fontSize: 12.5, color: '#A89F92', fontStyle: 'italic' }}>No skills attached</div>
               )}
             </div>
+
+            <button
+              onClick={() => setConfirmDelete(true)}
+              style={{
+                marginTop: 28,
+                display: 'inline-flex', alignItems: 'center', gap: 6,
+                border: '1px solid #E8C9BD', background: '#FCFAF1',
+                color: '#C4644A', borderRadius: 6,
+                padding: '6px 11px', fontSize: 12.5, fontFamily: UI_FONT,
+                cursor: 'pointer',
+              }}
+              onMouseEnter={e => { e.currentTarget.style.background = '#FEF3EE'; }}
+              onMouseLeave={e => { e.currentTarget.style.background = '#FCFAF1'; }}
+            >
+              <svg width="12" height="12" viewBox="0 0 13 13" fill="none">
+                <path d="M2 3.5h9M5 3.5V2h3v1.5M3.5 3.5l.5 7h5l.5-7" stroke="currentColor" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round"/>
+              </svg>
+              Delete agent
+            </button>
           </aside>
 
           {/* Right: tabs */}
@@ -387,6 +884,16 @@ function AgentDetail({ agent, skills, agentsMap, onBack, onSave }) {
           </main>
         </div>
       </div>
+
+      {confirmDelete && (
+        <ConfirmDialog
+          title={`Delete ${agent.name}?`}
+          message={`This will archive "${agent.name}". Chats and sessions that referenced this agent will keep their history, but you won't be able to assign new work to it.`}
+          confirmLabel="Delete"
+          onCancel={() => setConfirmDelete(false)}
+          onConfirm={handleDelete}
+        />
+      )}
     </div>
   );
 }
@@ -417,7 +924,7 @@ function CrewTabs({ tab, setTab }) {
 
 // ─── Main export ──────────────────────────────────────────────────────────────
 
-export default function CrewRoute({ agents, agentsMap, skills, runtimes, initialTab, onDataRefresh }) {
+export default function CrewRoute({ agents, agentsMap, skills, runtimes, initialTab, onDataRefresh, onToast }) {
   const [tab, setTab] = React.useState(initialTab || 'agents');
   const [openAgentId, setOpenAgentId] = React.useState(null);
 
@@ -430,15 +937,17 @@ export default function CrewRoute({ agents, agentsMap, skills, runtimes, initial
     <AgentDetail
       agent={detail}
       skills={skills}
+      runtimes={runtimes}
       agentsMap={agentsMap}
       onBack={() => setOpenAgentId(null)}
       onSave={() => { setOpenAgentId(null); onDataRefresh?.(); }}
+      onRefresh={() => onDataRefresh?.()}
     />
   );
 
   const meta = CREW_TABS.find(t => t.key === tab);
   return (
-    <div style={{ height: '100%', background: '#FAF5E8', overflow: 'auto', position: 'relative' }}>
+    <div data-testid="crew-route-shell" style={{ height: '100%', background: '#FAF5E8', overflow: 'auto', position: 'relative', padding: '60px 36px' }}>
       <div aria-hidden="true" style={{
         position: 'absolute',
         top: 0,
@@ -447,13 +956,13 @@ export default function CrewRoute({ agents, agentsMap, skills, runtimes, initial
         height: 38,
         WebkitAppRegion: 'drag',
       }} />
-      <div style={{ padding: '28px 36px 40px', maxWidth: 1080 }}>
+      <div data-testid="crew-route-content" style={{ maxWidth: CONTENT_MAX_WIDTH, margin: '0 auto' }}>
         <h1 style={{ fontSize: 22, fontWeight: 600, margin: '0 0 4px', color: '#1C1A17', letterSpacing: -0.2 }}>Crew</h1>
         <div style={{ fontSize: 13, color: '#807972', marginBottom: 18 }}>{meta?.subtitle}</div>
         <CrewTabs tab={tab} setTab={setTab} />
-        {tab === 'agents'   && <AgentsSection agents={agents} runtimes={runtimes} onPickAgent={setOpenAgentId} />}
+        {tab === 'agents'   && <AgentsSection agents={agents} runtimes={runtimes} onPickAgent={setOpenAgentId} onDataRefresh={onDataRefresh} />}
         {tab === 'skills'   && <SkillsSection skills={skills} agentsMap={agentsMap} />}
-        {tab === 'runtimes' && <RuntimesSection runtimes={runtimes} />}
+        {tab === 'runtimes' && <RuntimesSection runtimes={runtimes} onDataRefresh={onDataRefresh} onToast={onToast} />}
       </div>
     </div>
   );

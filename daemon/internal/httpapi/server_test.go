@@ -92,6 +92,24 @@ func TestBootstrapSkipsDefaultAgentWhenNoRuntimeExists(t *testing.T) {
 	}
 }
 
+func TestArchivedAgentsAreHiddenFromList(t *testing.T) {
+	env := newTestEnv(t)
+	postJSON(t, env.server, http.MethodPost, "/api/runtimes/rescan", nil, http.StatusOK, nil)
+
+	agentID := createAgent(t, env, "Temporary Agent")
+	postJSON(t, env.server, http.MethodPost, fmt.Sprintf("/api/agents/%s/archive", agentID), nil, http.StatusOK, nil)
+
+	var agents map[string]any
+	getJSON(t, env.server, "/api/agents", http.StatusOK, &agents)
+	items, _ := agents["items"].([]any)
+	for _, item := range items {
+		agent, _ := item.(map[string]any)
+		if agent["id"] == agentID {
+			t.Fatalf("archived agent should be hidden from /api/agents list, got %#v", agents)
+		}
+	}
+}
+
 func TestChatMessageReplayAndFollowSSE(t *testing.T) {
 	env := newTestEnv(t)
 	postJSON(t, env.server, http.MethodPost, "/api/runtimes/rescan", nil, http.StatusOK, nil)
