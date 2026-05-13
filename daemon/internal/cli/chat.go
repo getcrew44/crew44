@@ -258,11 +258,23 @@ func printEvent(w io.Writer, event model.Event) error {
 		}
 		_, err := fmt.Fprintf(w, "[tool-result/%s] %s\n", event.ActorAgentID, event.ToolCallResult.Name)
 		return err
+	case model.EventTypeRuntimeSession:
+		if event.RuntimeSession == nil {
+			return nil
+		}
+		_, err := fmt.Fprintf(w, "[runtime-session/%s] %s %s\n", event.ActorAgentID, event.RuntimeSession.Provider, event.RuntimeSession.SessionID)
+		return err
 	case model.EventTypeHandover:
 		if event.Handover == nil {
 			return nil
 		}
 		_, err := fmt.Fprintf(w, "[handover/%s] %s %s\n", event.Handover.Subtype, event.Handover.AgentID, event.Handover.AgentName)
+		return err
+	case model.EventTypeError:
+		if event.Error == nil {
+			return nil
+		}
+		_, err := fmt.Fprintf(w, "[error/%s] %s: %s\n", event.Error.Subtype, event.Error.Code, event.Error.Message)
 		return err
 	default:
 		return nil

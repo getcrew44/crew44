@@ -285,10 +285,17 @@ func TestChatResolvesAgentSkillsIntoRuntimeRequest(t *testing.T) {
 		if req.RuntimeEnvDir == "" {
 			t.Fatalf("expected runtime env dir")
 		}
-		if !strings.Contains(req.Agent.Instruction, "Available agents for handover") ||
+		if !strings.Contains(req.Agent.Instruction, "## CrewAI Context") ||
+			!strings.Contains(req.Agent.Instruction, "## Agent Identity") ||
+			!strings.Contains(req.Agent.Instruction, "## Agent Instructions") ||
+			!strings.Contains(req.Agent.Instruction, "## Available Skills") ||
+			!strings.Contains(req.Agent.Instruction, "## Available Agents For Handover") ||
 			!strings.Contains(req.Agent.Instruction, model.AgentHandoverMarkerExample) ||
 			!strings.Contains(req.Agent.Instruction, otherAgentID) {
-			t.Fatalf("expected runtime agent instruction to include handover agent list, got %q", req.Agent.Instruction)
+			t.Fatalf("expected runtime agent instruction to include structured prompt sections, got %q", req.Agent.Instruction)
+		}
+		if strings.Contains(req.Agent.Instruction, "uuid: "+agentID+"\n  name: Aria") {
+			t.Fatalf("expected current agent to be excluded from handover targets, got %q", req.Agent.Instruction)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for runtime request")
@@ -444,7 +451,7 @@ func TestMarkerOnlyHandoverPassesOriginalPromptToTarget(t *testing.T) {
 	getJSON(t, env.server, fmt.Sprintf("/api/chat/sessions/%s/events?after=0", chatID), http.StatusOK, &replay)
 	replayBytes, _ := json.Marshal(replay)
 	replayText := string(replayBytes)
-	if !strings.Contains(replayText, "target received: A previous agent handed this chat to you") || !strings.Contains(replayText, "please tell me a short story") || !strings.Contains(replayText, "Tell the requested story.") {
+	if !strings.Contains(replayText, "target received: Continue from the previous agent handover") || !strings.Contains(replayText, "please tell me a short story") {
 		t.Fatalf("expected target agent to receive original prompt after marker-only handover, got %#v", replay)
 	}
 	if strings.Contains(replayText, "CREWAI_AGENT_HANDOVER") {
@@ -476,8 +483,8 @@ func TestHandoverNotePreservesOriginalPromptForTarget(t *testing.T) {
 	if !strings.Contains(replayText, "target saw original prompt") || !strings.Contains(replayText, "please write the requested file") {
 		t.Fatalf("expected target prompt to preserve original user request, got %#v", replay)
 	}
-	if !strings.Contains(replayText, "Handover note") || !strings.Contains(replayText, "Write the requested file") {
-		t.Fatalf("expected target prompt to include marker handover note, got %#v", replay)
+	if !strings.Contains(replayText, "Handover Task") || !strings.Contains(replayText, "Write the requested file") {
+		t.Fatalf("expected target system prompt to include marker handover task, got %#v", replay)
 	}
 	if !strings.Contains(replayText, "Previous agent message") || !strings.Contains(replayText, "I will hand this to Bex") {
 		t.Fatalf("expected target prompt to include source agent message, got %#v", replay)
@@ -539,8 +546,66 @@ func TestInvalidHandoverTargetsAreStrippedWithoutScheduling(t *testing.T) {
 	if strings.Contains(replayText, `"type":"handover"`) {
 		t.Fatalf("expected invalid targets not to emit handover events, got %#v", replay)
 	}
+	if !strings.Contains(replayText, `"type":"error"`) || !strings.Contains(replayText, `"code":"archived_handover_target"`) {
+		t.Fatalf("expected invalid target to emit error event, got %#v", replay)
+	}
 	if strings.Contains(replayText, "CREWAI_AGENT_HANDOVER") {
 		t.Fatalf("persisted events should strip invalid handover markers, got %#v", replay)
+	}
+}
+
+func TestRuntimeErrorEmitsErrorEventAndStops(t *testing.T) {
+	engine := runtimeErrorEngine{}
+	env := newTestEnvWithEngine(t, engine)
+	postJSON(t, env.server, http.MethodPost, "/api/runtimes/rescan", nil, http.StatusOK, nil)
+
+	agentID := createAgent(t, env, "Aria")
+	projectID := createProject(t, env, agentID)
+	chatID := createChat(t, env, projectID, agentID)
+
+	postJSON(t, env.server, http.MethodPost, fmt.Sprintf("/api/chat/sessions/%s/messages", chatID), map[string]any{
+		"content":         "trigger runtime failure",
+		"target_agent_id": agentID,
+	}, http.StatusAccepted, nil)
+	waitForChatIdle(t, env.server, chatID)
+
+	var chat map[string]any
+	getJSON(t, env.server, fmt.Sprintf("/api/chat/sessions/%s", chatID), http.StatusOK, &chat)
+	stream := chat["stream"].(map[string]any)
+	if stream["status"] != "idle" || !strings.Contains(fmt.Sprint(stream["last_error"]), "runtime exploded") {
+		t.Fatalf("expected stopped chat with runtime error, got %#v", chat)
+	}
+
+	var replay map[string]any
+	getJSON(t, env.server, fmt.Sprintf("/api/chat/sessions/%s/events?after=0", chatID), http.StatusOK, &replay)
+	replayBytes, _ := json.Marshal(replay)
+	replayText := string(replayBytes)
+	if !strings.Contains(replayText, `"type":"error"`) || !strings.Contains(replayText, `"code":"runtime_error"`) || !strings.Contains(replayText, "runtime exploded") {
+		t.Fatalf("expected runtime error event, got %#v", replay)
+	}
+}
+
+func TestEmptyAssistantOutputEmitsErrorEventAndStops(t *testing.T) {
+	engine := emptyAssistantEngine{}
+	env := newTestEnvWithEngine(t, engine)
+	postJSON(t, env.server, http.MethodPost, "/api/runtimes/rescan", nil, http.StatusOK, nil)
+
+	agentID := createAgent(t, env, "Aria")
+	projectID := createProject(t, env, agentID)
+	chatID := createChat(t, env, projectID, agentID)
+
+	postJSON(t, env.server, http.MethodPost, fmt.Sprintf("/api/chat/sessions/%s/messages", chatID), map[string]any{
+		"content":         "trigger empty output",
+		"target_agent_id": agentID,
+	}, http.StatusAccepted, nil)
+	waitForChatIdle(t, env.server, chatID)
+
+	var replay map[string]any
+	getJSON(t, env.server, fmt.Sprintf("/api/chat/sessions/%s/events?after=0", chatID), http.StatusOK, &replay)
+	replayBytes, _ := json.Marshal(replay)
+	replayText := string(replayBytes)
+	if !strings.Contains(replayText, `"type":"error"`) || !strings.Contains(replayText, `"code":"empty_assistant_output"`) {
+		t.Fatalf("expected empty output error event, got %#v", replay)
 	}
 }
 
@@ -691,8 +756,11 @@ func TestHandoffToCurrentAgentStopsLoop(t *testing.T) {
 	getJSON(t, env.server, fmt.Sprintf("/api/chat/sessions/%s/events?after=0", chatID), http.StatusOK, &replay)
 	replayBytes, _ := json.Marshal(replay)
 	replayText := string(replayBytes)
-	if strings.Count(replayText, `"type":"handover"`) != 2 {
-		t.Fatalf("expected only scheduled+occurred events for first handover, got %#v", replay)
+	if strings.Count(replayText, `"type":"handover"`) != 2 || !strings.Contains(replayText, `"type":"error"`) || !strings.Contains(replayText, `"code":"self_handover"`) {
+		t.Fatalf("expected scheduled+occurred events followed by self-handover error, got %#v", replay)
+	}
+	if !strings.Contains(replayText, `"type":"runtime_session"`) || !strings.Contains(replayText, `"session_id":"loop-guard-Bex"`) {
+		t.Fatalf("expected target runtime session event to survive self-handover error, got %#v", replay)
 	}
 	if strings.Contains(replayText, "CREWAI_AGENT_HANDOVER") {
 		t.Fatalf("persisted events should not keep self-handover marker, got %#v", replay)
@@ -702,6 +770,10 @@ func TestHandoffToCurrentAgentStopsLoop(t *testing.T) {
 	getJSON(t, env.server, fmt.Sprintf("/api/chat/sessions/%s", chatID), http.StatusOK, &chat)
 	if chat["current_agent_id"] != agentB {
 		t.Fatalf("expected current agent to remain on handoff target %s, got %#v", agentB, chat["current_agent_id"])
+	}
+	stream := chat["stream"].(map[string]any)
+	if stream["status"] != "idle" || !strings.Contains(fmt.Sprint(stream["last_error"]), "itself") {
+		t.Fatalf("expected chat to stop with self-handover error, got %#v", chat)
 	}
 }
 
@@ -849,6 +921,10 @@ type noteHandoverEngine struct {
 	target string
 }
 
+type runtimeErrorEngine struct{}
+
+type emptyAssistantEngine struct{}
+
 type captureRunRequestEngine struct {
 	requests chan runtime.RunRequest
 }
@@ -890,6 +966,18 @@ func (skillOnlyAnswerEngine) Run(_ context.Context, request runtime.RunRequest, 
 }
 
 func (e *loopingHandoffEngine) Run(_ context.Context, request runtime.RunRequest, emit func(runtime.StreamEvent) error) (runtime.RunResult, error) {
+	sessionID := "loop-guard-" + request.Agent.Name
+	if err := emit(runtime.StreamEvent{
+		Type: model.EventTypeRuntimeSession,
+		RuntimeSession: &model.RuntimeSessionPayload{
+			RuntimeID: request.Runtime.ID,
+			Provider:  request.Runtime.Provider,
+			SessionID: sessionID,
+			Status:    "running",
+		},
+	}); err != nil {
+		return runtime.RunResult{}, err
+	}
 	var content string
 	switch request.Agent.Name {
 	case "Aria":
@@ -906,7 +994,7 @@ func (e *loopingHandoffEngine) Run(_ context.Context, request runtime.RunRequest
 	}); err != nil {
 		return runtime.RunResult{}, err
 	}
-	return runtime.RunResult{SessionID: "loop-guard"}, nil
+	return runtime.RunResult{SessionID: sessionID}, nil
 }
 
 func (e *multiHandoverEngine) Run(_ context.Context, request runtime.RunRequest, emit func(runtime.StreamEvent) error) (runtime.RunResult, error) {
@@ -968,7 +1056,7 @@ func (e *markerOnlyHandoverEngine) Run(_ context.Context, request runtime.RunReq
 func (e *noteHandoverEngine) Run(_ context.Context, request runtime.RunRequest, emit func(runtime.StreamEvent) error) (runtime.RunResult, error) {
 	content := "I will hand this to Bex.\n<CREWAI_AGENT_HANDOVER agent_id=\"" + e.target + "\">Write the requested file.</CREWAI_AGENT_HANDOVER>"
 	if request.Agent.Name != "Aria" {
-		content = "target saw original prompt: " + request.Prompt
+		content = "target saw original prompt: " + request.Prompt + "\n\ntarget saw system prompt: " + request.Agent.Instruction
 	}
 	if err := emit(runtime.StreamEvent{
 		Type: model.EventTypeMessage,
@@ -980,6 +1068,23 @@ func (e *noteHandoverEngine) Run(_ context.Context, request runtime.RunRequest, 
 		return runtime.RunResult{}, err
 	}
 	return runtime.RunResult{SessionID: "note-handover"}, nil
+}
+
+func (runtimeErrorEngine) Run(_ context.Context, _ runtime.RunRequest, _ func(runtime.StreamEvent) error) (runtime.RunResult, error) {
+	return runtime.RunResult{}, fmt.Errorf("runtime exploded")
+}
+
+func (emptyAssistantEngine) Run(_ context.Context, _ runtime.RunRequest, emit func(runtime.StreamEvent) error) (runtime.RunResult, error) {
+	if err := emit(runtime.StreamEvent{
+		Type: model.EventTypeMessage,
+		Message: &model.MessagePayload{
+			Role:    model.MessageRoleAssistant,
+			Content: "   ",
+		},
+	}); err != nil {
+		return runtime.RunResult{}, err
+	}
+	return runtime.RunResult{SessionID: "empty-assistant"}, nil
 }
 
 func newServerForState(t *testing.T, stateDir string, scanner runtime.Scanner) http.Handler {

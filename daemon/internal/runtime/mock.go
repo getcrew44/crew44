@@ -15,7 +15,6 @@ type RunRequest struct {
 	Agent           model.AgentConfig
 	AgentSkills     []SkillContext
 	Prompt          string
-	SummaryPath     string
 	WorkDir         string
 	RuntimeEnvDir   string
 	ResumeSessionID string
@@ -39,6 +38,7 @@ type StreamEvent struct {
 	Thinking       *model.ThinkingPayload
 	ToolCall       *model.ToolCallPayload
 	ToolCallResult *model.ToolCallResultPayload
+	RuntimeSession *model.RuntimeSessionPayload
 }
 
 type RunResult struct {

@@ -46,29 +46,6 @@ func prepareSkillEnvironment(request RunRequest) (map[string]string, error) {
 	return nil, nil
 }
 
-func appendSkillSummary(systemPrompt, provider string, skills []SkillContext) string {
-	if len(skills) == 0 {
-		return systemPrompt
-	}
-
-	var b strings.Builder
-	b.WriteString(strings.TrimSpace(systemPrompt))
-	if b.Len() > 0 {
-		b.WriteString("\n\n")
-	}
-	b.WriteString("Available skills:\n")
-	switch provider {
-	case "gemini", "hermes":
-		b.WriteString("Detailed skill instructions are in `.agent_context/skills/`. Each subdirectory contains a `SKILL.md`.\n")
-	default:
-		b.WriteString("The following skills are installed in the runtime's native skill location and should be used when relevant.\n")
-	}
-	for _, skill := range skills {
-		fmt.Fprintf(&b, "- %s\n", skill.Name)
-	}
-	return strings.TrimSpace(b.String())
-}
-
 func resolveSkillsDir(workDir, provider string) (string, error) {
 	var skillsDir string
 	switch provider {
