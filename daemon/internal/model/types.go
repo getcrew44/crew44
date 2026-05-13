@@ -27,6 +27,8 @@ type AgentConfig struct {
 	RuntimeID   string    `json:"runtime_id"`
 	Model       string    `json:"model"`
 	SkillIDs    []string  `json:"skill_ids"`
+	PresetID    string    `json:"preset_id,omitempty"`
+	PresetKey   string    `json:"preset_key,omitempty"`
 	ArchivedAt  time.Time `json:"archived_at,omitempty"`
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
@@ -36,8 +38,20 @@ type SkillRecord struct {
 	ID         string    `json:"id"`
 	Name       string    `json:"name"`
 	Path       string    `json:"path"`
+	PresetID   string    `json:"preset_id,omitempty"`
+	PresetKey  string    `json:"preset_key,omitempty"`
 	UpdatedAt  time.Time `json:"updated_at"`
 	ArchivedAt time.Time `json:"archived_at,omitempty"`
+}
+
+// PresetMapping records the user copies created from a preset definition.
+// Version is informational; no automatic migration.
+type PresetMapping struct {
+	PresetID string            `json:"preset_id"`
+	Version  int               `json:"version"`
+	SeededAt time.Time         `json:"seeded_at"`
+	AgentIDs map[string]string `json:"agent_ids"`
+	SkillIDs map[string]string `json:"skill_ids"`
 }
 
 type SkillFile struct {

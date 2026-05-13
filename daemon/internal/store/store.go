@@ -128,6 +128,43 @@ func (s *Store) DeleteAgent(id string) error {
 	return nil
 }
 
+func (s *Store) PresetMappingPath(presetID string) string {
+	return filepath.Join(s.root, "presets", presetID+".json")
+}
+
+func (s *Store) LoadPresetMapping(presetID string) (model.PresetMapping, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var mapping model.PresetMapping
+	err := readJSON(s.PresetMappingPath(presetID), &mapping)
+	if errors.Is(err, os.ErrNotExist) {
+		return model.PresetMapping{
+			PresetID: presetID,
+			AgentIDs: map[string]string{},
+			SkillIDs: map[string]string{},
+		}, nil
+	}
+	if err != nil {
+		return model.PresetMapping{}, err
+	}
+	if mapping.AgentIDs == nil {
+		mapping.AgentIDs = map[string]string{}
+	}
+	if mapping.SkillIDs == nil {
+		mapping.SkillIDs = map[string]string{}
+	}
+	return mapping, nil
+}
+
+func (s *Store) SavePresetMapping(mapping model.PresetMapping) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := os.MkdirAll(filepath.Join(s.root, "presets"), 0o755); err != nil {
+		return err
+	}
+	return writeJSON(s.PresetMappingPath(mapping.PresetID), mapping)
+}
+
 func (s *Store) ListSkills() ([]model.SkillRecord, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

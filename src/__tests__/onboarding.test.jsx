@@ -7,6 +7,7 @@ vi.mock('../api.js', () => ({
   rescanRuntimes: vi.fn(),
   listRuntimes: vi.fn(),
   createAgent: vi.fn(),
+  seedDefaultCrew: vi.fn(),
 }));
 
 const claudeRuntime = { id: 'rt-claude', name: 'Claude Code', provider: 'claude', version: '2.1.0', status: 'available' };
@@ -18,6 +19,7 @@ beforeEach(() => {
   api.rescanRuntimes.mockResolvedValue({});
   api.listRuntimes.mockResolvedValue([claudeRuntime, codexRuntime]);
   api.createAgent.mockResolvedValue({});
+  api.seedDefaultCrew.mockResolvedValue({});
 });
 
 afterEach(() => {
@@ -121,14 +123,14 @@ async function advanceToCrewStep() {
 }
 
 describe('Onboarding — crew step', () => {
-  it('renders all three default crew members selected by default', async () => {
+  it('renders all default crew members selected by default', async () => {
     render(<OnboardingRoute runtimes={[]} onComplete={() => {}} onSkip={() => {}} />);
     await advanceToCrewStep();
 
     DEFAULT_CREW.forEach(member => {
       expect(screen.getByText(member.name)).toBeInTheDocument();
     });
-    expect(screen.getByRole('button', { name: /Create 3 agents/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Create 4 agents/i })).toBeInTheDocument();
   }, 6000);
 
   it('defaults the runtime picker to "Auto — pick the best available"', async () => {
@@ -143,7 +145,7 @@ describe('Onboarding — crew step', () => {
     await advanceToCrewStep();
 
     fireEvent.click(screen.getByText('Coding Agent'));
-    expect(screen.getByRole('button', { name: /Create 2 agents/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Create 3 agents/i })).toBeInTheDocument();
   }, 6000);
 
   it('"Skip and finish" appears when no agents are selected', async () => {
@@ -154,39 +156,27 @@ describe('Onboarding — crew step', () => {
     expect(screen.getByRole('button', { name: /Skip and finish/i })).toBeInTheDocument();
   }, 6000);
 
-  it('creates the selected agents on the first available runtime when Auto is chosen', async () => {
+  it('seeds the default crew through the presets API so skills are attached', async () => {
     const onComplete = vi.fn();
-    // First runtime is "unavailable", second is the real choice for Auto.
-    api.listRuntimes.mockResolvedValue([offlineRuntime, claudeRuntime, codexRuntime]);
 
     render(<OnboardingRoute runtimes={[]} onComplete={onComplete} onSkip={() => {}} />);
     await advanceToCrewStep();
 
-    fireEvent.click(screen.getByRole('button', { name: /Create 3 agents/i }));
+    fireEvent.click(screen.getByRole('button', { name: /Create 4 agents/i }));
 
     await waitFor(() => expect(onComplete).toHaveBeenCalledOnce(), { timeout: 4000 });
-    expect(api.createAgent).toHaveBeenCalledTimes(DEFAULT_CREW.length);
-
-    // Auto should resolve to claudeRuntime (first 'available'), not the unavailable one.
-    DEFAULT_CREW.forEach((member, i) => {
-      expect(api.createAgent).toHaveBeenNthCalledWith(
-        i + 1,
-        member.name,
-        member.instruction,
-        claudeRuntime.id,
-        '',
-      );
-    });
+    expect(api.seedDefaultCrew).toHaveBeenCalledOnce();
+    expect(api.createAgent).not.toHaveBeenCalled();
   }, 6000);
 
-  it('surfaces an error message and does not complete when createAgent fails', async () => {
+  it('surfaces an error message and does not complete when preset seed fails', async () => {
     const onComplete = vi.fn();
-    api.createAgent.mockRejectedValueOnce(new Error('write failed'));
+    api.seedDefaultCrew.mockRejectedValueOnce(new Error('write failed'));
 
     render(<OnboardingRoute runtimes={[]} onComplete={onComplete} onSkip={() => {}} />);
     await advanceToCrewStep();
 
-    fireEvent.click(screen.getByRole('button', { name: /Create 3 agents/i }));
+    fireEvent.click(screen.getByRole('button', { name: /Create 4 agents/i }));
 
     await waitFor(
       () => expect(screen.getByText(/Could not finish setup.*write failed/i)).toBeInTheDocument(),

@@ -156,6 +156,23 @@ export async function rescanRuntimes() {
   return post('/runtimes/rescan', {});
 }
 
+export async function listPresets() {
+  const data = await get('/presets');
+  return data.items || [];
+}
+
+export async function seedDefaultCrew() {
+  return post('/presets/default-crew/seed', {});
+}
+
+export async function resetDefaultCrew() {
+  return post('/presets/default-crew/reset', {});
+}
+
+export async function resetAgentPreset(id) {
+  return post(`/agents/${id}/reset-preset`, {});
+}
+
 export async function getChat(id) {
   return get(`/chat/sessions/${id}`);
 }

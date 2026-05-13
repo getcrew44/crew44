@@ -66,18 +66,35 @@ func TestResourceLifecyclePersistsExpectedFiles(t *testing.T) {
 	assertFileExists(t, filepath.Join(env.stateDir, "chats", "chat-"+chat["id"].(string), "summary.md"))
 }
 
-func TestBootstrapCreatesDefaultAgentWhenRuntimeExists(t *testing.T) {
+func TestBootstrapCreatesDefaultCrewWhenRuntimeExists(t *testing.T) {
 	env := newTestEnv(t)
 
 	var agents map[string]any
 	getJSON(t, env.server, "/api/agents", http.StatusOK, &agents)
 	items, _ := agents["items"].([]any)
-	if len(items) != 1 {
-		t.Fatalf("expected one bootstrapped agent, got %#v", agents)
+	if len(items) != 4 {
+		t.Fatalf("expected four preset agents from default-crew bootstrap, got %d: %#v", len(items), agents)
 	}
-	agent, _ := items[0].(map[string]any)
-	if agent["runtime_id"] != "runtime-mock" {
-		t.Fatalf("expected bootstrapped agent to use runtime-mock, got %#v", agent["runtime_id"])
+
+	wantKeys := map[string]bool{"partner": false, "coding": false, "product": false, "designer": false}
+	for _, raw := range items {
+		agent, _ := raw.(map[string]any)
+		if agent["runtime_id"] != "runtime-mock" {
+			t.Fatalf("expected preset agent to use runtime-mock, got %#v", agent["runtime_id"])
+		}
+		if agent["preset_id"] != "default-crew" {
+			t.Fatalf("expected preset_id=default-crew on bootstrapped agent, got %#v", agent["preset_id"])
+		}
+		key, _ := agent["preset_key"].(string)
+		if _, ok := wantKeys[key]; !ok {
+			t.Fatalf("unexpected preset_key %q in bootstrapped crew", key)
+		}
+		wantKeys[key] = true
+	}
+	for key, seen := range wantKeys {
+		if !seen {
+			t.Fatalf("missing preset agent with key %q in bootstrapped crew", key)
+		}
 	}
 }
 
@@ -553,8 +570,8 @@ func TestRestartReloadsPersistedResources(t *testing.T) {
 
 	var agents map[string]any
 	getJSON(t, restarted, "/api/agents", http.StatusOK, &agents)
-	if items, _ := agents["items"].([]any); len(items) != 2 {
-		t.Fatalf("expected 2 agents after restart, got %#v", agents)
+	if items, _ := agents["items"].([]any); len(items) != 5 {
+		t.Fatalf("expected 5 agents after restart (4 preset + 1 created), got %#v", agents)
 	}
 
 	var projects map[string]any

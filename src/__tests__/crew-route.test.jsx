@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import CrewRoute from '../CrewRoute.jsx';
 import * as api from '../api.js';
@@ -8,6 +8,10 @@ vi.mock('../api.js', () => ({
   createAgent: vi.fn(),
   updateAgent: vi.fn(),
   archiveAgent: vi.fn(),
+  listPresets: vi.fn(() => Promise.resolve([])),
+  seedDefaultCrew: vi.fn(),
+  resetDefaultCrew: vi.fn(),
+  resetAgentPreset: vi.fn(),
 }));
 
 const baseProps = {
@@ -74,6 +78,10 @@ describe('CrewRoute agents tab', () => {
     vi.clearAllMocks();
   });
 
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it('uses the same content width and page spacing as the new task page', () => {
     render(<CrewRoute {...agentProps} />);
 
@@ -90,6 +98,70 @@ describe('CrewRoute agents tab', () => {
     });
     expect(content.style.paddingLeft).toBe('');
     expect(content.style.paddingRight).toBe('');
+  });
+
+  it('does not append ago when the agent was updated just now', () => {
+    const now = new Date('2026-05-13T07:10:32Z').getTime();
+    vi.useFakeTimers();
+    vi.setSystemTime(now);
+
+    render(<CrewRoute
+      {...agentProps}
+      agents={[{
+        ...agentProps.agents[0],
+        updated_at: new Date(now - 30 * 1000).toISOString(),
+      }]}
+    />);
+
+    expect(screen.getByText('Updated just now')).toBeInTheDocument();
+    expect(screen.queryByText('Updated just now ago')).not.toBeInTheDocument();
+  });
+
+  it('shows the runtime name as quiet metadata without a label or badge', () => {
+    render(<CrewRoute
+      {...agentProps}
+      runtimes={[{
+        id: 'claude-code',
+        name: 'Claude Code',
+        provider: 'claude',
+        status: 'available',
+      }]}
+      agents={[{
+        ...agentProps.agents[0],
+        runtime_id: 'claude-code',
+      }]}
+    />);
+
+    expect(screen.getByText('Claude Code')).toBeInTheDocument();
+    expect(screen.queryByText('Runtime')).not.toBeInTheDocument();
+    expect(screen.queryByText('C')).not.toBeInTheDocument();
+  });
+
+  it('shows preset reset completion through the app toast instead of an inline page message', async () => {
+    const onToast = vi.fn();
+    const onDataRefresh = vi.fn();
+    api.resetAgentPreset.mockResolvedValue({ reset_agents: ['planning'], reset_skills: [] });
+
+    render(<CrewRoute
+      {...agentProps}
+      agents={[{
+        ...agentProps.agents[0],
+        preset_key: 'planning',
+      }]}
+      onDataRefresh={onDataRefresh}
+      onToast={onToast}
+    />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Agent options' }));
+    fireEvent.click(screen.getByText('Reset to factory version'));
+    fireEvent.click(screen.getByRole('button', { name: 'Reset to factory' }));
+
+    await waitFor(() => {
+      expect(api.resetAgentPreset).toHaveBeenCalledWith('agent-1');
+      expect(onToast).toHaveBeenCalledWith('Reset "Planning Agent" to factory version.');
+      expect(onDataRefresh).toHaveBeenCalledOnce();
+    });
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
   });
 });
 

@@ -68,6 +68,11 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/agents/{id}/archive", s.handleArchiveAgent)
 	s.mux.HandleFunc("POST /api/agents/{id}/restore", s.handleRestoreAgent)
 	s.mux.HandleFunc("PUT /api/agents/{id}/skills", s.handleReplaceAgentSkills)
+	s.mux.HandleFunc("POST /api/agents/{id}/reset-preset", s.handleResetAgentPreset)
+
+	s.mux.HandleFunc("GET /api/presets", s.handleListPresets)
+	s.mux.HandleFunc("POST /api/presets/default-crew/seed", s.handleSeedDefaultCrew)
+	s.mux.HandleFunc("POST /api/presets/default-crew/reset", s.handleResetDefaultCrew)
 
 	s.mux.HandleFunc("GET /api/skills", s.handleListSkills)
 	s.mux.HandleFunc("POST /api/skills", s.handleCreateSkill)
@@ -220,6 +225,42 @@ func (s *Server) handleReplaceAgentSkills(w http.ResponseWriter, r *http.Request
 		return
 	}
 	writeJSON(w, http.StatusOK, item)
+}
+
+func (s *Server) handleListPresets(w http.ResponseWriter, r *http.Request) {
+	items, err := s.app.ListPresets()
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": items})
+}
+
+func (s *Server) handleSeedDefaultCrew(w http.ResponseWriter, r *http.Request) {
+	result, err := s.app.SeedDefaultCrew()
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+func (s *Server) handleResetDefaultCrew(w http.ResponseWriter, r *http.Request) {
+	result, err := s.app.ResetDefaultCrew()
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+func (s *Server) handleResetAgentPreset(w http.ResponseWriter, r *http.Request) {
+	result, err := s.app.ResetAgentPreset(r.PathValue("id"))
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
 }
 
 func (s *Server) handleListSkills(w http.ResponseWriter, r *http.Request) {
