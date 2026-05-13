@@ -9,6 +9,23 @@ export async function getOnboardingStatus() {
   return rpc.call('onboarding.get');
 }
 
+export async function getRemoteStatus() {
+  return rpc.call('remote.status');
+}
+
+export async function createRemotePairing(relayUrl) {
+  return rpc.call('remote.pairing.create', { relay_url: relayUrl });
+}
+
+export async function listRemoteDevices() {
+  const data = await rpc.call('remote.devices.list');
+  return data.items || [];
+}
+
+export async function deleteRemoteDevice(deviceId) {
+  return rpc.call('remote.devices.delete', { device_id: deviceId });
+}
+
 export async function completeOnboarding() {
   return rpc.call('onboarding.complete');
 }

@@ -22,6 +22,7 @@ var errMethodNotFound = errors.New("method not found")
 
 type Server struct {
 	app       *app.App
+	remote    RemoteService
 	authToken string
 	methods   map[string]methodHandler
 	upgrader  websocket.Upgrader
@@ -29,7 +30,15 @@ type Server struct {
 
 type Config struct {
 	App       *app.App
+	Remote    RemoteService
 	AuthToken string
+}
+
+type RemoteService interface {
+	Status(context.Context) (any, error)
+	CreatePairing(context.Context, string) (any, error)
+	ListDevices(context.Context) (any, error)
+	DeleteDevice(context.Context, string) (any, error)
 }
 
 type Peer interface {
@@ -38,9 +47,16 @@ type Peer interface {
 	RemoveSubscription(id string) bool
 }
 
+type FrameTransport interface {
+	ReadFrame() ([]byte, error)
+	WriteFrame([]byte) error
+	Close() error
+}
+
 func NewServer(cfg Config) *Server {
 	server := &Server{
 		app:       cfg.App,
+		remote:    cfg.Remote,
 		authToken: cfg.AuthToken,
 		upgrader: websocket.Upgrader{
 			Subprotocols: []string{ProtocolV1},
@@ -65,7 +81,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		return
 	}
-	conn := NewConn(ws)
+	conn := NewConn(NewWebSocketTransport(ws))
 	conn.Run(r.Context(), s)
 }
 
@@ -92,7 +108,7 @@ func (s *Server) authorize(r *http.Request) error {
 }
 
 type Conn struct {
-	ws            *websocket.Conn
+	transport     FrameTransport
 	outbox        chan any
 	done          chan struct{}
 	closeOnce     sync.Once
@@ -100,9 +116,9 @@ type Conn struct {
 	subscriptions map[string]func()
 }
 
-func NewConn(ws *websocket.Conn) *Conn {
+func NewConn(transport FrameTransport) *Conn {
 	return &Conn{
-		ws:            ws,
+		transport:     transport,
 		outbox:        make(chan any, writeQueueSize),
 		done:          make(chan struct{}),
 		subscriptions: make(map[string]func()),
@@ -118,7 +134,7 @@ func (c *Conn) Run(ctx context.Context, server *Server) {
 	}()
 
 	for {
-		_, data, err := c.ws.ReadMessage()
+		data, err := c.transport.ReadFrame()
 		if err != nil {
 			return
 		}
@@ -178,7 +194,12 @@ func (c *Conn) writeLoop(done chan<- struct{}) {
 		case <-c.done:
 			return
 		case value := <-c.outbox:
-			if err := c.ws.WriteJSON(value); err != nil {
+			data, err := json.Marshal(value)
+			if err != nil {
+				c.close()
+				return
+			}
+			if err := c.transport.WriteFrame(data); err != nil {
 				c.close()
 				return
 			}
@@ -215,6 +236,27 @@ func (c *Conn) close() {
 			cancel()
 		}
 		c.subMu.Unlock()
-		_ = c.ws.Close()
+		_ = c.transport.Close()
 	})
+}
+
+type WebSocketTransport struct {
+	ws *websocket.Conn
+}
+
+func NewWebSocketTransport(ws *websocket.Conn) *WebSocketTransport {
+	return &WebSocketTransport{ws: ws}
+}
+
+func (t *WebSocketTransport) ReadFrame() ([]byte, error) {
+	_, data, err := t.ws.ReadMessage()
+	return data, err
+}
+
+func (t *WebSocketTransport) WriteFrame(data []byte) error {
+	return t.ws.WriteMessage(websocket.TextMessage, data)
+}
+
+func (t *WebSocketTransport) Close() error {
+	return t.ws.Close()
 }

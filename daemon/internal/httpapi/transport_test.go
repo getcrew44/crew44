@@ -1,14 +1,16 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/sqtech/crew-ai/crewai-repo/internal/model"
 	"github.com/sqtech/crew-ai/crewai-repo/internal/rpc"
 	"github.com/sqtech/crew-ai/crewai-repo/internal/runtime"
 )
@@ -111,18 +113,19 @@ func TestTransportUnknownRPCMethodReturnsJSONRPCError(t *testing.T) {
 }
 
 func TestTransportChatSubscriptionReplaysEventsAndDone(t *testing.T) {
-	env := newTestEnv(t)
-	postJSON(t, env.server, http.MethodPost, "/api/runtimes/rescan", nil, http.StatusOK, nil)
-	agentID := createAgent(t, env, "Aria")
-	projectID := createProject(t, env, agentID)
-	chatID := createChat(t, env, projectID, agentID)
-	postJSON(t, env.server, http.MethodPost, fmt.Sprintf("/api/chat/sessions/%s/messages", chatID), map[string]any{
+	env := newTransportEnv(t)
+	callTransportRPC(t, env.rpcServer, "runtimes.rescan", nil, nil)
+	agentID := createTransportAgent(t, env.rpcServer)
+	projectID := createTransportProject(t, env.rpcServer, agentID)
+	chatID := createTransportChat(t, env.rpcServer, projectID, agentID)
+	callTransportRPC(t, env.rpcServer, "chats.messages.post", map[string]any{
+		"id":              chatID,
 		"content":         "hello",
 		"target_agent_id": agentID,
-	}, http.StatusAccepted, nil)
-	waitForChatIdle(t, env.server, chatID)
+	}, nil)
+	waitForTransportChatIdle(t, env.rpcServer, chatID)
 
-	server := httptest.NewServer(env.server)
+	server := httptest.NewServer(env.handler)
 	t.Cleanup(server.Close)
 	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "/rpc"
 	dialer := websocket.Dialer{Subprotocols: []string{rpc.ProtocolV1}}
@@ -183,6 +186,117 @@ func newAuthTransportServer(t *testing.T, token string) *httptest.Server {
 	server := httptest.NewServer(handler)
 	t.Cleanup(server.Close)
 	return server
+}
+
+type transportEnv struct {
+	handler   http.Handler
+	rpcServer *rpc.Server
+}
+
+func newTransportEnv(t *testing.T) transportEnv {
+	t.Helper()
+	handler, err := NewServer(ServerConfig{
+		StateDir:       t.TempDir(),
+		RuntimeScanDir: t.TempDir(),
+		Scanner: &runtime.StaticScanner{
+			Records: []model.RuntimeRecord{transportMockRuntimeRecord()},
+		},
+		Engine: runtime.MockEngine{},
+	})
+	if err != nil {
+		t.Fatalf("new server: %v", err)
+	}
+	server, ok := handler.(*Server)
+	if !ok {
+		t.Fatalf("expected *Server, got %T", handler)
+	}
+	return transportEnv{handler: handler, rpcServer: server.rpc}
+}
+
+func callTransportRPC(t *testing.T, server *rpc.Server, method string, params any, out any) {
+	t.Helper()
+	rawParams, err := json.Marshal(params)
+	if err != nil {
+		t.Fatalf("marshal rpc params: %v", err)
+	}
+	result, err := server.Handle(context.Background(), nil, rpc.Request{
+		JSONRPC: rpc.Version,
+		Method:  method,
+		Params:  rawParams,
+	})
+	if err != nil {
+		t.Fatalf("rpc %s: %v", method, err)
+	}
+	if out == nil {
+		return
+	}
+	data, err := json.Marshal(result)
+	if err != nil {
+		t.Fatalf("marshal rpc result: %v", err)
+	}
+	if err := json.Unmarshal(data, out); err != nil {
+		t.Fatalf("decode rpc result: %v", err)
+	}
+}
+
+func createTransportAgent(t *testing.T, server *rpc.Server) string {
+	t.Helper()
+	var resp map[string]any
+	callTransportRPC(t, server, "agents.create", map[string]any{
+		"name":        "Aria",
+		"instruction": "Be helpful",
+		"runtime_id":  "runtime-mock",
+		"model":       "mock-1",
+	}, &resp)
+	return resp["id"].(string)
+}
+
+func createTransportProject(t *testing.T, server *rpc.Server, agentID string) string {
+	t.Helper()
+	var resp map[string]any
+	callTransportRPC(t, server, "projects.create", map[string]any{
+		"name":          "Demo Project",
+		"workdir":       "/tmp/demo",
+		"main_agent_id": agentID,
+	}, &resp)
+	return resp["id"].(string)
+}
+
+func createTransportChat(t *testing.T, server *rpc.Server, projectID, agentID string) string {
+	t.Helper()
+	var resp map[string]any
+	callTransportRPC(t, server, "chats.create", map[string]any{
+		"project_id":    projectID,
+		"title":         "Demo Chat",
+		"main_agent_id": agentID,
+	}, &resp)
+	return resp["id"].(string)
+}
+
+func waitForTransportChatIdle(t *testing.T, server *rpc.Server, chatID string) {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		var resp map[string]any
+		callTransportRPC(t, server, "chats.get", map[string]any{"id": chatID}, &resp)
+		stream, _ := resp["stream"].(map[string]any)
+		if stream["status"] == "idle" {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("chat %s did not become idle in time", chatID)
+}
+
+func transportMockRuntimeRecord() model.RuntimeRecord {
+	return model.RuntimeRecord{
+		ID:         "runtime-mock",
+		Provider:   "mock",
+		Name:       "Mock Runtime",
+		Status:     model.RuntimeStatusAvailable,
+		BinaryPath: "builtin://mock",
+		Version:    "test",
+	}
 }
 
 func respStatus(resp *http.Response) int {
