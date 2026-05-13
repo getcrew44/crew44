@@ -100,6 +100,19 @@ describe('CrewRoute agents tab', () => {
     expect(content.style.paddingRight).toBe('');
   });
 
+  it('guides users to install a runtime when no agents or runtimes exist', () => {
+    render(<CrewRoute
+      {...baseProps}
+      initialTab="agents"
+      agents={[]}
+      runtimes={[]}
+    />);
+
+    expect(screen.getByText('Install a runtime to get started.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'View runtimes' })).toBeInTheDocument();
+    expect(screen.queryByText('No agents yet. Create one to get started.')).not.toBeInTheDocument();
+  });
+
   it('does not append ago when the agent was updated just now', () => {
     const now = new Date('2026-05-13T07:10:32Z').getTime();
     vi.useFakeTimers();
@@ -163,6 +176,59 @@ describe('CrewRoute agents tab', () => {
     });
     expect(screen.queryByRole('status')).not.toBeInTheDocument();
   });
+
+  it('does not offer removal for the partner preset agent', () => {
+    render(<CrewRoute
+      {...agentProps}
+      agents={[{
+        ...agentProps.agents[0],
+        name: 'Partner',
+        preset_id: 'default-crew',
+        preset_key: 'partner',
+      }]}
+    />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Agent options' }));
+
+    expect(screen.getByText('Reset to factory version')).toBeInTheDocument();
+    expect(screen.queryByText('Remove')).not.toBeInTheDocument();
+  });
+
+  it('does not show the detail delete action for the partner preset agent', () => {
+    render(<CrewRoute
+      {...agentProps}
+      agents={[{
+        ...agentProps.agents[0],
+        name: 'Partner',
+        preset_id: 'default-crew',
+        preset_key: 'partner',
+      }]}
+    />);
+
+    fireEvent.click(screen.getByText('Partner'));
+
+    expect(screen.queryByRole('button', { name: 'Delete agent' })).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ['coding', 'Coding Agent'],
+    ['product', 'Product Agent'],
+    ['designer', 'Designer'],
+  ])('offers removal for the %s preset agent', (presetKey, name) => {
+    render(<CrewRoute
+      {...agentProps}
+      agents={[{
+        ...agentProps.agents[0],
+        name,
+        preset_id: 'default-crew',
+        preset_key: presetKey,
+      }]}
+    />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Agent options' }));
+
+    expect(screen.getByText('Remove')).toBeInTheDocument();
+  });
 });
 
 describe('CrewRoute agent detail', () => {
@@ -183,5 +249,37 @@ describe('CrewRoute agent detail', () => {
       maxWidth: '720px',
       margin: '0px auto',
     });
+  });
+
+  it('shows auto when an agent does not pin a model', () => {
+    render(<CrewRoute
+      {...agentProps}
+      agents={[{
+        ...agentProps.agents[0],
+        model: '',
+      }]}
+    />);
+
+    fireEvent.click(screen.getByText('Planning Agent'));
+
+    expect(screen.getAllByText('auto')).toHaveLength(2);
+    expect(screen.queryByText('No model')).not.toBeInTheDocument();
+  });
+
+  it('sizes the instruction editor to its content up to a maximum height', () => {
+    render(<CrewRoute {...agentProps} />);
+
+    fireEvent.click(screen.getByText('Planning Agent'));
+
+    const editor = screen.getByTestId('agent-instruction-input');
+    Object.defineProperty(editor, 'scrollHeight', { configurable: true, value: 72 });
+
+    fireEvent.change(editor, { target: { value: 'Short instruction.' } });
+    expect(editor).toHaveStyle({ height: '72px', overflowY: 'hidden' });
+
+    Object.defineProperty(editor, 'scrollHeight', { configurable: true, value: 900 });
+
+    fireEvent.change(editor, { target: { value: Array.from({ length: 40 }, (_, i) => `Line ${i + 1}`).join('\n') } });
+    expect(editor).toHaveStyle({ height: '560px', overflowY: 'auto' });
   });
 });

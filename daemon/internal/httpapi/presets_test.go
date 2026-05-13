@@ -180,6 +180,38 @@ func TestSeedDefaultCrewRecreatesDeletedPreset(t *testing.T) {
 	}
 }
 
+func TestPartnerPresetAgentCannotBeArchived(t *testing.T) {
+	env := newTestEnv(t)
+
+	var resp map[string]any
+	getJSON(t, env.server, "/api/agents", http.StatusOK, &resp)
+	items, _ := resp["items"].([]any)
+	var partnerID string
+	for _, raw := range items {
+		a, _ := raw.(map[string]any)
+		if a["preset_key"] == "partner" {
+			partnerID = a["id"].(string)
+			break
+		}
+	}
+	if partnerID == "" {
+		t.Fatalf("partner preset agent not found in bootstrap output")
+	}
+
+	postJSON(t, env.server, http.MethodPost, "/api/agents/"+partnerID+"/archive", nil, http.StatusBadRequest, nil)
+
+	var after map[string]any
+	getJSON(t, env.server, "/api/agents", http.StatusOK, &after)
+	afterItems, _ := after["items"].([]any)
+	for _, raw := range afterItems {
+		a, _ := raw.(map[string]any)
+		if a["id"] == partnerID {
+			return
+		}
+	}
+	t.Fatalf("partner preset agent should still be listed after rejected archive, got %#v", after)
+}
+
 func TestSeedDefaultCrewIgnoresUserNamedAgent(t *testing.T) {
 	env := newTestEnv(t)
 	// Archive the preset "coding" agent so the seed has work to do.

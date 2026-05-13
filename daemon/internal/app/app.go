@@ -312,6 +312,9 @@ func (a *App) SetAgentArchived(id string, archived bool) (model.AgentConfig, err
 	if err != nil {
 		return model.AgentConfig{}, a.mapError(err)
 	}
+	if archived && isProtectedPresetAgent(agent) {
+		return model.AgentConfig{}, ErrBadRequest
+	}
 	if archived {
 		agent.ArchivedAt = time.Now().UTC()
 	} else {
@@ -322,6 +325,10 @@ func (a *App) SetAgentArchived(id string, archived bool) (model.AgentConfig, err
 		return model.AgentConfig{}, err
 	}
 	return agent, nil
+}
+
+func isProtectedPresetAgent(agent model.AgentConfig) bool {
+	return agent.PresetID == presets.DefaultCrewPresetID && agent.PresetKey == "partner"
 }
 
 func (a *App) ReplaceAgentSkills(id string, skillIDs []string) (model.AgentConfig, error) {

@@ -6,3 +6,4 @@
 /dist/
 /.electron-app/
 .gstack/
+/mocks/
