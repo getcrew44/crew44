@@ -10,6 +10,7 @@ This repository is structured as a standard Electron/Vite app at the top level, 
 .
 ├── electron/              Electron main process, preload, app assets, scripts
 ├── src/                   React renderer source
+├── packages/mobile/       Expo mobile app
 ├── public/                Renderer static assets
 ├── daemon/                Go module for daemon, API tests, internals
 │   ├── cmd/crewai-daemon  daemon transport entrypoint
@@ -70,6 +71,15 @@ http://localhost:3000
 ```
 
 The Vite dev server talks directly to `ws://127.0.0.1:8080/rpc` by default. Override with `CREWAI_RPC_URL`; `CREWAI_BACKEND_URL` or `CREWAI_BASE_URL` are still used for `/health`.
+
+Run the Expo mobile app:
+
+```bash
+npm run mobile:start -- --lan --port 8085 --clear
+```
+
+See `packages/mobile/README.md` for the mobile development workflow and
+`docs/mobile-pairing.md` for relay and pairing details.
 
 ## Build
 
@@ -137,6 +147,7 @@ new WebSocket("ws://127.0.0.1:8080/rpc", [
 npm run dev      # Electron development app
 npm run build    # renderer build + local Electron app
 npm run web:dev  # daemon + bare Vite development server
+npm run mobile:start -- --lan --clear  # Expo mobile app
 npm run test     # daemon Go tests and renderer tests
 npm run clean    # remove local build artifacts
 ```
@@ -153,6 +164,7 @@ npm run clean    # remove local build artifacts
 | `daemon/internal/runtime` | Runtime scan/execution interfaces plus local scanner and real/mock engines. |
 | `daemon/internal/backendagent` | Adapters for local coding-agent CLIs. |
 | `daemon/internal/broker` | In-process pub/sub for streaming chat events to RPC subscribers. |
+| `packages/mobile` | Expo mobile client for pairing, project browsing, read-only agent viewing, and chat. |
 
 ## Daemon API
 
