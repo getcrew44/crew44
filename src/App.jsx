@@ -9,8 +9,6 @@ import { displayAgent, relativeTime, HUMAN_USER } from './utils.js';
 import * as api from './api.js';
 import { createExistingFolderProject } from './existingFolderProject.js';
 
-const ONBOARDING_KEY = 'crewai.onboardingComplete';
-
 // Minimal toast — renders a small pill at the bottom-center of the window
 function Toast({ message, onDone }) {
   React.useEffect(() => {
@@ -151,38 +149,35 @@ export default function App() {
   const [backendOnline, setBackendOnline] = React.useState(false);
   const [toast, setToast] = React.useState(null);
   const [folderPathDialogOpen, setFolderPathDialogOpen] = React.useState(false);
-  const [onboardingDismissed, setOnboardingDismissed] = React.useState(() => {
-    try { return localStorage.getItem(ONBOARDING_KEY) === '1'; }
-    catch { return false; }
-  });
+  const [onboardingRequired, setOnboardingRequired] = React.useState(false);
   const [forceOnboarding, setForceOnboarding] = React.useState(false);
   const showToast = React.useCallback((msg) => setToast(msg), []);
 
-  const markOnboardingDone = React.useCallback(() => {
-    try { localStorage.setItem(ONBOARDING_KEY, '1'); } catch {}
-    setOnboardingDismissed(true);
+  const markOnboardingDone = React.useCallback(async () => {
+    const status = await api.completeOnboarding();
+    setOnboardingRequired(Boolean(status.onboarding_required));
     setForceOnboarding(false);
   }, []);
 
   const resetOnboarding = React.useCallback(() => {
-    try { localStorage.removeItem(ONBOARDING_KEY); } catch {}
-    setOnboardingDismissed(false);
     setForceOnboarding(true);
   }, []);
 
 
   const loadData = React.useCallback(async () => {
     try {
-      const [projs, agts, sklls, rntms] = await Promise.all([
+      const [projs, agts, sklls, rntms, onboarding] = await Promise.all([
         api.listProjects(),
         api.listAgents(),
         api.listSkills(),
         api.listRuntimes(),
+        api.getOnboardingStatus(),
       ]);
 
       setProjects(projs);
       setSkills(sklls);
       setRuntimes(rntms);
+      setOnboardingRequired(Boolean(onboarding.onboarding_required));
       setBackendOnline(true);
 
       // Build agents map with display properties
@@ -266,13 +261,23 @@ export default function App() {
   }, [createProjectFromFolderPath]);
 
   const handleCreateProject = React.useCallback(async (name) => {
+    const mainAgentId = agentsList[0]?.id || '';
+    if (!mainAgentId) {
+      showToast('Create an agent before creating a project');
+      return;
+    }
+    if (!window.electronAPI?.createBlankProjectFolder) {
+      showToast('Blank project folders are only available in the desktop app');
+      return;
+    }
     try {
-      await api.createProject(name, '', '');
+      const folder = await window.electronAPI.createBlankProjectFolder(name);
+      await api.createProject(name, folder.path, mainAgentId);
       loadData();
     } catch (err) {
       showToast(`Failed to create project: ${err.message}`);
     }
-  }, [loadData, showToast]);
+  }, [agentsList, loadData, showToast]);
 
   const handleRenameProject = React.useCallback(async (id, newName) => {
     const project = projects.find(p => p.id === id);
@@ -358,7 +363,7 @@ export default function App() {
   const shouldShowOnboarding =
     !loading && backendOnline && (
       forceOnboarding ||
-      (!onboardingDismissed && agentsList.length === 0 && projects.length === 0)
+      onboardingRequired
     );
 
   if (shouldShowOnboarding) {
@@ -369,10 +374,16 @@ export default function App() {
         <div style={{ width: '100%', height: '100%', background: '#FAF5E8', overflow: 'hidden' }}>
           <OnboardingRoute
             runtimes={runtimes}
-            onSkip={() => { markOnboardingDone(); }}
-            onComplete={() => {
-              markOnboardingDone();
-              loadData();
+            onSkip={async () => {
+              try {
+                await markOnboardingDone();
+              } catch (err) {
+                showToast(`Failed to finish setup: ${err.message}`);
+              }
+            }}
+            onComplete={async () => {
+              await markOnboardingDone();
+              await loadData();
               showToast('Crew ready. Welcome aboard.');
             }}
           />

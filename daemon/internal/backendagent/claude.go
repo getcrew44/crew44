@@ -133,6 +133,7 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		finalStatus := "completed"
 		var finalError string
 		usage := make(map[string]TokenUsage)
+		toolNamesByID := make(map[string]string)
 
 		// Close stdout when the context is cancelled so scanner.Scan() unblocks.
 		go func() {
@@ -156,9 +157,9 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 
 			switch msg.Type {
 			case "assistant":
-				b.handleAssistant(msg, msgCh, &output, usage)
+				b.handleAssistant(msg, msgCh, &output, usage, toolNamesByID)
 			case "user":
-				b.handleUser(msg, msgCh)
+				b.handleUser(msg, msgCh, toolNamesByID)
 			case "system":
 				if msg.SessionID != "" {
 					sessionID = msg.SessionID
@@ -233,7 +234,7 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	return &Session{Messages: msgCh, Result: resCh}, nil
 }
 
-func (b *claudeBackend) handleAssistant(msg claudeSDKMessage, ch chan<- Message, output *strings.Builder, usage map[string]TokenUsage) {
+func (b *claudeBackend) handleAssistant(msg claudeSDKMessage, ch chan<- Message, output *strings.Builder, usage map[string]TokenUsage, toolNamesByID map[string]string) {
 	var content claudeMessageContent
 	if err := json.Unmarshal(msg.Message, &content); err != nil {
 		return
@@ -265,6 +266,9 @@ func (b *claudeBackend) handleAssistant(msg claudeSDKMessage, ch chan<- Message,
 			if block.Input != nil {
 				_ = json.Unmarshal(block.Input, &input)
 			}
+			if block.ID != "" && block.Name != "" {
+				toolNamesByID[block.ID] = block.Name
+			}
 			trySend(ch, Message{
 				Type:   MessageToolUse,
 				Tool:   block.Name,
@@ -275,7 +279,7 @@ func (b *claudeBackend) handleAssistant(msg claudeSDKMessage, ch chan<- Message,
 	}
 }
 
-func (b *claudeBackend) handleUser(msg claudeSDKMessage, ch chan<- Message) {
+func (b *claudeBackend) handleUser(msg claudeSDKMessage, ch chan<- Message, toolNamesByID map[string]string) {
 	var content claudeMessageContent
 	if err := json.Unmarshal(msg.Message, &content); err != nil {
 		return
@@ -287,8 +291,14 @@ func (b *claudeBackend) handleUser(msg claudeSDKMessage, ch chan<- Message) {
 			if block.Content != nil {
 				resultStr = string(block.Content)
 			}
+			toolName := block.Name
+			if toolName == "" {
+				toolName = toolNamesByID[block.ToolUseID]
+			}
+			delete(toolNamesByID, block.ToolUseID)
 			trySend(ch, Message{
 				Type:   MessageToolResult,
+				Tool:   toolName,
 				CallID: block.ToolUseID,
 				Output: resultStr,
 			})

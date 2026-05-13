@@ -9,6 +9,8 @@ vi.mock('../api.js', () => ({
   listSkills: vi.fn(),
   listRuntimes: vi.fn(),
   listProjectChats: vi.fn(),
+  getOnboardingStatus: vi.fn(),
+  completeOnboarding: vi.fn(),
   deleteProject: vi.fn(),
 }));
 
@@ -21,7 +23,6 @@ const project = {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  localStorage.setItem('crewai.onboardingComplete', '1');
   api.listProjects.mockResolvedValue([project]);
   api.listAgents.mockResolvedValue([
     { id: 'agent-1', name: 'Agent One', kind: 'agent', runtime_id: 'runtime-1' },
@@ -29,6 +30,14 @@ beforeEach(() => {
   api.listSkills.mockResolvedValue([]);
   api.listRuntimes.mockResolvedValue([{ id: 'runtime-1', name: 'Test Desk' }]);
   api.listProjectChats.mockResolvedValue([]);
+  api.getOnboardingStatus.mockResolvedValue({
+    last_onboarding_version: '1',
+    onboarding_required: false,
+  });
+  api.completeOnboarding.mockResolvedValue({
+    last_onboarding_version: '1',
+    onboarding_required: false,
+  });
   api.deleteProject.mockResolvedValue({ ok: true });
 });
 

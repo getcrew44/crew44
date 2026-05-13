@@ -189,7 +189,7 @@ describe('Onboarding — crew step', () => {
     fireEvent.click(screen.getByRole('button', { name: /Create 3 agents/i }));
 
     await waitFor(
-      () => expect(screen.getByText(/Could not create agents.*write failed/i)).toBeInTheDocument(),
+      () => expect(screen.getByText(/Could not finish setup.*write failed/i)).toBeInTheDocument(),
       { timeout: 4000 },
     );
     expect(onComplete).not.toHaveBeenCalled();

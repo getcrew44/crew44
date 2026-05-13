@@ -1,9 +1,10 @@
 const { app, BrowserWindow, dialog, ipcMain, shell } = require('electron');
-const { spawn } = require('child_process');
+const { execFileSync, spawn } = require('child_process');
 const crypto = require('crypto');
 const fs = require('fs');
 const http = require('http');
 const net = require('net');
+const os = require('os');
 const path = require('path');
 
 const isDev = Boolean(process.env.CREWAI_RENDERER_URL);
@@ -13,6 +14,18 @@ const bundledDaemon = path.join(__dirname, '..', 'bin', process.platform === 'wi
 const configuredBackendUrl = (process.env.CREWAI_BACKEND_URL || process.env.CREWAI_BASE_URL || '').replace(/\/$/, '');
 const configuredAuthToken = process.env.AUTH_TOKEN || process.env.CREWAI_AUTH_TOKEN || process.env.CREWAI_API_TOKEN || '';
 const preferredPort = Number(process.env.CREWAI_DAEMON_PORT || process.env.PORT || 18766);
+const cliPathEntries = [
+  '/opt/homebrew/bin',
+  '/opt/homebrew/sbin',
+  '/usr/local/bin',
+  '/usr/local/sbin',
+  path.join(os.homedir(), '.local/bin'),
+  path.join(os.homedir(), 'bin'),
+  '/usr/bin',
+  '/bin',
+  '/usr/sbin',
+  '/sbin',
+];
 
 let mainWindow;
 let daemonProcess;
@@ -20,6 +33,8 @@ let backendUrl = configuredBackendUrl;
 let authToken = configuredAuthToken;
 
 app.setName(appName);
+
+repairProcessPath();
 
 function makeAuthToken() {
   return crypto.randomBytes(32).toString('base64url');
@@ -54,6 +69,48 @@ async function choosePort() {
   const port = await findOpenPort();
   console.log(`[crewai] preferred daemon port ${preferredPort || '(invalid)'} is unavailable; using ${port}`);
   return port;
+}
+
+function withDaemonEnv(overrides) {
+  const env = { ...process.env, ...overrides };
+  if (process.platform === 'win32') return env;
+
+  const entries = [
+    ...(env.PATH || '').split(path.delimiter),
+    ...cliPathEntries,
+  ].filter(Boolean);
+  env.PATH = [...new Set(entries)].join(path.delimiter);
+  return env;
+}
+
+function repairProcessPath() {
+  if (process.platform === 'win32') return;
+
+  const shellPath = process.env.SHELL || '/bin/zsh';
+  const marker = '__CREWAI_LOGIN_SHELL_PATH__';
+  let loginShellPath = '';
+
+  try {
+    const output = execFileSync(shellPath, ['-ilc', `printf '${marker}%s' "$PATH"`], {
+      encoding: 'utf8',
+      timeout: 3000,
+      env: process.env,
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
+    const markerIndex = output.lastIndexOf(marker);
+    if (markerIndex >= 0) {
+      loginShellPath = output.slice(markerIndex + marker.length).trim();
+    }
+  } catch (err) {
+    console.warn(`[crewai] could not recover login shell PATH via ${shellPath}: ${err.message}`);
+  }
+
+  const entries = [
+    ...loginShellPath.split(path.delimiter),
+    ...(process.env.PATH || '').split(path.delimiter),
+    ...cliPathEntries,
+  ].filter(Boolean);
+  process.env.PATH = [...new Set(entries)].join(path.delimiter);
 }
 
 function waitForHealth(url, retries = 80) {
@@ -106,12 +163,11 @@ async function ensureBackend() {
   authToken = configuredAuthToken || makeAuthToken();
 
   daemonProcess = spawn(bundledDaemon, [], {
-    env: {
-      ...process.env,
+    env: withDaemonEnv({
       HOST: '127.0.0.1',
       PORT: String(port),
       AUTH_TOKEN: authToken,
-    },
+    }),
     stdio: ['ignore', 'ignore', 'pipe'],
   });
 
@@ -161,6 +217,26 @@ function createWindow() {
   }
 }
 
+function sanitizeProjectFolderName(name) {
+  const cleaned = String(name || '')
+    .trim()
+    .replace(/[<>:"/\\|?*\x00-\x1F]/g, '-')
+    .replace(/\s+/g, ' ')
+    .replace(/[. ]+$/g, '');
+  return cleaned || 'Untitled Project';
+}
+
+async function uniqueProjectFolderPath(baseDir, name) {
+  const first = path.join(baseDir, name);
+  if (!fs.existsSync(first)) return first;
+
+  for (let i = 2; i < 1000; i += 1) {
+    const candidate = path.join(baseDir, `${name}-${i}`);
+    if (!fs.existsSync(candidate)) return candidate;
+  }
+  throw new Error('Could not allocate a unique project folder name');
+}
+
 ipcMain.handle('backend:get-config', async () => ({
   url: isDev && configuredBackendUrl ? configuredBackendUrl : backendUrl,
   token: authToken,
@@ -174,6 +250,15 @@ ipcMain.handle('dialog:open-folder', async () => {
     canceled: result.canceled,
     filePaths: result.filePaths,
   };
+});
+
+ipcMain.handle('project:create-blank-folder', async (_event, name) => {
+  const documentsDir = app.getPath('documents');
+  const crewaiDir = path.join(documentsDir, 'CrewAI');
+  const folderName = sanitizeProjectFolderName(name);
+  const projectDir = await uniqueProjectFolderPath(crewaiDir, folderName);
+  await fs.promises.mkdir(projectDir, { recursive: true });
+  return { path: projectDir };
 });
 
 ipcMain.handle('shell:show-in-folder', async (_event, folderPath) => {

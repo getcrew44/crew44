@@ -596,9 +596,9 @@ export default function OnboardingRoute({ runtimes: initialRuntimes, onComplete,
       for (const member of chosen) {
         await api.createAgent(member.name, member.instruction, resolvedRuntimeId, '');
       }
-      onComplete?.();
+      await Promise.resolve(onComplete?.());
     } catch (err) {
-      setError(`Could not create agents: ${err.message}`);
+      setError(`Could not finish setup: ${err.message}`);
       setCreating(false);
     }
   };
