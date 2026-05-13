@@ -3,7 +3,6 @@ package httpapi
 import (
 	"encoding/json"
 	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -289,12 +288,7 @@ func TestResetAgentPresetRejectsNonPresetAgent(t *testing.T) {
 	env := newTestEnv(t)
 	postJSON(t, env.server, http.MethodPost, "/api/runtimes/rescan", nil, http.StatusOK, nil)
 	agentID := createAgent(t, env, "Aria")
-	req := httptest.NewRequest(http.MethodPost, "/api/agents/"+agentID+"/reset-preset", nil)
-	rec := httptest.NewRecorder()
-	env.server.ServeHTTP(rec, req)
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400 for non-preset agent reset, got %d body=%s", rec.Code, rec.Body.String())
-	}
+	postJSON(t, env.server, http.MethodPost, "/api/agents/"+agentID+"/reset-preset", nil, http.StatusBadRequest, nil)
 }
 
 func TestSeedDefaultCrewConcurrentCallsNoDuplicates(t *testing.T) {
@@ -308,10 +302,8 @@ func TestSeedDefaultCrewConcurrentCallsNoDuplicates(t *testing.T) {
 	for i := 0; i < 4; i++ {
 		go func() {
 			defer wg.Done()
-			req := httptest.NewRequest(http.MethodPost, "/api/presets/default-crew/seed", nil)
-			rec := httptest.NewRecorder()
-			env.server.ServeHTTP(rec, req)
-			results <- rec.Code
+			postJSON(t, env.server, http.MethodPost, "/api/presets/default-crew/seed", nil, http.StatusOK, nil)
+			results <- http.StatusOK
 		}()
 	}
 	wg.Wait()

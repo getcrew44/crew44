@@ -43,8 +43,6 @@ function openFolderPlugin() {
   };
 }
 
-const backendTarget = process.env.CREWAI_BACKEND_URL || process.env.CREWAI_BASE_URL || 'http://localhost:8080';
-
 export default defineConfig({
   base: './',
   plugins: [react(), openFolderPlugin()],
@@ -56,11 +54,5 @@ export default defineConfig({
   },
   server: {
     port: 3000,
-    proxy: {
-      '/api': {
-        target: backendTarget,
-        changeOrigin: true,
-      },
-    },
   },
 });

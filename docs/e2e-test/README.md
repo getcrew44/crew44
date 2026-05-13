@@ -1,10 +1,10 @@
-# API-Level End-to-End Test Design
+# JSON-RPC-Level End-to-End Test Design
 
 ## Goal
 
-This suite validates the backend as a file-backed API service, without any
+This suite validates the backend as a file-backed JSON-RPC service, without any
 frontend involved. The purpose is not just "one happy path works", but that the
-API contract is friendly to a frontend:
+RPC contract is friendly to a frontend:
 
 - list/get responses reflect persisted state immediately
 - on-disk state matches API responses
@@ -19,7 +19,7 @@ The machine running this suite must already have authenticated local CLIs for:
 - `codex`
 - `claude`
 
-`POST /api/runtimes/rescan` uses the multica-derived local scan path now wired
+`runtimes.rescan` uses the multica-derived local scan path now wired
 into this repo. The suite expects exactly two detected runtimes today:
 
 - `codex`
@@ -64,10 +64,10 @@ It also creates a workspace sentinel file:
 
 After the backend starts, the suite calls:
 
-- `POST /api/runtimes/rescan`
-- `GET /api/runtimes`
-- `GET /api/runtimes/codex`
-- `GET /api/runtimes/claude`
+- `runtimes.rescan`
+- `runtimes.list`
+- `runtimes.get { id: "codex" }`
+- `runtimes.get { id: "claude" }`
 
 Assertions:
 
@@ -82,9 +82,9 @@ Assertions:
 The suite intentionally creates the project **before** wiring a main agent, to
 mirror a frontend-first "register workspace, configure later" flow:
 
-- `POST /api/projects`
-- `GET /api/projects`
-- `GET /api/projects/{id}`
+- `projects.create`
+- `projects.list`
+- `projects.get`
 
 Assertions:
 
@@ -101,9 +101,9 @@ Assertions:
 
 The suite creates a Codex-backed main agent:
 
-- `POST /api/agents`
-- `GET /api/agents`
-- `GET /api/agents/{id}`
+- `agents.create`
+- `agents.list`
+- `agents.get`
 
 Assertions:
 
@@ -116,13 +116,13 @@ Assertions:
 
 The suite exercises both the skill record and the skill file endpoints:
 
-- `POST /api/skills`
-- `GET /api/skills`
-- `GET /api/skills/{id}`
-- `PUT /api/skills/{id}`
-- `PUT /api/skills/{id}/files`
-- `GET /api/skills/{id}/files`
-- `DELETE /api/skills/{id}/files/{fileId}`
+- `skills.create`
+- `skills.list`
+- `skills.get`
+- `skills.update`
+- `skills.files.put`
+- `skills.files.list`
+- `skills.files.delete`
 
 Assertions:
 
@@ -138,8 +138,8 @@ Assertions:
 
 The suite then exercises update-style resource wiring:
 
-- `PUT /api/agents/{id}/skills`
-- `PUT /api/projects/{id}`
+- `agents.skills.replace`
+- `projects.update`
 
 Assertions:
 
@@ -156,7 +156,7 @@ Two more agents are created:
 
 Assertions:
 
-- `GET /api/agents` returns exactly `3` agents
+- `agents.list` returns exactly `3` agents
 - worker runtime is `codex`
 - reviewer runtime is `claude`
 
@@ -164,12 +164,12 @@ Assertions:
 
 The suite creates a "resume chat":
 
-- `POST /api/chat/sessions`
-- `GET /api/projects/{id}/chats`
-- `GET /api/chat/sessions?project_id={id}`
-- `GET /api/chat/sessions`
-- `GET /api/chat/sessions/{id}`
-- `PUT /api/chat/sessions/{id}`
+- `chats.create`
+- `projects.chats.list`
+- `chats.list { project_id }`
+- `chats.list`
+- `chats.get`
+- `chats.update`
 
 Assertions:
 
@@ -185,7 +185,7 @@ Assertions:
   - `stream.status == idle`
 
 This step specifically covers a frontend-facing expectation that
-`GET /api/chat/sessions` without `project_id` returns all persisted chats.
+`chats.list` without `project_id` returns all persisted chats.
 
 ### 9. Run Codex twice and verify session resume
 
@@ -202,23 +202,23 @@ Assertions:
 - `last_runtime_session.session_id` is non-empty after turn one
 - the second turn reuses the exact same session id
 
-### 10. Switch to Claude and verify SSE replay/follow
+### 10. Switch to Claude and verify RPC event replay/follow
 
 The suite posts a Claude-targeted message to the same chat, then reads:
 
-- `GET /api/chat/sessions/{id}/events?after=0&follow=1`
+- `chats.events.subscribe { chat_id, after: 0 }`
 
 Assertions:
 
-- SSE output contains `event: chat.event`
-- SSE output contains a `tool_call`
-- SSE output contains `CLAUDE_OK`
-- SSE output terminates with `event: done`
+- RPC notifications include `chat.event`
+- replay/follow output contains a `tool_call`
+- replay/follow output contains `CLAUDE_OK`
+- RPC notifications terminate with `chat.done`
 - chat `current_agent_id` becomes the Claude agent
 - `summary.md` contains earlier Codex user context and assistant output
 
 This confirms real provider invocation, provider stream parsing, persisted event
-replay, and live SSE follow.
+replay, and live WebSocket follow.
 
 ### 11. Trigger handoff and verify downstream side effects
 
@@ -271,10 +271,10 @@ The script keeps named artifacts for each phase, including:
 
 - runtime snapshots
 - project/agent/skill/chat create/list/get/update responses
-- SSE output
+- WebSocket event output
 - persisted summaries
 - final restart verification snapshots
 - `server.log`
 
-These artifacts are intended to make API regressions debuggable without any
+These artifacts are intended to make RPC regressions debuggable without any
 frontend attached.

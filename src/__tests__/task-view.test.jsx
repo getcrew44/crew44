@@ -141,7 +141,7 @@ describe('TaskView', () => {
     await waitFor(() => expect(api.cancelChat).toHaveBeenCalledWith('chat-1'));
   });
 
-  it('reconciles a persisted user SSE event with the optimistic user message', async () => {
+  it('reconciles a persisted user stream event with the optimistic user message', async () => {
     render(<TaskView chatId="chat-1" agentsMap={agentsMap} />);
 
     const input = await screen.findByTestId('composer-input');

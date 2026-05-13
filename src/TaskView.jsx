@@ -514,7 +514,7 @@ export default function TaskView({ chatId, agentsMap, onStreamingChange }) {
   const [error, setError] = React.useState(null);
   const timelineRef = React.useRef(null);
   const lastSeqRef = React.useRef(0);
-  const sseCleanupRef = React.useRef(() => {});
+  const streamCleanupRef = React.useRef(() => {});
 
   // Auto-scroll when events change
   React.useLayoutEffect(() => {
@@ -529,8 +529,8 @@ export default function TaskView({ chatId, agentsMap, onStreamingChange }) {
     return () => onStreamingChange?.(chatId, false);
   }, [chatId, isStreaming, onStreamingChange]);
 
-  const connectSSE = React.useCallback((id, after) => {
-    sseCleanupRef.current();
+  const connectEventStream = React.useCallback((id, after) => {
+    streamCleanupRef.current();
     setIsStreaming(true);
 
     const cleanup = api.streamChatEvents(
@@ -578,14 +578,14 @@ export default function TaskView({ chatId, agentsMap, onStreamingChange }) {
         api.getChat(id).then(setChat).catch(() => {});
       },
       (err) => {
-        console.error('SSE error:', err);
+        console.error('Chat stream error:', err);
         setIsStreaming(false);
       }
     );
-    sseCleanupRef.current = cleanup;
+    streamCleanupRef.current = cleanup;
   }, []);
 
-  // Load chat + connect SSE when chatId changes
+  // Load chat + connect event stream when chatId changes
   React.useEffect(() => {
     if (!chatId) return;
 
@@ -601,13 +601,13 @@ export default function TaskView({ chatId, agentsMap, onStreamingChange }) {
       })
       .catch(err => setError(err.message));
 
-    connectSSE(chatId, 0);
+    connectEventStream(chatId, 0);
 
     return () => {
-      sseCleanupRef.current();
-      sseCleanupRef.current = () => {};
+      streamCleanupRef.current();
+      streamCleanupRef.current = () => {};
     };
-  }, [chatId, connectSSE]);
+  }, [chatId, connectEventStream]);
 
   const handleSend = React.useCallback(async (text) => {
     if (!chatId) return;
@@ -628,19 +628,19 @@ export default function TaskView({ chatId, agentsMap, onStreamingChange }) {
       // target_agent_id is required by the backend — use current agent, fall back to lead
       const targetAgentId = chat?.current_agent_id || chat?.main_agent_id;
       await api.postMessage(chatId, text, targetAgentId);
-      // Reconnect SSE after the last known seq to get agent response
-      connectSSE(chatId, lastSeqRef.current);
+      // Reconnect after the last known seq to get agent response
+      connectEventStream(chatId, lastSeqRef.current);
     } catch (err) {
       console.error('Send failed:', err);
       setIsStreaming(false);
     }
-  }, [chatId, chat, connectSSE]);
+  }, [chatId, chat, connectEventStream]);
 
   const handleCancel = React.useCallback(async () => {
     if (!chatId) return;
     try {
       await api.cancelChat(chatId);
-      sseCleanupRef.current();
+      streamCleanupRef.current();
       setIsStreaming(false);
     } catch (err) {
       console.error('Cancel failed:', err);
