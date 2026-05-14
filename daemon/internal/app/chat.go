@@ -125,14 +125,16 @@ func (a *App) runChat(ctx context.Context, chatID, agentID, turnID, prompt strin
 		}
 		runtimeAgent := agent
 		runtimeAgent.Instruction = promptbuilder.BuildSystemPrompt(promptbuilder.SystemPromptInput{
-			Agent:             agent,
-			Runtime:           runtimeRecord,
-			AvailableAgents:   availableAgents,
-			Skills:            promptSkills(agentSkills),
-			SummaryPath:       a.store.SummaryPath(chatID),
-			HandoverNote:      currentHandoverNote,
-			UserMemoryPath:    a.store.UserMemoryPath(),
-			ProjectMemoryPath: a.store.ProjectMemoryPath(project.ID),
+			Agent:                   agent,
+			Runtime:                 runtimeRecord,
+			AvailableAgents:         availableAgents,
+			Skills:                  promptSkills(agentSkills),
+			SummaryPath:             a.store.SummaryPath(chatID),
+			HandoverNote:            currentHandoverNote,
+			UserMemoryDir:           a.store.UserMemoryDir(),
+			ProjectMemoryDir:        a.store.ProjectMemoryDir(project.ID),
+			LegacyUserMemoryPath:    a.store.UserMemoryPath(),
+			LegacyProjectMemoryPath: a.store.ProjectMemoryPath(project.ID),
 		})
 
 		resumeSessionID := ""

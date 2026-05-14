@@ -27,12 +27,26 @@ type Manager struct {
 	acceptMu sync.Mutex
 }
 
-// MemoryWriter appends to USER.md or per-project MEMORY.md. Caller resolves
-// the project. Returns (writtenPath, overflowed). overflowed=true means the
-// append would exceed the cap and was redirected to a .pending sibling file.
+// MemoryEntry is one accepted memory suggestion, materialized into a
+// standalone file on disk with frontmatter and a one-line pointer in the
+// scope's MEMORY.md index.
+type MemoryEntry struct {
+	Title       string    // suggestion title — used as the index link label and frontmatter description fallback
+	Description string    // one-line index/frontmatter description (sug.Impact or short body)
+	Body        string    // the actual memory content (preview.Text)
+	MinerID     string    // already sanitized via safeID upstream; uniqueness suffix
+	ScanID      string    // origin scan id, recorded in frontmatter
+	GeneratedAt time.Time // origin scan timestamp, recorded in frontmatter
+}
+
+// MemoryWriter persists an accepted memory as a typed file plus an index line.
+// Returns (bodyPath, indexFull). indexFull=true means the body file was
+// written normally but the MEMORY.md index would have exceeded its cap, so
+// the index pointer landed in MEMORY.md.pending. Caller routes the suggestion
+// to pending_compaction in that case.
 type MemoryWriter interface {
-	AppendUserMemory(line string) (path string, overflowed bool, err error)
-	AppendProjectMemory(projectID, line string) (path string, overflowed bool, err error)
+	WriteUserMemory(entry MemoryEntry) (path string, indexFull bool, err error)
+	WriteProjectMemory(projectID string, entry MemoryEntry) (path string, indexFull bool, err error)
 }
 
 // SkillWriter materializes a SKILL.md draft into the user's skills directory
@@ -166,7 +180,7 @@ func (m *Manager) Act(suggestionID, action string, editedPreview *Preview) error
 }
 
 // applyAccept routes the accepted suggestion to the right side effect:
-// memory → append to USER.md / project MEMORY.md
+// memory → write a typed file under memory/ + append a line to MEMORY.md
 // skill  → drop a SKILL.md file
 // strategy → write a markdown record under applied/ (no schedule mutation in v1)
 //
@@ -176,11 +190,12 @@ func (m *Manager) Act(suggestionID, action string, editedPreview *Preview) error
 func (m *Manager) applyAccept(sug Suggestion, preview Preview) (string, error) {
 	switch sug.Kind {
 	case KindMemoryUser:
-		path, overflowed, err := m.memWriter.AppendUserMemory(preview.Text)
+		entry := buildMemoryEntry(sug, preview)
+		path, indexFull, err := m.memWriter.WriteUserMemory(entry)
 		if err != nil {
 			return "", err
 		}
-		if overflowed {
+		if indexFull {
 			return path, errMemoryCapHit
 		}
 		return path, nil
@@ -189,11 +204,12 @@ func (m *Manager) applyAccept(sug Suggestion, preview Preview) (string, error) {
 		if err != nil {
 			return "", fmt.Errorf("optimizer: unsafe project scope: %w", err)
 		}
-		path, overflowed, err := m.memWriter.AppendProjectMemory(scopeID, preview.Text)
+		entry := buildMemoryEntry(sug, preview)
+		path, indexFull, err := m.memWriter.WriteProjectMemory(scopeID, entry)
 		if err != nil {
 			return "", err
 		}
-		if overflowed {
+		if indexFull {
 			return path, errMemoryCapHit
 		}
 		return path, nil
@@ -206,7 +222,39 @@ func (m *Manager) applyAccept(sug Suggestion, preview Preview) (string, error) {
 	return "", fmt.Errorf("optimizer: unsupported kind %q", sug.Kind)
 }
 
-var errMemoryCapHit = errors.New("optimizer: memory file cap reached; entry queued under .pending")
+// buildMemoryEntry packs the fields the writer needs out of the suggestion
+// and (possibly edited) preview. Description prefers the impact tag, falling
+// back to a short slice of the body so the index line is always informative.
+func buildMemoryEntry(sug Suggestion, preview Preview) MemoryEntry {
+	description := strings.TrimSpace(sug.Impact)
+	if description == "" {
+		description = firstLine(sug.Body)
+	}
+	const maxDescription = 160
+	if len(description) > maxDescription {
+		description = strings.TrimRight(description[:maxDescription-1], " ") + "…"
+	}
+	return MemoryEntry{
+		Title:       strings.TrimSpace(sug.Title),
+		Description: description,
+		Body:        strings.TrimSpace(preview.Text),
+		MinerID:     sug.MinerID,
+		ScanID:      sug.ScanID,
+		GeneratedAt: sug.GeneratedAt,
+	}
+}
+
+func firstLine(s string) string {
+	for _, line := range strings.Split(s, "\n") {
+		line = strings.TrimSpace(line)
+		if line != "" {
+			return line
+		}
+	}
+	return ""
+}
+
+var errMemoryCapHit = errors.New("optimizer: MEMORY.md index cap reached; index line queued under .pending")
 
 func renderStrategyMarkdown(sug Suggestion, preview Preview) string {
 	var b strings.Builder

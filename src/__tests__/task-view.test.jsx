@@ -176,24 +176,17 @@ describe('TaskView', () => {
     expect(screen.getAllByText('请修复这个问题')).toHaveLength(1);
   });
 
-  it('renders a simplified header with id, opened time, and status meta line', async () => {
+  it('renders a simplified header with id and opened time', async () => {
     render(<TaskView chatId="chat-1" agentsMap={agentsMap} />);
 
     expect(await screen.findByRole('heading', { level: 1 })).toHaveTextContent('Demo chat');
     // 8-char short id
     expect(screen.getByText('chat-1')).toBeInTheDocument();
     expect(screen.getByText(/opened /)).toBeInTheDocument();
-    // status is shown as plain text (no MetaPill), not as the old bordered pill
-    expect(screen.getByText('active')).toBeInTheDocument();
-  });
-
-  it('uses "running" status when the chat is streaming', async () => {
-    api.getChat.mockResolvedValue({ ...chat, stream: { status: 'streaming' } });
-    api.streamChatEvents.mockImplementation(() => vi.fn());
-
-    render(<TaskView chatId="chat-1" agentsMap={agentsMap} />);
-
-    expect(await screen.findByText('running')).toBeInTheDocument();
+    // Status indicator was removed — streaming state is conveyed by the
+    // composer's Stop button and the elapsed-time tick, not a header label.
+    expect(screen.queryByText('active')).not.toBeInTheDocument();
+    expect(screen.queryByText('running')).not.toBeInTheDocument();
   });
 
   it('does not render a Share button in the header', async () => {
@@ -529,6 +522,9 @@ describe('TaskView', () => {
     // actor change that follows.
     expect(dividers).toHaveLength(1);
     expect(dividers[0]).toHaveTextContent(/Aria handed off to Default Agent/);
+    // The note is hidden until the divider is clicked.
+    expect(dividers[0]).not.toHaveTextContent(/write the composer/);
+    fireEvent.click(within(dividers[0]).getByTestId('handover-toggle'));
     expect(dividers[0]).toHaveTextContent(/write the composer/);
   });
 

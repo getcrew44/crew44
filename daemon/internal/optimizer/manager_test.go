@@ -9,25 +9,25 @@ import (
 	"time"
 )
 
-// fakeMemWriter records the last AppendUserMemory / AppendProjectMemory call
+// fakeMemWriter records the last WriteUserMemory / WriteProjectMemory call
 // so manager tests can assert the right routing without touching disk.
 type fakeMemWriter struct {
-	lastUserLine    string
-	lastProjectID   string
-	lastProjectLine string
-	overflow        bool
-	err             error
+	lastUserEntry    MemoryEntry
+	lastProjectID    string
+	lastProjectEntry MemoryEntry
+	overflow         bool
+	err              error
 }
 
-func (w *fakeMemWriter) AppendUserMemory(line string) (string, bool, error) {
-	w.lastUserLine = line
-	return "/fake/USER.md", w.overflow, w.err
+func (w *fakeMemWriter) WriteUserMemory(entry MemoryEntry) (string, bool, error) {
+	w.lastUserEntry = entry
+	return "/fake/memory/" + entry.MinerID + ".md", w.overflow, w.err
 }
 
-func (w *fakeMemWriter) AppendProjectMemory(projectID, line string) (string, bool, error) {
+func (w *fakeMemWriter) WriteProjectMemory(projectID string, entry MemoryEntry) (string, bool, error) {
 	w.lastProjectID = projectID
-	w.lastProjectLine = line
-	return "/fake/MEMORY.md", w.overflow, w.err
+	w.lastProjectEntry = entry
+	return "/fake/projects/" + projectID + "/memory/" + entry.MinerID + ".md", w.overflow, w.err
 }
 
 type fakeSkillWriter struct {
@@ -100,23 +100,32 @@ func TestManager_AcceptRoutesByKind(t *testing.T) {
 		t.Fatalf("want skill body to include header, got %q", skills.lastBody)
 	}
 
-	// memory-user accept → AppendUserMemory.
+	// memory-user accept → WriteUserMemory with title + body + miner id.
 	if err := mgr.Act(scanID+":mu-1", ActionAccept, nil); err != nil {
 		t.Fatalf("memory-user accept: %v", err)
 	}
-	if mem.lastUserLine != "Prefer em-dashes." {
-		t.Fatalf("want user line set, got %q", mem.lastUserLine)
+	if mem.lastUserEntry.Body != "Prefer em-dashes." {
+		t.Fatalf("want user body set, got %q", mem.lastUserEntry.Body)
+	}
+	if mem.lastUserEntry.Title != "M" {
+		t.Fatalf("want user title forwarded, got %q", mem.lastUserEntry.Title)
+	}
+	if mem.lastUserEntry.MinerID != "mu-1" {
+		t.Fatalf("want user miner id, got %q", mem.lastUserEntry.MinerID)
 	}
 
-	// memory-project accept → AppendProjectMemory with scope_id.
+	// memory-project accept → WriteProjectMemory with scope_id + entry payload.
 	if err := mgr.Act(scanID+":mp-1", ActionAccept, nil); err != nil {
 		t.Fatalf("memory-project accept: %v", err)
 	}
 	if mem.lastProjectID != "proj-123" {
 		t.Fatalf("want project id proj-123, got %q", mem.lastProjectID)
 	}
-	if mem.lastProjectLine != "Uses pnpm workspaces." {
-		t.Fatalf("want project line set, got %q", mem.lastProjectLine)
+	if mem.lastProjectEntry.Body != "Uses pnpm workspaces." {
+		t.Fatalf("want project body set, got %q", mem.lastProjectEntry.Body)
+	}
+	if mem.lastProjectEntry.MinerID != "mp-1" {
+		t.Fatalf("want project miner id, got %q", mem.lastProjectEntry.MinerID)
 	}
 
 	// strategy accept → applied/<scan>-<miner>.md markdown rendered.
@@ -160,16 +169,16 @@ func TestManager_EditPreviewIsUsedOnAccept(t *testing.T) {
 		t.Fatalf("edit: %v", err)
 	}
 	// Edit alone must NOT have called the memory writer yet.
-	if mem.lastUserLine != "" {
-		t.Fatalf("edit must not write memory; got %q", mem.lastUserLine)
+	if mem.lastUserEntry.Body != "" {
+		t.Fatalf("edit must not write memory; got %q", mem.lastUserEntry.Body)
 	}
 
 	// Accept now uses the edited preview, not the original.
 	if err := mgr.Act(scanID+":mu-1", ActionAccept, nil); err != nil {
 		t.Fatalf("accept: %v", err)
 	}
-	if mem.lastUserLine != "EDITED TEXT" {
-		t.Fatalf("accept should use edited preview, got %q", mem.lastUserLine)
+	if mem.lastUserEntry.Body != "EDITED TEXT" {
+		t.Fatalf("accept should use edited preview, got %q", mem.lastUserEntry.Body)
 	}
 
 	// Edit without an edited_preview must fail.
@@ -257,8 +266,8 @@ func TestManager_MemoryOverflowQueuesPendingCompactionWithoutDuplicateWrites(t *
 	if err := mgr.Act(sugID, ActionAccept, nil); err != nil {
 		t.Fatalf("overflow accept should queue pending compaction, got err: %v", err)
 	}
-	if mem.lastUserLine != "Remember this once." {
-		t.Fatalf("expected first accept to write pending entry once, got %q", mem.lastUserLine)
+	if mem.lastUserEntry.Body != "Remember this once." {
+		t.Fatalf("expected first accept to write the entry once, got %q", mem.lastUserEntry.Body)
 	}
 
 	states, err := store.ListStates()
@@ -268,32 +277,32 @@ func TestManager_MemoryOverflowQueuesPendingCompactionWithoutDuplicateWrites(t *
 	if got := states[sugID].State; got != "pending_compaction" {
 		t.Fatalf("state=%q, want pending_compaction", got)
 	}
-	if got := states[sugID].AppliedTo; got != "/fake/USER.md" {
-		t.Fatalf("applied_to=%q, want pending path", got)
+	if got := states[sugID].AppliedTo; !strings.HasSuffix(got, ".md") {
+		t.Fatalf("applied_to=%q, want body file path", got)
 	}
 
-	mem.lastUserLine = ""
+	mem.lastUserEntry = MemoryEntry{}
 	if err := mgr.Act(sugID, ActionAccept, nil); err != nil {
 		t.Fatalf("second overflow accept should be idempotent, got err: %v", err)
 	}
-	if mem.lastUserLine != "" {
-		t.Fatalf("second accept must not append duplicate pending entry, got %q", mem.lastUserLine)
+	if mem.lastUserEntry.Body != "" {
+		t.Fatalf("second accept must not write a duplicate entry, got %q", mem.lastUserEntry.Body)
 	}
 }
 
 // countingMemWriter is a thread-safe MemoryWriter that counts how many times
-// AppendUserMemory ran. Used to assert concurrent Accept calls don't double-write.
+// WriteUserMemory ran. Used to assert concurrent Accept calls don't double-write.
 type countingMemWriter struct {
 	calls atomic.Int32
 }
 
-func (w *countingMemWriter) AppendUserMemory(string) (string, bool, error) {
+func (w *countingMemWriter) WriteUserMemory(MemoryEntry) (string, bool, error) {
 	w.calls.Add(1)
-	return "/fake/USER.md", false, nil
+	return "/fake/memory/entry.md", false, nil
 }
-func (w *countingMemWriter) AppendProjectMemory(string, string) (string, bool, error) {
+func (w *countingMemWriter) WriteProjectMemory(string, MemoryEntry) (string, bool, error) {
 	w.calls.Add(1)
-	return "/fake/MEMORY.md", false, nil
+	return "/fake/memory/project-entry.md", false, nil
 }
 
 // TestManager_ConcurrentAcceptIsSerializedAndIdempotent simulates a
@@ -337,7 +346,7 @@ func TestManager_ConcurrentAcceptIsSerializedAndIdempotent(t *testing.T) {
 	}
 
 	if got := mem.calls.Load(); got != 1 {
-		t.Fatalf("AppendUserMemory called %d times under concurrent Accept; want exactly 1", got)
+		t.Fatalf("WriteUserMemory called %d times under concurrent Accept; want exactly 1", got)
 	}
 
 	states, err := store.ListStates()

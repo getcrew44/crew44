@@ -336,7 +336,7 @@ function Counter({ label, n, sub, stack = false, valueStyle }) {
   );
 }
 
-function LastScanCounter({ iso, runsAnalyzed, onViewResults }) {
+function LastScanCounter({ iso, runsAnalyzed }) {
   const scan = formatLastScanParts(iso);
   if (!scan) {
     return <Counter label="Last scan" n="never" sub="" />;
@@ -348,11 +348,6 @@ function LastScanCounter({ iso, runsAnalyzed, onViewResults }) {
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 3 }}>
         <div data-testid="last-scan-date" style={{ fontSize: 18, fontWeight: 600, color: '#1C1A17', lineHeight: 1.15 }}>{scan.date}</div>
         <div data-testid="last-scan-time" style={{ fontSize: 12, color: '#807972', lineHeight: 1.25 }}>{sub}</div>
-        {typeof onViewResults === 'function' && (
-          <button onClick={onViewResults} style={{ background: 'none', border: 'none', padding: 0, marginTop: 2, cursor: 'pointer', color: '#5C544B', textDecoration: 'underline', fontSize: 11.5, fontFamily: AUTO_UI }}>
-            View results
-          </button>
-        )}
       </div>
     </div>
   );
@@ -377,11 +372,14 @@ function ScheduleStrip({ list, onRun, onSchedule, schedule, scanElapsedMs, onVie
     <div style={{ ...autoCard, display: 'flex', alignItems: 'stretch', marginBottom: 20 }}>
       <Counter label="New this scan" n={items.length} sub="suggestions"/>
       <Counter label="High impact"   n={items.filter(e => e.suggestion.priority === 'high').length} sub="worth a look"/>
-      <LastScanCounter iso={list?.last_scan_at} runsAnalyzed={list?.runs_analyzed} onViewResults={onViewResults}/>
+      <LastScanCounter iso={list?.last_scan_at} runsAnalyzed={list?.runs_analyzed}/>
       <div style={{ padding: '14px 16px', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', justifyContent: 'space-between', gap: 6, minWidth: 220 }}>
         <div style={{ fontSize: 11.5, color: '#A89F92', textTransform: 'uppercase', letterSpacing: 0.4 }}>Next scan</div>
         <div style={{ fontSize: 12.5, color: '#5C544B', textAlign: 'right' }}>{describeSchedule(schedule)}</div>
         <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+          {typeof onViewResults === 'function' && (
+            <button onClick={onViewResults} style={ghostBtn} disabled={scanning}>View results</button>
+          )}
           <button onClick={onSchedule} style={ghostBtn} disabled={scanning}>Schedule</button>
           <button onClick={onRun} style={runStyle} disabled={scanning} aria-busy={scanning}>
             {scanning ? <Spinner size={11}/> : <AutoIcon name="play" size={11}/>}
@@ -393,34 +391,24 @@ function ScheduleStrip({ list, onRun, onSchedule, schedule, scanElapsedMs, onVie
   );
 }
 
-function FilterTabs({ filter, setFilter, list }) {
-  const items = list?.items || [];
-  function matches(e, key) {
-    const k = e.suggestion.kind;
-    if (key === 'all') return true;
-    if (key === 'memory') return k === 'memory-project' || k === 'memory-user';
-    return k === key;
-  }
+function FilterTabs({ filter, setFilter }) {
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 16, paddingBottom: 12, borderBottom: '1px solid #ECE6D5' }}>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 2, marginBottom: 16, borderBottom: '1px solid #ECE6D5' }}>
       {FILTERS.map(f => {
         const active = filter === f.key;
-        const n = items.filter(e => matches(e, f.key) && !CLOSED_STATES.includes(e.state?.state)).length;
         return (
-          <button key={f.key} onClick={() => setFilter(f.key)} style={{
-            padding: '5px 12px', borderRadius: 7, border: 'none',
-            background: active ? '#1C1A17' : 'transparent',
-            color: active ? '#FCFBF7' : '#5C544B',
-            fontSize: 12.5, fontWeight: active ? 500 : 400, cursor: 'pointer',
-            fontFamily: AUTO_UI, display: 'inline-flex', alignItems: 'center', gap: 6,
-          }}>
-            {f.label}
-            <span style={{ fontSize: 11, padding: '0 6px', borderRadius: 999, background: active ? 'rgba(255,255,255,0.18)' : '#F0EAD8', color: active ? '#FCFBF7' : '#807972', fontFamily: AUTO_MONO }}>{n}</span>
-          </button>
+          <div key={f.key} onClick={() => setFilter(f.key)} style={{
+            padding: '8px 14px', fontSize: 13, cursor: 'pointer',
+            color: active ? '#1C1A17' : '#807972',
+            fontWeight: active ? 500 : 400,
+            borderBottom: '2px solid ' + (active ? '#1C1A17' : 'transparent'),
+            marginBottom: -1,
+            fontFamily: AUTO_UI,
+          }}>{f.label}</div>
         );
       })}
       <span style={{ flex: 1 }}/>
-      <span style={{ fontSize: 12, color: '#807972' }}>Sorted by impact</span>
+      <span style={{ fontSize: 12, color: '#807972', padding: '0 0 8px' }}>Sorted by impact</span>
     </div>
   );
 }
@@ -594,7 +582,7 @@ function WhatItSeesModal({ open, onClose, latestScanId }) {
           <PrivacyItem title="Runs through your configured Partner agent" body="Wherever your Partner runtime sends data, the scanner sends the same kind of data."/>
           <PrivacyItem title="Output is reviewed before anything changes" body="Suggestions are accepted, edited, or dismissed per row. Nothing mutates skills, memory files, or schedules unless you accept."/>
           <PrivacyItem title="Retention" body="Scan corpus is kept under ~/.crewai/optimizer/scans/ until you purge it. No automatic aggregation in v1."/>
-          <PrivacyItem title="What an accepted suggestion does" body="Strategy → writes a record of intent to applied/. Skill → drops a SKILL.md in your skills folder. Memory → appends to your memory file (USER.md or project MEMORY.md)."/>
+          <PrivacyItem title="What an accepted suggestion does" body="Strategy → writes a record of intent to applied/. Skill → drops a SKILL.md in your skills folder. Memory → writes a typed markdown file under memory/ and adds a one-line pointer to MEMORY.md."/>
           <div style={{ display: 'flex', gap: 8, marginTop: 14 }}>
             <button style={ghostBtn} onClick={() => purgeOptimizerScans().then(() => setScan(null))}>Purge scan corpus now</button>
           </div>
@@ -834,7 +822,7 @@ export default function AutoRoute({ onToast }) {
         <ScheduleStrip list={list} schedule={schedule} scanElapsedMs={scanElapsedMs}
           onRun={handleRun} onSchedule={() => setScheduleOpen(true)}
           onViewResults={hasScan ? () => setResultsOpen(true) : null}/>
-        <FilterTabs filter={filter} setFilter={setFilter} list={list}/>
+        <FilterTabs filter={filter} setFilter={setFilter}/>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           {error && (
@@ -845,6 +833,14 @@ export default function AutoRoute({ onToast }) {
           {!error && items.length === 0 && (
             <div style={{ padding: 40, textAlign: 'center', color: '#807972', fontSize: 13 }}>
               {hasScan ? 'No suggestions in this category. Nice — your crew is dialed in.' : 'Run your first scan to see suggestions.'}
+              {hasScan && (
+                <div style={{ marginTop: 10 }}>
+                  <button onClick={() => setResultsOpen(true)} style={{
+                    background: 'none', border: 'none', padding: 0, cursor: 'pointer',
+                    color: '#5C544B', textDecoration: 'underline', fontSize: 12.5, fontFamily: AUTO_UI,
+                  }}>View last scan results</button>
+                </div>
+              )}
             </div>
           )}
           {items.map(entry => (

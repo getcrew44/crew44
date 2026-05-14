@@ -53,38 +53,194 @@ export function Toggle({ on, onChange }) {
   );
 }
 
-export function RichText({ text }) {
+// Inline tokens: {{file:...}}, {{ref:...}}, **bold**, *italic*, `code`, @mention.
+function renderInline(text, keyPrefix = '') {
   if (!text) return null;
-  const parts = [];
+  const tokens = [];
+  const re = /\{\{(file|ref):([^}]+)\}\}|\*\*([^*]+)\*\*|\*([^*\n]+)\*|`([^`]+)`|(@\w+)/g;
   let last = 0;
-  const re = /\{\{(file|ref):([^}]+)\}\}|(@\w+)/g;
   let m;
   while ((m = re.exec(text))) {
-    if (m.index > last) parts.push({ kind: 'text', value: text.slice(last, m.index) });
-    if (m[1] === 'file') {
-      parts.push({ kind: 'file', value: m[2] });
-    } else if (m[1] === 'ref') {
-      parts.push({ kind: 'ref', value: m[2] });
-    } else if (m[3]) {
-      parts.push({ kind: 'mention', value: m[3] });
-    }
+    if (m.index > last) tokens.push({ kind: 'text', value: text.slice(last, m.index) });
+    if (m[1] === 'file') tokens.push({ kind: 'file', value: m[2] });
+    else if (m[1] === 'ref') tokens.push({ kind: 'ref', value: m[2] });
+    else if (m[3] != null) tokens.push({ kind: 'bold', value: m[3] });
+    else if (m[4] != null) tokens.push({ kind: 'italic', value: m[4] });
+    else if (m[5] != null) tokens.push({ kind: 'code', value: m[5] });
+    else if (m[6]) tokens.push({ kind: 'mention', value: m[6] });
     last = m.index + m[0].length;
   }
-  if (last < text.length) parts.push({ kind: 'text', value: text.slice(last) });
+  if (last < text.length) tokens.push({ kind: 'text', value: text.slice(last) });
+
+  return tokens.map((p, i) => {
+    const key = keyPrefix + i;
+    if (p.kind === 'file') return (
+      <code key={key} style={{
+        fontFamily: MONO_FONT, fontSize: 12.5, color: '#C4644A',
+        background: '#F7EFDD', padding: '1px 5px', borderRadius: 4,
+      }}>{p.value}</code>
+    );
+    if (p.kind === 'code') return (
+      <code key={key} style={{
+        fontFamily: MONO_FONT, fontSize: 12.5, color: '#1C1A17',
+        background: '#ECE6D5', padding: '1px 5px', borderRadius: 4,
+      }}>{p.value}</code>
+    );
+    if (p.kind === 'bold') return (
+      <strong key={key} style={{ fontWeight: 600, color: '#1C1A17' }}>{p.value}</strong>
+    );
+    if (p.kind === 'italic') return (
+      <em key={key} style={{ fontStyle: 'italic' }}>{p.value}</em>
+    );
+    if (p.kind === 'ref' || p.kind === 'mention') return (
+      <span key={key} style={{ color: '#C4644A', fontWeight: 500 }}>{p.value.startsWith('@') ? p.value : '@' + p.value}</span>
+    );
+    return <React.Fragment key={key}>{p.value}</React.Fragment>;
+  });
+}
+
+const HEADING_STYLE = {
+  1: { fontSize: 20, fontWeight: 700, lineHeight: 1.25, margin: '12px 0 8px' },
+  2: { fontSize: 17, fontWeight: 650, lineHeight: 1.3,  margin: '12px 0 6px' },
+  3: { fontSize: 15, fontWeight: 600, lineHeight: 1.35, margin: '10px 0 4px' },
+  4: { fontSize: 14, fontWeight: 600, lineHeight: 1.4,  margin: '8px 0 4px'  },
+};
+
+const CODE_BLOCK_STYLE = {
+  padding: '10px 12px', borderRadius: 6,
+  background: '#F4EFE0', border: '1px solid #ECE6D5',
+  fontFamily: MONO_FONT, fontSize: 12.5, lineHeight: 1.55,
+  color: '#1C1A17', whiteSpace: 'pre',
+  overflowX: 'auto',
+};
+
+// Render an inline paragraph's lines, preserving single newlines as <br>.
+function renderParagraphLines(lines, keyPrefix) {
+  return lines.map((line, idx) => (
+    <React.Fragment key={`${keyPrefix}${idx}`}>
+      {idx > 0 && <br />}
+      {renderInline(line, `${keyPrefix}${idx}-`)}
+    </React.Fragment>
+  ));
+}
+
+// Block renderer: paragraphs (single-newline preserves a soft break), fenced
+// code blocks (```lang … ```), bullet lists (`- `/`* `), ordered lists (`1.`),
+// ATX headings (`#`–`####`), and horizontal rules (`---`/`***`). A single
+// paragraph body renders without wrapping so inline layouts stay tight.
+export function RichText({ text }) {
+  if (!text) return null;
+  const lines = text.split('\n');
+  const blocks = [];
+  let para = [];
+  let list = null;
+  let fence = null; // { lang, lines } while inside a ``` block
+
+  const flushPara = () => { if (para.length) { blocks.push({ kind: 'p', lines: para }); para = []; } };
+  const flushList = () => { if (list && list.items.length) { blocks.push(list); list = null; } };
+
+  for (const raw of lines) {
+    const fenceMatch = raw.match(/^\s*```\s*([\w+-]*)\s*$/);
+
+    if (fence) {
+      if (fenceMatch) {
+        blocks.push({ kind: 'code', lang: fence.lang, lines: fence.lines });
+        fence = null;
+      } else {
+        fence.lines.push(raw);
+      }
+      continue;
+    }
+
+    if (fenceMatch) {
+      flushPara();
+      flushList();
+      fence = { lang: fenceMatch[1] || '', lines: [] };
+      continue;
+    }
+
+    const line = raw.replace(/\s+$/, '');
+    const heading = line.match(/^\s*(#{1,4})\s+(.+)$/);
+    const bullet = /^\s*[-*]\s+/.test(line);
+    const numbered = line.match(/^\s*\d+\.\s+(.+)$/);
+    const hr = /^\s*(?:-{3,}|\*{3,}|_{3,})\s*$/.test(line);
+
+    if (heading) {
+      flushPara();
+      flushList();
+      blocks.push({ kind: 'h', level: heading[1].length, text: heading[2] });
+    } else if (hr) {
+      flushPara();
+      flushList();
+      blocks.push({ kind: 'hr' });
+    } else if (bullet) {
+      flushPara();
+      if (!list || list.kind !== 'ul') { flushList(); list = { kind: 'ul', items: [] }; }
+      list.items.push(line.replace(/^\s*[-*]\s+/, ''));
+    } else if (numbered) {
+      flushPara();
+      if (!list || list.kind !== 'ol') { flushList(); list = { kind: 'ol', items: [] }; }
+      list.items.push(numbered[1]);
+    } else if (line.trim() === '') {
+      flushPara();
+      flushList();
+    } else {
+      flushList();
+      para.push(line);
+    }
+  }
+  if (fence) blocks.push({ kind: 'code', lang: fence.lang, lines: fence.lines });
+  flushPara();
+  flushList();
+
+  if (blocks.length === 1 && blocks[0].kind === 'p') {
+    return <>{renderParagraphLines(blocks[0].lines, '')}</>;
+  }
 
   return (
     <>
-      {parts.map((p, i) => {
-        if (p.kind === 'file') return (
-          <code key={i} style={{
-            fontFamily: MONO_FONT, fontSize: 12.5, color: '#C4644A',
-            background: '#F7EFDD', padding: '1px 5px', borderRadius: 4,
-          }}>{p.value}</code>
+      {blocks.map((b, i) => {
+        if (b.kind === 'h') {
+          const Tag = `h${Math.min(b.level + 1, 6)}`;
+          const s = HEADING_STYLE[b.level] || HEADING_STYLE[4];
+          return (
+            <Tag key={i} style={{ ...s, color: '#1C1A17', marginTop: i === 0 ? 0 : s.margin.split(' ')[0] }}>
+              {renderInline(b.text, `${i}-`)}
+            </Tag>
+          );
+        }
+        if (b.kind === 'hr') return (
+          <hr key={i} style={{
+            border: 'none', borderTop: '1px solid #ECE6D5',
+            margin: '12px 0',
+          }} />
         );
-        if (p.kind === 'ref' || p.kind === 'mention') return (
-          <span key={i} style={{ color: '#C4644A', fontWeight: 500 }}>{p.value.startsWith('@') ? p.value : '@' + p.value}</span>
+        if (b.kind === 'code') return (
+          <pre key={i} style={{
+            ...CODE_BLOCK_STYLE,
+            margin: i === 0 ? '0 0 8px' : '8px 0',
+          }}>{b.lines.join('\n')}</pre>
         );
-        return <React.Fragment key={i}>{p.value}</React.Fragment>;
+        if (b.kind === 'p') return (
+          <p key={i} style={{ margin: i === 0 ? '0 0 8px' : '8px 0' }}>
+            {renderParagraphLines(b.lines, `${i}-`)}
+          </p>
+        );
+        if (b.kind === 'ul' || b.kind === 'ol') {
+          const ListTag = b.kind === 'ol' ? 'ol' : 'ul';
+          return (
+            <ListTag key={i} style={{
+              margin: i === 0 ? '0 0 8px' : '8px 0',
+              padding: '0 0 0 22px',
+              listStyle: b.kind === 'ol' ? 'decimal' : 'disc',
+            }}>
+              {b.items.map((it, j) => (
+                <li key={j} style={{ margin: '2px 0' }}>{renderInline(it, `${i}-${j}-`)}</li>
+              ))}
+            </ListTag>
+          );
+        }
+        return null;
       })}
     </>
   );

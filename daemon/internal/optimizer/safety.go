@@ -85,3 +85,55 @@ func clampEvidence(items []string) []string {
 	}
 	return out
 }
+
+// memorySlugMaxLen bounds the title-derived portion of a memory filename.
+// safeIDMaxLen still applies to the full <slug>-<minerID> result.
+const memorySlugMaxLen = 50
+
+// MemorySlug derives a filesystem-safe basename for a per-memory file from
+// the suggestion title, suffixed with scanID-minerID so the slug is globally
+// unique. MinerID alone is only unique within one scan (it's an LLM-emitted
+// hint like "mu-1"); without scanID two scans with the same title+minerID
+// would silently overwrite each other's body file. Falls back to the suffix
+// alone when the title slugifies to nothing or the combination would fail
+// safeID.
+func MemorySlug(title, scanID, minerID string) string {
+	suffix := strings.TrimSpace(minerID)
+	if s := strings.TrimSpace(scanID); s != "" && suffix != "" {
+		suffix = s + "-" + suffix
+	} else if s != "" {
+		suffix = s
+	}
+	var sb strings.Builder
+	lastDash := true
+	for _, r := range strings.ToLower(title) {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
+			sb.WriteRune(r)
+			lastDash = false
+		default:
+			if !lastDash {
+				sb.WriteByte('-')
+				lastDash = true
+			}
+		}
+	}
+	slug := strings.Trim(sb.String(), "-")
+	if len(slug) > memorySlugMaxLen {
+		slug = strings.TrimRight(slug[:memorySlugMaxLen], "-")
+	}
+	if slug == "" {
+		if _, err := safeID(suffix); err == nil {
+			return suffix
+		}
+		return strings.TrimSpace(minerID)
+	}
+	candidate := slug + "-" + suffix
+	if _, err := safeID(candidate); err != nil {
+		if _, err := safeID(suffix); err == nil {
+			return suffix
+		}
+		return strings.TrimSpace(minerID)
+	}
+	return candidate
+}

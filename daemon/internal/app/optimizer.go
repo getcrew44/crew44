@@ -315,39 +315,127 @@ type memoryWriter struct {
 // storeIface is the subset of *store.Store the memoryWriter needs. Lets us
 // avoid a circular import.
 type storeIface interface {
-	UserMemoryPath() string
-	ProjectMemoryPath(projectID string) string
+	UserMemoryDir() string
+	ProjectMemoryDir(projectID string) string
 }
 
-func (w *memoryWriter) AppendUserMemory(line string) (string, bool, error) {
-	return appendMemoryLine(w.store.UserMemoryPath(), line, optimizer.UserMemoryCap)
+const memoryIndexFile = "MEMORY.md"
+
+func (w *memoryWriter) WriteUserMemory(entry optimizer.MemoryEntry) (string, bool, error) {
+	return writeMemoryEntry(w.store.UserMemoryDir(), entry, optimizer.UserMemoryCap)
 }
 
-func (w *memoryWriter) AppendProjectMemory(projectID, line string) (string, bool, error) {
+func (w *memoryWriter) WriteProjectMemory(projectID string, entry optimizer.MemoryEntry) (string, bool, error) {
 	if strings.TrimSpace(projectID) == "" {
 		return "", false, errors.New("optimizer: project memory requires scope_id")
 	}
-	return appendMemoryLine(w.store.ProjectMemoryPath(projectID), line, optimizer.ProjectMemoryCap)
+	return writeMemoryEntry(w.store.ProjectMemoryDir(projectID), entry, optimizer.ProjectMemoryCap)
 }
 
-// appendMemoryLine appends "- <line>\n" to path. If the resulting size would
-// exceed cap, the entry is written to path+".pending" instead and overflowed
-// is true. v1 leaves compaction to a future TODO.
-func appendMemoryLine(path, line string, cap int) (string, bool, error) {
-	line = strings.TrimSpace(line)
-	if line == "" {
+// writeMemoryEntry materializes one accepted memory as a typed markdown file
+// inside dir and appends a one-line pointer to dir/MEMORY.md. If the new
+// index line would push the index past cap bytes, the pointer is appended to
+// MEMORY.md.pending instead and indexFull is true; the body file is always
+// written so the memory itself is never lost.
+func writeMemoryEntry(dir string, entry optimizer.MemoryEntry, cap int) (string, bool, error) {
+	body := strings.TrimSpace(entry.Body)
+	if body == "" {
 		return "", false, errors.New("optimizer: memory text is empty")
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if entry.MinerID == "" {
+		return "", false, errors.New("optimizer: memory entry missing miner id")
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", false, err
 	}
-	existing, _ := os.ReadFile(path)
-	entry := fmt.Sprintf("- %s\n", line)
-	if len(existing)+len(entry) > cap {
-		pending := path + ".pending"
-		return pending, true, appendFile(pending, entry)
+	slug := optimizer.MemorySlug(entry.Title, entry.ScanID, entry.MinerID)
+	bodyPath := filepath.Join(dir, slug+".md")
+	if err := os.WriteFile(bodyPath, []byte(renderMemoryFile(entry, slug, body)), 0o644); err != nil {
+		return "", false, err
 	}
-	return path, false, appendFile(path, entry)
+	indexLine := renderMemoryIndexLine(entry, slug)
+	indexPath := filepath.Join(dir, memoryIndexFile)
+	existing, _ := os.ReadFile(indexPath)
+	header := ""
+	if len(existing) == 0 {
+		header = "# Memory Index\n\n"
+	}
+	addition := header + indexLine
+	if len(existing)+len(addition) > cap {
+		if err := appendFile(indexPath+".pending", addition); err != nil {
+			return bodyPath, true, err
+		}
+		return bodyPath, true, nil
+	}
+	if err := appendFile(indexPath, addition); err != nil {
+		return bodyPath, false, err
+	}
+	return bodyPath, false, nil
+}
+
+func renderMemoryFile(entry optimizer.MemoryEntry, slug, body string) string {
+	generated := entry.GeneratedAt
+	if generated.IsZero() {
+		generated = time.Now().UTC()
+	}
+	var b strings.Builder
+	b.WriteString("---\n")
+	fmt.Fprintf(&b, "name: %s\n", slug)
+	if desc := strings.TrimSpace(entry.Description); desc != "" {
+		fmt.Fprintf(&b, "description: %s\n", yamlInline(desc))
+	}
+	fmt.Fprintf(&b, "generated_at: %s\n", generated.UTC().Format(time.RFC3339))
+	if entry.ScanID != "" {
+		fmt.Fprintf(&b, "source_scan: %s\n", entry.ScanID)
+	}
+	if entry.MinerID != "" && entry.ScanID != "" {
+		fmt.Fprintf(&b, "source_suggestion: %s:%s\n", entry.ScanID, entry.MinerID)
+	}
+	b.WriteString("---\n\n")
+	b.WriteString(body)
+	if !strings.HasSuffix(body, "\n") {
+		b.WriteByte('\n')
+	}
+	return b.String()
+}
+
+func renderMemoryIndexLine(entry optimizer.MemoryEntry, slug string) string {
+	title := memoryLinkText(entry.Title)
+	if title == "" {
+		title = slug
+	}
+	desc := collapseToLine(entry.Description)
+	if desc == "" {
+		return fmt.Sprintf("- [%s](%s.md)\n", title, slug)
+	}
+	return fmt.Sprintf("- [%s](%s.md) — %s\n", title, slug, desc)
+}
+
+// memoryLinkText keeps the title readable inside a markdown link. It collapses
+// any interior whitespace (including newlines) to single spaces so the link
+// stays on one line — the prompt reader's regex matches per physical line, so
+// a wrapped title would orphan the entry. The closing bracket is also rewritten
+// so the link target can't be terminated prematurely.
+func memoryLinkText(title string) string {
+	title = collapseToLine(title)
+	return strings.ReplaceAll(title, "]", ")")
+}
+
+// collapseToLine flattens any whitespace run (spaces, tabs, newlines) to a
+// single space. Used wherever a value must fit on one physical line.
+func collapseToLine(s string) string {
+	return strings.Join(strings.Fields(s), " ")
+}
+
+// yamlInline single-line-quotes a value when it contains characters that
+// would otherwise confuse a YAML reader. The frontmatter we emit is consumed
+// by humans more than parsers, but this keeps it safe to round-trip.
+func yamlInline(s string) string {
+	s = strings.ReplaceAll(s, "\n", " ")
+	if strings.ContainsAny(s, ":#\"'") {
+		return `"` + strings.ReplaceAll(s, `"`, `\"`) + `"`
+	}
+	return s
 }
 
 func appendFile(path, content string) error {
