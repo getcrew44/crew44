@@ -4,12 +4,13 @@ import { createRemotePairing } from './api.js';
 import { ghostBtn, primaryBtn, UI_FONT, MONO_FONT, Icon } from './components.jsx';
 
 const LAST_RELAY_URL_KEY = 'crewai.lastRelayUrl';
+export const DEFAULT_RELAY_URL = 'wss://relay.mindivelabs.com/relay';
 
 function readLastRelayUrl() {
   try {
-    return window.localStorage?.getItem(LAST_RELAY_URL_KEY) || '';
+    return window.localStorage?.getItem(LAST_RELAY_URL_KEY) || DEFAULT_RELAY_URL;
   } catch {
-    return '';
+    return DEFAULT_RELAY_URL;
   }
 }
 
@@ -119,7 +120,7 @@ export default function PairMobileDialog({ onClose }) {
           onKeyDown={event => {
             if (event.key === 'Enter') createPairing();
           }}
-          placeholder="wss://relay.example.com/relay"
+          placeholder={DEFAULT_RELAY_URL}
           style={{
             width: '100%',
             boxSizing: 'border-box',
