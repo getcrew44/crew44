@@ -89,18 +89,10 @@ function Shell({ step, total, onSkip, wide, children }) {
       display: 'flex', flexDirection: 'column', overflow: 'hidden',
     }}>
       <div style={{
-        padding: '18px 28px', borderBottom: '1px solid #ECE6D5',
+        padding: '18px 28px 18px 92px', borderBottom: '1px solid #ECE6D5',
         display: 'flex', alignItems: 'center', gap: 14,
         WebkitAppRegion: 'drag',
       }}>
-        <div style={{
-          width: 26, height: 26, borderRadius: 7,
-          background: '#1C1A17', color: '#FCFBF7',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          fontSize: 13, fontWeight: 700, fontFamily: MONO_FONT,
-        }}>C</div>
-        <span style={{ fontSize: 13.5, fontWeight: 600, color: '#1C1A17' }}>CrewAI</span>
-        <span style={{ fontSize: 12, color: '#A89F92' }}>· Setup</span>
         <div style={{ flex: 1 }} />
         <StepDots step={step} total={total} />
         <div style={{ flex: 1 }} />
@@ -371,7 +363,7 @@ function ScanStep({ onNext, onBack, runtimes, setRuntimes }) {
 
   let title, body;
   if (scanning) {
-    title = 'Scanning your machine for runtimes.';
+    title = 'Scanning your machine for runtimes...';
     body = 'Runtimes are the local engines your agents talk to — things like Claude Code, OpenAI CLIs, or anything you’ve already installed. We’ll detect what’s here and use it.';
   } else if (error) {
     title = 'Couldn’t reach the runtime scanner.';
@@ -438,7 +430,17 @@ function ScanStep({ onNext, onBack, runtimes, setRuntimes }) {
       <Footer
         left={<button style={largeGhostBtn} onClick={onBack}><span style={{ fontSize: 15 }}>←</span> Back</button>}
         right={
-          <button style={largePrimaryBtn} onClick={onNext} disabled={scanning}>
+          <button
+            style={scanning ? {
+              ...largePrimaryBtn,
+              background: '#D8CFB8',
+              borderColor: '#D8CFB8',
+              color: '#807972',
+              cursor: 'not-allowed',
+            } : largePrimaryBtn}
+            onClick={onNext}
+            disabled={scanning}
+          >
             {scanning ? 'Scanning…' : <>Continue <span style={{ fontSize: 15 }}>→</span></>}
           </button>
         }
@@ -451,15 +453,16 @@ function ScanStep({ onNext, onBack, runtimes, setRuntimes }) {
 
 // ─── Step 3: Default crew ────────────────────────────────────────────────────
 
-function CrewCard({ member, selected, onToggle }) {
+function CrewCard({ member, selected, onToggle, locked }) {
   const color = agentColor(member.key);
   return (
     <div
-      onClick={onToggle}
+      onClick={locked ? undefined : onToggle}
+      title={locked ? 'Partner is required and stays selected.' : undefined}
       style={{
         ...card,
         padding: '16px 18px',
-        cursor: 'pointer',
+        cursor: locked ? 'default' : 'pointer',
         display: 'flex', alignItems: 'flex-start', gap: 14,
         border: '1px solid ' + (selected ? '#1C1A17' : '#ECE6D5'),
         background: selected ? '#FCFBF7' : '#FCFAF1',
@@ -473,9 +476,16 @@ function CrewCard({ member, selected, onToggle }) {
         fontSize: 16, fontWeight: 600, flexShrink: 0,
       }}>{agentInitial(member.name)}</div>
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 4 }}>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 4, flexWrap: 'wrap' }}>
           <span style={{ fontSize: 14.5, fontWeight: 600, color: '#1C1A17' }}>{member.name}</span>
           <span style={{ fontSize: 12, color: '#807972' }}>· {member.role}</span>
+          {locked && (
+            <span style={{
+              fontSize: 10.5, fontWeight: 600, letterSpacing: 0.4, textTransform: 'uppercase',
+              color: '#807972', background: '#F0EAD8', borderRadius: 4,
+              padding: '1px 6px',
+            }}>Required</span>
+          )}
         </div>
         <div style={{ fontSize: 13, color: '#5C544B', lineHeight: 1.5 }}>{member.blurb}</div>
       </div>
@@ -485,6 +495,7 @@ function CrewCard({ member, selected, onToggle }) {
         background: selected ? '#1C1A17' : 'transparent',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
         color: '#FCFBF7', fontSize: 12, fontWeight: 700,
+        opacity: locked ? 0.7 : 1,
       }}>{selected ? '✓' : ''}</div>
     </div>
   );
@@ -499,6 +510,7 @@ function CrewStep({ onBack, onFinish, runtimes, creating, error }) {
   const [runtimeId, setRuntimeId] = React.useState(AUTO_RUNTIME);
 
   const toggle = (key) => {
+    if (key === 'partner') return; // Partner is required.
     setSelected(prev => {
       const next = new Set(prev);
       if (next.has(key)) next.delete(key); else next.add(key);
@@ -523,6 +535,7 @@ function CrewStep({ onBack, onFinish, runtimes, creating, error }) {
             member={m}
             selected={selected.has(m.key)}
             onToggle={() => toggle(m.key)}
+            locked={m.key === 'partner'}
           />
         ))}
       </div>

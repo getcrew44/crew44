@@ -184,22 +184,90 @@ function ToolStatusChip({ result }) {
   return null;
 }
 
-// Compact, click-to-expand tool call. The collapsed row is transparent — just
-// a chevron, mono tool name, truncated input, time, and a status indicator.
-// Expanding reveals the full input + captured output in a bordered card.
-function ToolEvent({ event, agentsMap, showHeader = true }) {
-  const agent = resolveAuthor(event.author, agentsMap);
-  const [expanded, setExpanded] = React.useState(false);
-  if (!agent || agent.kind !== 'agent') return null;
-
+// The collapsible card body for a single tool call. Used both standalone
+// (inside ToolEvent) and as a child inside ToolGroupEvent's expanded list.
+function ToolEventCard({ event, defaultOpen = false }) {
+  const [expanded, setExpanded] = React.useState(defaultOpen);
   const fullOutput = event.output || event.detail || '';
   const hasOutput = Boolean(fullOutput);
   const pathOverflows = Boolean(event.path && event.path.length > 80);
   const canExpand = hasOutput || pathOverflows;
 
   return (
+    <div style={{
+      borderRadius: 6, overflow: 'hidden',
+      background: expanded ? '#FCFAF1' : 'transparent',
+      border: '1px solid ' + (expanded ? '#ECE6D5' : 'transparent'),
+      transition: 'background .15s, border-color .15s',
+    }}>
+      <button
+        type="button"
+        data-testid="tool-event-row"
+        aria-expanded={expanded}
+        onClick={() => { if (canExpand) setExpanded(v => !v); }}
+        style={{
+          display: 'flex', alignItems: 'center', gap: 8,
+          width: '100%', padding: '4px 8px',
+          background: 'transparent', border: 'none',
+          cursor: canExpand ? 'pointer' : 'default',
+          fontFamily: UI_FONT, textAlign: 'left',
+          color: '#807972',
+        }}
+      >
+        <span aria-hidden="true" style={{
+          color: '#A89F92', display: 'flex',
+          transform: expanded ? 'rotate(90deg)' : 'none',
+          transition: 'transform .15s',
+          opacity: canExpand ? 1 : 0.3,
+        }}>
+          <svg width="10" height="10" viewBox="0 0 10 10">
+            <path d="M3.5 2L7 5 3.5 8" stroke="currentColor" strokeWidth="1.4" fill="none" strokeLinecap="round" strokeLinejoin="round"/>
+          </svg>
+        </span>
+        <span style={{
+          fontFamily: MONO_FONT, fontSize: 12, color: '#807972', fontWeight: 400,
+        }}>{event.tool}</span>
+        {event.path && (
+          <span style={{
+            fontFamily: MONO_FONT, fontSize: 12, color: '#A89F92',
+            whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+            flex: 1, minWidth: 0,
+          }}>{event.path}</span>
+        )}
+        {!event.path && <span style={{ flex: 1 }} />}
+        <span style={{ fontSize: 11, color: '#A89F92', flexShrink: 0 }}>{event.time}</span>
+        <ToolStatusChip result={event.result} />
+      </button>
+      {expanded && (
+        <div
+          data-testid="tool-event-detail"
+          style={{
+            borderTop: '1px solid #ECE6D5', background: '#FFFEF8',
+            padding: '10px 14px',
+            fontFamily: MONO_FONT, fontSize: 12.5, color: '#1C1A17',
+            whiteSpace: 'pre-wrap', overflow: 'auto', maxHeight: 400,
+            lineHeight: 1.55,
+            animation: 'cw-expand-in .18s ease',
+          }}
+        >
+          {pathOverflows && (
+            <div style={{ marginBottom: hasOutput ? 8 : 0 }}>{event.path}</div>
+          )}
+          {hasOutput && (
+            <span style={{ color: event.result === 'error' ? '#B23A2E' : '#1C1A17' }}>{fullOutput}</span>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ToolEventGutter({ author, time, showHeader, agentsMap, children, testid }) {
+  const agent = resolveAuthor(author, agentsMap);
+  if (!agent || agent.kind !== 'agent') return null;
+  return (
     <div
-      data-testid="tool-event"
+      data-testid={testid}
       style={{ display: 'flex', gap: 14, padding: showHeader ? '10px 0' : '2px 0' }}
     >
       {showHeader
@@ -210,76 +278,92 @@ function ToolEvent({ event, agentsMap, showHeader = true }) {
           <div style={{ fontSize: 13.5, display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
             <span style={{ fontWeight: 600, color: '#1C1A17' }}>{agent.name}</span>
             {agent.archived && <DeletedTag />}
-            <span style={{ color: '#A89F92' }}>· {event.time}</span>
+            <span style={{ color: '#A89F92' }}>· {time}</span>
           </div>
         )}
-        <div style={{
-          borderRadius: 6, overflow: 'hidden',
-          background: expanded ? '#FCFAF1' : 'transparent',
-          border: '1px solid ' + (expanded ? '#ECE6D5' : 'transparent'),
-          transition: 'background .15s, border-color .15s',
-        }}>
-          <button
-            type="button"
-            data-testid="tool-event-row"
-            aria-expanded={expanded}
-            onClick={() => { if (canExpand) setExpanded(v => !v); }}
-            style={{
-              display: 'flex', alignItems: 'center', gap: 8,
-              width: '100%', padding: '4px 8px',
-              background: 'transparent', border: 'none',
-              cursor: canExpand ? 'pointer' : 'default',
-              fontFamily: UI_FONT, textAlign: 'left',
-              color: '#807972',
-            }}
-          >
-            <span aria-hidden="true" style={{
-              color: '#A89F92', display: 'flex',
-              transform: expanded ? 'rotate(90deg)' : 'none',
-              transition: 'transform .15s',
-              opacity: canExpand ? 1 : 0.3,
-            }}>
-              <svg width="10" height="10" viewBox="0 0 10 10">
-                <path d="M3.5 2L7 5 3.5 8" stroke="currentColor" strokeWidth="1.4" fill="none" strokeLinecap="round" strokeLinejoin="round"/>
-              </svg>
-            </span>
-            <span style={{
-              fontFamily: MONO_FONT, fontSize: 12, color: '#807972', fontWeight: 400,
-            }}>{event.tool}</span>
-            {event.path && (
-              <span style={{
-                fontFamily: MONO_FONT, fontSize: 12, color: '#A89F92',
-                whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-                flex: 1, minWidth: 0,
-              }}>{event.path}</span>
-            )}
-            {!event.path && <span style={{ flex: 1 }} />}
-            <span style={{ fontSize: 11, color: '#A89F92', flexShrink: 0 }}>{event.time}</span>
-            <ToolStatusChip result={event.result} />
-          </button>
-          {expanded && (
-            <div
-              data-testid="tool-event-detail"
-              style={{
-                borderTop: '1px solid #ECE6D5', background: '#FFFEF8',
-                padding: '10px 14px',
-                fontFamily: MONO_FONT, fontSize: 12.5, color: '#1C1A17',
-                whiteSpace: 'pre-wrap', overflow: 'auto', maxHeight: 400,
-                lineHeight: 1.55,
-                animation: 'cw-expand-in .18s ease',
-              }}
-            >
-              {pathOverflows && (
-                <div style={{ marginBottom: hasOutput ? 8 : 0 }}>{event.path}</div>
-              )}
-              {hasOutput && (
-                <span style={{ color: event.result === 'error' ? '#B23A2E' : '#1C1A17' }}>{fullOutput}</span>
-              )}
-            </div>
-          )}
-        </div>
+        {children}
       </div>
     </div>
+  );
+}
+
+// Compact, click-to-expand tool call.
+function ToolEvent({ event, agentsMap, showHeader = true }) {
+  return (
+    <ToolEventGutter
+      author={event.author} time={event.time}
+      showHeader={showHeader} agentsMap={agentsMap}
+      testid="tool-event"
+    >
+      <ToolEventCard event={event} />
+    </ToolEventGutter>
+  );
+}
+
+// Consecutive tool calls from the same agent collapse into a single header
+// row ("Used N tools  name · name · name"). Expanding reveals each tool's
+// own compact body.
+function ToolGroupEvent({ events, agentsMap, showHeader = true }) {
+  const [open, setOpen] = React.useState(false);
+  const anyError = events.some(e => e.result === 'error');
+  const anyPending = events.some(e => e.result === 'pending');
+  const status = anyPending ? 'pending' : anyError ? 'error' : 'ok';
+
+  return (
+    <ToolEventGutter
+      author={events[0].author} time={events[0].time}
+      showHeader={showHeader} agentsMap={agentsMap}
+      testid="tool-group"
+    >
+      <div style={{
+        borderRadius: 6, overflow: 'hidden',
+        background: open ? '#FCFAF1' : 'transparent',
+        border: '1px solid ' + (open ? '#ECE6D5' : 'transparent'),
+        transition: 'background .15s, border-color .15s',
+      }}>
+        <button
+          type="button"
+          data-testid="tool-group-row"
+          aria-expanded={open}
+          onClick={() => setOpen(v => !v)}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 8,
+            width: '100%', padding: '4px 8px',
+            background: 'transparent', border: 'none', cursor: 'pointer',
+            fontFamily: UI_FONT, textAlign: 'left', color: '#807972',
+          }}
+        >
+          <span aria-hidden="true" style={{
+            color: '#A89F92', display: 'flex',
+            transform: open ? 'rotate(90deg)' : 'none',
+            transition: 'transform .15s',
+          }}>
+            <svg width="10" height="10" viewBox="0 0 10 10">
+              <path d="M3.5 2L7 5 3.5 8" stroke="currentColor" strokeWidth="1.4" fill="none" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
+          </span>
+          <span style={{ fontSize: 12, color: '#5C544B' }}>Used {events.length} tools</span>
+          {!open && (
+            <span style={{
+              fontFamily: MONO_FONT, fontSize: 12, color: '#A89F92',
+              whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+              flex: 1, minWidth: 0,
+            }}>{events.map(e => e.tool).join(' · ')}</span>
+          )}
+          {open && <span style={{ flex: 1 }} />}
+          <ToolStatusChip result={status} />
+        </button>
+        {open && (
+          <div style={{
+            borderTop: '1px solid #ECE6D5', background: '#FFFEF8',
+            padding: '6px 8px', display: 'flex', flexDirection: 'column', gap: 2,
+            animation: 'cw-expand-in .18s ease',
+          }}>
+            {events.map((e, i) => <ToolEventCard key={e._seq ?? i} event={e} />)}
+          </div>
+        )}
+      </div>
+    </ToolEventGutter>
   );
 }
 
@@ -373,6 +457,7 @@ function EventRouter({ event, agentsMap, showHeader = true, thought }) {
   if (event.kind === 'message') return <MessageEvent event={event} agentsMap={agentsMap} thought={thought} />;
   if (event.kind === 'thinking') return <ThinkingEvent event={event} agentsMap={agentsMap} />;
   if (event.kind === 'tool') return <ToolEvent event={event} agentsMap={agentsMap} showHeader={showHeader} />;
+  if (event.kind === 'tool_group') return <ToolGroupEvent events={event.events} agentsMap={agentsMap} showHeader={showHeader} />;
   if (event.kind === 'tool_result') return <ToolResultEvent event={event} agentsMap={agentsMap} />;
   if (event.kind === 'error') return <ErrorEvent event={event} agentsMap={agentsMap} />;
   // runtime_session is intentionally swallowed; no UI for it.
@@ -631,8 +716,28 @@ function prepareEvents(events) {
   return out;
 }
 
+// Collapse runs of consecutive `tool` events from the same author into a
+// single `tool_group` synthetic event. A single tool stays as `tool` so it
+// keeps its standalone compact row.
+function groupConsecutiveTools(events) {
+  const out = [];
+  for (const e of events) {
+    if (e.kind === 'tool') {
+      const last = out[out.length - 1];
+      if (last && last._toolRun && last.author === e.author) {
+        last.events.push(e);
+        continue;
+      }
+      out.push({ _toolRun: true, kind: 'tool_group', author: e.author, time: e.time, events: [e], _seq: e._seq });
+      continue;
+    }
+    out.push(e);
+  }
+  return out.map(e => (e._toolRun && e.events.length === 1) ? e.events[0] : e);
+}
+
 function renderEventsWithHandovers({ events, agentsMap }) {
-  const prepared = prepareEvents(events);
+  const prepared = groupConsecutiveTools(prepareEvents(events));
   const out = [];
   // Track the last *agent* actor, not the last event author. A human turn
   // between two agents (e.g. "@Designer take it from here") should still let
@@ -691,7 +796,8 @@ function renderEventsWithHandovers({ events, agentsMap }) {
       );
     }
 
-    const showHeader = !(e.kind === 'tool' && prevToolAuthor === actor && actor);
+    const isTool = e.kind === 'tool' || e.kind === 'tool_group';
+    const showHeader = !(isTool && prevToolAuthor === actor && actor);
     out.push(
       <EventRouter
         key={e._seq ?? i}
@@ -703,7 +809,7 @@ function renderEventsWithHandovers({ events, agentsMap }) {
     );
 
     if (isAgentActor(actor)) prevAgentActor = actor;
-    prevToolAuthor = e.kind === 'tool' ? actor : null;
+    prevToolAuthor = isTool ? actor : null;
   });
   return out;
 }

@@ -61,7 +61,7 @@ describe('Onboarding — runtime scan step', () => {
     fireEvent.click(screen.getByRole('button', { name: /start exploring/i }));
 
     // Initial scanning state
-    expect(screen.getByText('Scanning your machine for runtimes.')).toBeInTheDocument();
+    expect(screen.getByText('Scanning your machine for runtimes...')).toBeInTheDocument();
     expect(api.rescanRuntimes).toHaveBeenCalledOnce();
     expect(screen.getByRole('button', { name: /scanning…/i })).toBeDisabled();
   });
@@ -148,12 +148,14 @@ describe('Onboarding — crew step', () => {
     expect(screen.getByRole('button', { name: /Create 3 agents/i })).toBeInTheDocument();
   }, 6000);
 
-  it('"Skip and finish" appears when no agents are selected', async () => {
+  it('Partner stays selected when all members are clicked — it cannot be deselected', async () => {
     render(<OnboardingRoute runtimes={[]} onComplete={() => {}} onSkip={() => {}} />);
     await advanceToCrewStep();
 
     DEFAULT_CREW.forEach(member => fireEvent.click(screen.getByText(member.name)));
-    expect(screen.getByRole('button', { name: /Skip and finish/i })).toBeInTheDocument();
+    // Partner is locked-in, so the cta should still ask to create at least one agent.
+    expect(screen.getByRole('button', { name: /Create 1 agent/i })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Skip and finish/i })).not.toBeInTheDocument();
   }, 6000);
 
   it('seeds the default crew through the presets API so skills are attached', async () => {
