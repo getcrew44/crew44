@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, act, within } from '@testing-library/react';
 import TaskView from '../TaskView.jsx';
 import * as api from '../api.js';
+import { writeComposerDraft } from '../draftStore.js';
 import { rememberAgents, __resetSeenAgentsCacheForTests } from '../utils.js';
 
 vi.mock('../api.js', () => ({
@@ -48,6 +49,7 @@ const chat = {
 
 beforeEach(() => {
   __resetSeenAgentsCacheForTests();
+  window.localStorage.clear();
   vi.clearAllMocks();
   api.getChat.mockResolvedValue(chat);
   api.postMessage.mockResolvedValue({ ...chat, stream: { status: 'streaming' } });
@@ -289,6 +291,25 @@ describe('TaskView', () => {
 
     await waitFor(() => expect(api.postMessage).toHaveBeenCalledOnce());
     expect(api.postMessage).toHaveBeenCalledWith('chat-1', 'route this to default', 'agent-2');
+  });
+
+  it('restores unsent chat text and target-agent drafts', async () => {
+    api.getChat.mockResolvedValue({
+      ...chat,
+      project_id: 'p1',
+      current_agent_id: 'agent-1',
+      main_agent_id: 'agent-1',
+    });
+    writeComposerDraft('p1', 'chat-1', {
+      text: 'keep this draft',
+      targetAgentId: 'agent-2',
+    });
+
+    render(<TaskView chatId="chat-1" agentsMap={agentsMap} />);
+
+    const input = await screen.findByTestId('composer-input');
+    await waitFor(() => expect(input).toHaveValue('keep this draft'));
+    expect(screen.getByTestId('composer-agent-picker')).toHaveTextContent('Default Agent');
   });
 
   it('attributes a message from a deleted agent to that agent (not to the user)', async () => {

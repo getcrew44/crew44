@@ -2,6 +2,7 @@ import React from 'react';
 import { Avatar, RichText, UI_FONT, MONO_FONT } from './components.jsx';
 import { mapBackendEvent, mergeToolResults, relativeTime, formatTime, HUMAN_USER, resolveAuthor } from './utils.js';
 import * as api from './api.js';
+import { clearComposerDraft, readComposerDraft, writeComposerDraft } from './draftStore.js';
 
 // ─── Event renderers ──────────────────────────────────────────────────────────
 
@@ -851,8 +852,8 @@ function AgentPicker({ value, onChange, agents }) {
   );
 }
 
-function Composer({ onSend, isStreaming, onCancel, agentsMap, targetAgentId, onChangeTargetAgent }) {
-  const [val, setVal] = React.useState('');
+function Composer({ onSend, isStreaming, onCancel, agentsMap, chatId, projectId, defaultTargetAgentId, targetAgentId, onChangeTargetAgent }) {
+  const [val, setVal] = React.useState(() => readComposerDraft(projectId, chatId).text || '');
   const [cursor, setCursor] = React.useState(0);
   const [activeSuggestion, setActiveSuggestion] = React.useState(0);
   const ta = React.useRef(null);
@@ -867,6 +868,21 @@ function Composer({ onSend, isStreaming, onCancel, agentsMap, targetAgentId, onC
     ta.current.style.height = 'auto';
     ta.current.style.height = Math.min(160, ta.current.scrollHeight) + 'px';
   }, [val]);
+
+  React.useEffect(() => {
+    if (!chatId || !projectId) return;
+    const draft = readComposerDraft(projectId, chatId);
+    setVal(draft.text || '');
+    if (draft.targetAgentId) onChangeTargetAgent?.(draft.targetAgentId);
+  }, [chatId, projectId, onChangeTargetAgent]);
+
+  React.useEffect(() => {
+    if (!chatId || !projectId) return;
+    writeComposerDraft(projectId, chatId, {
+      text: val,
+      targetAgentId: targetAgentId && targetAgentId !== defaultTargetAgentId ? targetAgentId : '',
+    });
+  }, [chatId, projectId, defaultTargetAgentId, targetAgentId, val]);
 
   const activeMention = React.useMemo(() => mentionBounds(val, cursor), [val, cursor]);
   const mentionOptions = React.useMemo(() => {
@@ -899,6 +915,7 @@ function Composer({ onSend, isStreaming, onCancel, agentsMap, targetAgentId, onC
     const text = val.trim();
     if (!text || isStreaming) return;
     setVal('');
+    if (chatId && projectId) clearComposerDraft(projectId, chatId);
     onSend(text);
   };
 
@@ -1024,6 +1041,14 @@ function Composer({ onSend, isStreaming, onCancel, agentsMap, targetAgentId, onC
             onClick={(e) => updateCursor(e.target)}
             onKeyUp={(e) => updateCursor(e.target)}
             onKeyDown={onKeyDown}
+            onDragOver={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+            }}
+            onDrop={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+            }}
             disabled={isStreaming}
             placeholder={isStreaming ? 'Crew is working…' : 'Steer the crew — @agent to direct, ⌘↵ to send'}
             rows={1}
@@ -1163,7 +1188,9 @@ export default function TaskView({ chatId, agentsMap, onStreamingChange }) {
       .then(c => {
         setChat(c);
         setIsStreaming(c.stream?.status === 'streaming');
-        setTargetAgentId(c.current_agent_id || c.main_agent_id || null);
+        const defaultTarget = c.current_agent_id || c.main_agent_id || null;
+        const draft = readComposerDraft(c.project_id, c.id);
+        setTargetAgentId(draft.targetAgentId || defaultTarget);
       })
       .catch(err => setError(err.message));
 
@@ -1246,6 +1273,9 @@ export default function TaskView({ chatId, agentsMap, onStreamingChange }) {
         isStreaming={isStreaming}
         onCancel={handleCancel}
         agentsMap={agentsMap}
+        chatId={chatId}
+        projectId={chat?.project_id || ''}
+        defaultTargetAgentId={chat?.current_agent_id || chat?.main_agent_id || null}
         targetAgentId={targetAgentId}
         onChangeTargetAgent={setTargetAgentId}
       />

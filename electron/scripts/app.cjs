@@ -12,10 +12,38 @@ const iconSource = path.join(root, 'electron', 'assets', 'crewai.icns');
 const iconTarget = path.join(targetApp, 'Contents', 'Resources', 'crewai.icns');
 const resourcesApp = path.join(targetApp, 'Contents', 'Resources', 'app');
 
-function ensureDevApp() {
-  if (!fs.existsSync(sourceApp)) {
-    throw new Error('Electron.app is missing. Run npm install.');
+function getInstallElectronCommand() {
+  const userAgent = process.env.npm_config_user_agent || '';
+  if (userAgent.startsWith('pnpm/')) return 'pnpm exec install-electron --no';
+  if (userAgent.startsWith('yarn/')) return 'yarn run install-electron --no';
+  if (userAgent.startsWith('npm/')) return 'npx install-electron --no';
+
+  if (fs.existsSync(path.join(root, 'pnpm-lock.yaml'))) return 'pnpm exec install-electron --no';
+  if (fs.existsSync(path.join(root, 'yarn.lock'))) return 'yarn run install-electron --no';
+  return 'npx install-electron --no';
+}
+
+function ensureElectronSourceApp() {
+  if (fs.existsSync(sourceApp)) return;
+
+  try {
+    require('electron');
+  } catch (err) {
+    const installCommand = getInstallElectronCommand();
+    throw new Error(
+      `Electron.app is missing and Electron could not be installed automatically. ${err.message}\n` +
+        `Run \`${installCommand}\` and try again.`
+    );
   }
+
+  if (!fs.existsSync(sourceApp)) {
+    const installCommand = getInstallElectronCommand();
+    throw new Error(`Electron.app is missing. Run \`${installCommand}\` and try again.`);
+  }
+}
+
+function ensureDevApp() {
+  ensureElectronSourceApp();
 
   fs.rmSync(targetApp, { recursive: true, force: true });
   fs.mkdirSync(appRoot, { recursive: true });

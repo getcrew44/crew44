@@ -12,7 +12,7 @@ import (
 func TestPrepareSkillEnvironmentWritesProviderNativeSkills(t *testing.T) {
 	workDir := t.TempDir()
 
-	env, err := prepareSkillEnvironment(RunRequest{
+	preparedEnv, err := prepareSkillEnvironment(RunRequest{
 		Runtime: model.RuntimeRecord{Provider: "cursor"},
 		WorkDir: workDir,
 		AgentSkills: []SkillContext{{
@@ -28,8 +28,8 @@ func TestPrepareSkillEnvironmentWritesProviderNativeSkills(t *testing.T) {
 	if err != nil {
 		t.Fatalf("prepareSkillEnvironment failed: %v", err)
 	}
-	if len(env) != 0 {
-		t.Fatalf("expected no provider env for cursor, got %#v", env)
+	if len(preparedEnv.Env) != 0 || len(preparedEnv.ExtraArgs) != 0 {
+		t.Fatalf("expected no provider env for cursor, got %#v", preparedEnv)
 	}
 
 	assertFileContains(t, filepath.Join(workDir, ".cursor", "skills", "review-helper", "SKILL.md"), "Use this skill")
@@ -39,9 +39,11 @@ func TestPrepareSkillEnvironmentWritesProviderNativeSkills(t *testing.T) {
 
 func TestPrepareSkillEnvironmentPrunesManagedStaleSkills(t *testing.T) {
 	workDir := t.TempDir()
+	envDir := filepath.Join(t.TempDir(), "runtime-env")
 	first := RunRequest{
-		Runtime: model.RuntimeRecord{Provider: "claude"},
-		WorkDir: workDir,
+		Runtime:       model.RuntimeRecord{Provider: "claude"},
+		WorkDir:       workDir,
+		RuntimeEnvDir: envDir,
 		AgentSkills: []SkillContext{{
 			ID:      "skill-1",
 			Name:    "One",
@@ -61,10 +63,84 @@ func TestPrepareSkillEnvironmentPrunesManagedStaleSkills(t *testing.T) {
 		t.Fatalf("second prepare failed: %v", err)
 	}
 
-	if _, err := os.Stat(filepath.Join(workDir, ".claude", "skills", "one")); !os.IsNotExist(err) {
+	claudeSkills := filepath.Join(envDir, "claude-config", "skills")
+	if _, err := os.Stat(filepath.Join(workDir, ".claude")); !os.IsNotExist(err) {
+		t.Fatalf("expected workspace .claude directory to be absent, stat err=%v", err)
+	}
+	if _, err := os.Stat(filepath.Join(claudeSkills, "one")); !os.IsNotExist(err) {
 		t.Fatalf("expected stale skill directory to be removed, stat err=%v", err)
 	}
-	assertFileContains(t, filepath.Join(workDir, ".claude", "skills", "two", "SKILL.md"), "# Two")
+	assertFileContains(t, filepath.Join(claudeSkills, "two", "SKILL.md"), "# Two")
+}
+
+func TestPrepareSkillEnvironmentClaudeUsesIsolatedConfigDir(t *testing.T) {
+	sharedClaudeConfig := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", sharedClaudeConfig)
+	if err := os.WriteFile(
+		filepath.Join(sharedClaudeConfig, "settings.json"),
+		[]byte(`{"env":{"ANTHROPIC_AUTH_TOKEN":"token","ANTHROPIC_BASE_URL":"https://example.test"},"permissions":{"allow":["Bash(*)"]}}`),
+		0o600,
+	); err != nil {
+		t.Fatalf("write shared claude settings: %v", err)
+	}
+
+	workDir := t.TempDir()
+	envDir := filepath.Join(t.TempDir(), "runtime-env")
+	preparedEnv, err := prepareSkillEnvironment(RunRequest{
+		Runtime:       model.RuntimeRecord{Provider: "claude"},
+		WorkDir:       workDir,
+		RuntimeEnvDir: envDir,
+		AgentSkills: []SkillContext{{
+			ID:      "skill-1",
+			Name:    "Claude Skill",
+			Content: "# Claude Skill\n",
+		}},
+	})
+	if err != nil {
+		t.Fatalf("prepareSkillEnvironment failed: %v", err)
+	}
+	if preparedEnv.Env["CLAUDE_CONFIG_DIR"] != filepath.Join(envDir, "claude-config") {
+		t.Fatalf("expected isolated CLAUDE_CONFIG_DIR, got %#v", preparedEnv.Env)
+	}
+	if preparedEnv.Env["HOME"] != filepath.Join(envDir, "home") {
+		t.Fatalf("expected isolated HOME, got %#v", preparedEnv.Env)
+	}
+	if got := strings.Join(preparedEnv.ExtraArgs, "\x00"); got != "--setting-sources\x00user" {
+		t.Fatalf("expected claude isolation args, got %#v", preparedEnv.ExtraArgs)
+	}
+	settingsPath := filepath.Join(envDir, "claude-config", "settings.json")
+	assertFileContains(t, settingsPath, "ANTHROPIC_AUTH_TOKEN")
+	assertFileContains(t, settingsPath, "ANTHROPIC_BASE_URL")
+	data, err := os.ReadFile(settingsPath)
+	if err != nil {
+		t.Fatalf("read isolated claude settings: %v", err)
+	}
+	if strings.Contains(string(data), "permissions") || strings.Contains(string(data), "Bash(*)") {
+		t.Fatalf("expected only claude settings env to be copied, got %s", data)
+	}
+	assertFileContains(t, filepath.Join(envDir, "claude-config", "skills", "claude-skill", "SKILL.md"), "# Claude Skill")
+}
+
+func TestPrepareSkillEnvironmentClaudeIsolatesEvenWithoutSkills(t *testing.T) {
+	workDir := t.TempDir()
+	envDir := filepath.Join(t.TempDir(), "runtime-env")
+	preparedEnv, err := prepareSkillEnvironment(RunRequest{
+		Runtime:       model.RuntimeRecord{Provider: "claude"},
+		WorkDir:       workDir,
+		RuntimeEnvDir: envDir,
+	})
+	if err != nil {
+		t.Fatalf("prepareSkillEnvironment failed: %v", err)
+	}
+	if preparedEnv.Env["CLAUDE_CONFIG_DIR"] != filepath.Join(envDir, "claude-config") {
+		t.Fatalf("expected isolated CLAUDE_CONFIG_DIR, got %#v", preparedEnv.Env)
+	}
+	if preparedEnv.Env["HOME"] != filepath.Join(envDir, "home") {
+		t.Fatalf("expected isolated HOME, got %#v", preparedEnv.Env)
+	}
+	if got := strings.Join(preparedEnv.ExtraArgs, "\x00"); got != "--setting-sources\x00user" {
+		t.Fatalf("expected claude isolation args, got %#v", preparedEnv.ExtraArgs)
+	}
 }
 
 func TestPrepareSkillEnvironmentCodexUsesIsolatedHome(t *testing.T) {
@@ -76,10 +152,23 @@ func TestPrepareSkillEnvironmentCodexUsesIsolatedHome(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(sharedHome, "config.toml"), []byte("[profile]\nname = \"default\"\n\n[[skills.config]]\nname = \"plugin-only\"\n"), 0o600); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
+	sharedSkillsDir := filepath.Join(sharedHome, "skills")
+	if err := os.MkdirAll(filepath.Join(sharedSkillsDir, "shared-skill"), 0o755); err != nil {
+		t.Fatalf("mkdir shared skill: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(sharedSkillsDir, "shared-skill", "SKILL.md"), []byte("# Shared Skill\n"), 0o644); err != nil {
+		t.Fatalf("write shared skill: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(sharedSkillsDir, "codex-skill"), 0o755); err != nil {
+		t.Fatalf("mkdir shadowed skill: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(sharedSkillsDir, "codex-skill", "SKILL.md"), []byte("# Shadowed Shared Skill\n"), 0o644); err != nil {
+		t.Fatalf("write shadowed skill: %v", err)
+	}
 
 	workDir := t.TempDir()
 	envDir := filepath.Join(t.TempDir(), "runtime-env")
-	env, err := prepareSkillEnvironment(RunRequest{
+	preparedEnv, err := prepareSkillEnvironment(RunRequest{
 		Runtime:       model.RuntimeRecord{Provider: "codex"},
 		WorkDir:       workDir,
 		RuntimeEnvDir: envDir,
@@ -93,16 +182,96 @@ func TestPrepareSkillEnvironmentCodexUsesIsolatedHome(t *testing.T) {
 		t.Fatalf("prepareSkillEnvironment failed: %v", err)
 	}
 	codexHome := filepath.Join(envDir, "codex-home")
-	if env["CODEX_HOME"] != codexHome {
-		t.Fatalf("expected CODEX_HOME %q, got %#v", codexHome, env)
+	if preparedEnv.Env["CODEX_HOME"] != codexHome {
+		t.Fatalf("expected CODEX_HOME %q, got %#v", codexHome, preparedEnv.Env)
+	}
+	if preparedEnv.Env["HOME"] != filepath.Join(envDir, "home") {
+		t.Fatalf("expected isolated HOME, got %#v", preparedEnv.Env)
+	}
+	if len(preparedEnv.ExtraArgs) != 0 {
+		t.Fatalf("expected no codex extra args, got %#v", preparedEnv.ExtraArgs)
 	}
 	assertFileContains(t, filepath.Join(codexHome, "skills", "codex-skill", "SKILL.md"), "# Codex Skill")
-	configBytes, err := os.ReadFile(filepath.Join(codexHome, "config.toml"))
-	if err != nil {
-		t.Fatalf("read copied config: %v", err)
+	if _, err := os.Stat(filepath.Join(codexHome, "skills", "shared-skill")); !os.IsNotExist(err) {
+		t.Fatalf("expected shared codex skill to be hidden, stat err=%v", err)
 	}
-	if strings.Contains(string(configBytes), "[[skills.config]]") {
-		t.Fatalf("expected inherited skills.config blocks stripped, got %q", string(configBytes))
+	if _, err := os.Stat(filepath.Join(codexHome, "config.toml")); !os.IsNotExist(err) {
+		t.Fatalf("expected shared codex config to be hidden, stat err=%v", err)
+	}
+	if _, err := os.Stat(filepath.Join(codexHome, "auth.json")); err != nil {
+		t.Fatalf("expected auth state to be available, stat err=%v", err)
+	}
+}
+
+func TestPrepareSkillEnvironmentCodexIsolatesEvenWithoutSkills(t *testing.T) {
+	sharedHome := t.TempDir()
+	t.Setenv("CODEX_HOME", sharedHome)
+	if err := os.WriteFile(filepath.Join(sharedHome, "auth.json"), []byte(`{"token":"ok"}`), 0o600); err != nil {
+		t.Fatalf("write auth: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(sharedHome, "config.toml"), []byte("model = \"from-user-config\"\n"), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	workDir := t.TempDir()
+	envDir := filepath.Join(t.TempDir(), "runtime-env")
+	preparedEnv, err := prepareSkillEnvironment(RunRequest{
+		Runtime:       model.RuntimeRecord{Provider: "codex"},
+		WorkDir:       workDir,
+		RuntimeEnvDir: envDir,
+	})
+	if err != nil {
+		t.Fatalf("prepareSkillEnvironment failed: %v", err)
+	}
+	codexHome := filepath.Join(envDir, "codex-home")
+	if preparedEnv.Env["CODEX_HOME"] != codexHome {
+		t.Fatalf("expected isolated CODEX_HOME, got %#v", preparedEnv.Env)
+	}
+	if preparedEnv.Env["HOME"] != filepath.Join(envDir, "home") {
+		t.Fatalf("expected isolated HOME, got %#v", preparedEnv.Env)
+	}
+	if _, err := os.Stat(filepath.Join(codexHome, "auth.json")); err != nil {
+		t.Fatalf("expected auth state to be available, stat err=%v", err)
+	}
+	if _, err := os.Stat(filepath.Join(codexHome, "config.toml")); !os.IsNotExist(err) {
+		t.Fatalf("expected shared codex config to be hidden, stat err=%v", err)
+	}
+}
+
+func TestPrepareSkillEnvironmentCodexReplacesManagedSkills(t *testing.T) {
+	sharedHome := t.TempDir()
+	t.Setenv("CODEX_HOME", sharedHome)
+
+	workDir := t.TempDir()
+	envDir := filepath.Join(t.TempDir(), "runtime-env")
+	first := RunRequest{
+		Runtime:       model.RuntimeRecord{Provider: "codex"},
+		WorkDir:       workDir,
+		RuntimeEnvDir: envDir,
+		AgentSkills: []SkillContext{{
+			ID:      "skill-1",
+			Name:    "Other",
+			Content: "# Other\n",
+		}},
+	}
+	if _, err := prepareSkillEnvironment(first); err != nil {
+		t.Fatalf("first prepare failed: %v", err)
+	}
+	codexHome := filepath.Join(envDir, "codex-home")
+	assertFileContains(t, filepath.Join(codexHome, "skills", "other", "SKILL.md"), "# Other")
+
+	second := first
+	second.AgentSkills = []SkillContext{{
+		ID:      "skill-2",
+		Name:    "Codex Skill",
+		Content: "# CrewAI Codex Skill\n",
+	}}
+	if _, err := prepareSkillEnvironment(second); err != nil {
+		t.Fatalf("second prepare failed: %v", err)
+	}
+	assertFileContains(t, filepath.Join(codexHome, "skills", "codex-skill", "SKILL.md"), "# CrewAI Codex Skill")
+	if _, err := os.Stat(filepath.Join(codexHome, "skills", "other")); !os.IsNotExist(err) {
+		t.Fatalf("expected stale managed skill to be removed, stat err=%v", err)
 	}
 }
 

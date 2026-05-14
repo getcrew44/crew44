@@ -144,7 +144,7 @@ func TestBuildSystemPromptStructuresRuntimeContext(t *testing.T) {
 		Agent:           current,
 		Runtime:         model.RuntimeRecord{ID: "claude", Provider: "claude"},
 		AvailableAgents: []model.AgentConfig{current, other},
-		Skills:          []Skill{{Name: "handoff-routing"}},
+		Skills:          []Skill{{Name: "problem-framing"}},
 		SummaryPath:     "/tmp/chat-summary.md",
 		HandoverNote:    "Tell the user an English story.",
 	})
@@ -164,7 +164,7 @@ func TestBuildSystemPromptStructuresRuntimeContext(t *testing.T) {
 		"## Conversation Summary",
 		"/tmp/chat-summary.md",
 		"## Available Skills",
-		"handoff-routing",
+		"problem-framing",
 		"## Available Agents For Handover",
 		"uuid: agent-b",
 		"## Handover Output Protocol",
@@ -177,5 +177,16 @@ func TestBuildSystemPromptStructuresRuntimeContext(t *testing.T) {
 	}
 	if strings.Contains(got, "uuid: agent-a\n  name: Personal partner") {
 		t.Fatalf("current agent should not appear in handover targets:\n%s", got)
+	}
+	for _, policy := range []string{
+		"Only hand over when another listed agent is better suited to continue.",
+		"Code edits",
+		"Requirements",
+		"Layout",
+		"handoff-routing",
+	} {
+		if strings.Contains(got, policy) {
+			t.Fatalf("system prompt should not inject routing policy %q:\n%s", policy, got)
+		}
 	}
 }

@@ -110,10 +110,11 @@ describe('RichText', () => {
     expect(container.textContent).toContain('@milo');
   });
 
-  it('renders @mention syntax inline', () => {
+  it('does not highlight raw @mention syntax inline', () => {
     const { container } = render(<RichText text="hey @aria how are you" />);
     expect(container.textContent).toContain('@aria');
     expect(container.textContent).toContain('how are you');
+    expect(container.querySelector('span')).toBeNull();
   });
 
   it('handles multiple markup tokens in one string', () => {

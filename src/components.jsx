@@ -53,11 +53,11 @@ export function Toggle({ on, onChange }) {
   );
 }
 
-// Inline tokens: {{file:...}}, {{ref:...}}, **bold**, *italic*, `code`, @mention.
+// Inline tokens: {{file:...}}, {{ref:...}}, **bold**, *italic*, `code`.
 function renderInline(text, keyPrefix = '') {
   if (!text) return null;
   const tokens = [];
-  const re = /\{\{(file|ref):([^}]+)\}\}|\*\*([^*]+)\*\*|\*([^*\n]+)\*|`([^`]+)`|(@\w+)/g;
+  const re = /\{\{(file|ref):([^}]+)\}\}|\*\*([^*]+)\*\*|\*([^*\n]+)\*|`([^`]+)`/g;
   let last = 0;
   let m;
   while ((m = re.exec(text))) {
@@ -67,7 +67,6 @@ function renderInline(text, keyPrefix = '') {
     else if (m[3] != null) tokens.push({ kind: 'bold', value: m[3] });
     else if (m[4] != null) tokens.push({ kind: 'italic', value: m[4] });
     else if (m[5] != null) tokens.push({ kind: 'code', value: m[5] });
-    else if (m[6]) tokens.push({ kind: 'mention', value: m[6] });
     last = m.index + m[0].length;
   }
   if (last < text.length) tokens.push({ kind: 'text', value: text.slice(last) });
@@ -92,8 +91,8 @@ function renderInline(text, keyPrefix = '') {
     if (p.kind === 'italic') return (
       <em key={key} style={{ fontStyle: 'italic' }}>{p.value}</em>
     );
-    if (p.kind === 'ref' || p.kind === 'mention') return (
-      <span key={key} style={{ color: '#C4644A', fontWeight: 500 }}>{p.value.startsWith('@') ? p.value : '@' + p.value}</span>
+    if (p.kind === 'ref') return (
+      <span key={key} style={{ color: '#C4644A', fontWeight: 500 }}>{'@' + p.value}</span>
     );
     return <React.Fragment key={key}>{p.value}</React.Fragment>;
   });

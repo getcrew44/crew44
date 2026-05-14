@@ -283,6 +283,26 @@ ipcMain.handle('shell:show-in-folder', async (_event, folderPath) => {
   return true;
 });
 
+ipcMain.handle('paths:info', async (_event, paths) => {
+  const list = Array.isArray(paths) ? paths : [];
+  return Promise.all(list.map(async (filePath) => {
+    if (!filePath || typeof filePath !== 'string') {
+      return { path: '', name: '', isDirectory: false };
+    }
+
+    try {
+      const stat = await fs.promises.stat(filePath);
+      return {
+        path: filePath,
+        name: path.basename(filePath),
+        isDirectory: stat.isDirectory(),
+      };
+    } catch {
+      return { path: filePath, name: path.basename(filePath), isDirectory: false };
+    }
+  }));
+});
+
 app.whenReady().then(async () => {
   await ensureBackend();
   createWindow();

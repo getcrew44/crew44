@@ -60,8 +60,8 @@ func (s *Store) ProjectMemoryDir(projectID string) string {
 	return filepath.Join(s.root, "projects", "proj-"+projectID, "memory")
 }
 
-func (s *Store) RuntimeEnvDir(chatID, agentID string) string {
-	return filepath.Join(s.root, "runtime-env", "chat-"+chatID, "agent-"+agentID)
+func (s *Store) RuntimeEnvDir(agentID string) string {
+	return filepath.Join(s.root, "runtime-env", "agent-"+agentID)
 }
 
 func (s *Store) ListRuntimes() ([]model.RuntimeRecord, error) {

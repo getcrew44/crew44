@@ -151,7 +151,7 @@ func (a *App) runChat(ctx context.Context, chatID, agentID, turnID, prompt strin
 			AgentSkills:     agentSkills,
 			Prompt:          currentPrompt,
 			WorkDir:         project.Workdir,
-			RuntimeEnvDir:   a.store.RuntimeEnvDir(chatID, currentAgentID),
+			RuntimeEnvDir:   a.store.RuntimeEnvDir(currentAgentID),
 			ResumeSessionID: resumeSessionID,
 		}, func(streamEvent runtime.StreamEvent) error {
 			event := model.Event{
