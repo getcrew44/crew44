@@ -457,7 +457,7 @@ describe('TaskView', () => {
     expect(screen.queryByTestId('tool-event-detail')).not.toBeInTheDocument();
   });
 
-  it('omits the agent header on consecutive tool calls from the same agent', async () => {
+  it('collapses consecutive tool calls from the same agent into a single group row', async () => {
     api.streamChatEvents.mockImplementation(() => vi.fn());
 
     render(<TaskView chatId="chat-1" agentsMap={agentsMap} />);
@@ -480,13 +480,20 @@ describe('TaskView', () => {
       tool_call: { name: 'Bash', input: { command: 'c' } },
     });
 
-    // Each tool event still renders its compact row.
-    const rows = await screen.findAllByTestId('tool-event-row');
-    expect(rows).toHaveLength(3);
-    // But the "Aria" agent name should only show on the first one.
-    // (Scope to the conversation column to ignore the AgentPicker pill in the composer.)
+    // Single group row collapsed by default; no individual tool rows yet.
+    const groupRow = await screen.findByTestId('tool-group-row');
+    expect(groupRow).toHaveTextContent(/Used 3 tools/);
+    expect(groupRow).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryAllByTestId('tool-event-row')).toHaveLength(0);
+
+    // "Aria" agent header shows once for the whole group.
     const column = screen.getByTestId('conversation-column');
     expect(within(column).getAllByText('Aria')).toHaveLength(1);
+
+    // Expanding reveals each individual tool's compact row.
+    fireEvent.click(groupRow);
+    expect(groupRow).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.queryAllByTestId('tool-event-row')).toHaveLength(3);
   });
 
   it('re-shows the agent header when a non-tool event sits between two tool calls from the same agent', async () => {
