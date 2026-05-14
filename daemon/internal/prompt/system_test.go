@@ -9,70 +9,120 @@ import (
 	"github.com/sqtech/crew-ai/crewai-repo/internal/model"
 )
 
-func TestBuildSystemPromptInjectsMemoryFiles(t *testing.T) {
+func TestBuildSystemPromptExpandsTypedMemoryFiles(t *testing.T) {
 	dir := t.TempDir()
-	userPath := filepath.Join(dir, "USER.md")
-	projPath := filepath.Join(dir, "MEMORY.md")
-	if err := os.WriteFile(userPath, []byte("- Prefers em-dashes over semicolons.\n"), 0o644); err != nil {
+	userDir := filepath.Join(dir, "memory")
+	projDir := filepath.Join(dir, "projects", "proj-x", "memory")
+	if err := os.MkdirAll(userDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(projPath, []byte("- This repo uses pnpm workspaces.\n"), 0o644); err != nil {
+	if err := os.MkdirAll(projDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(userDir, "MEMORY.md"), []byte("# Memory Index\n\n- [Em-dash style](em-dash-mu-1.md) — prefers em-dashes\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(userDir, "em-dash-mu-1.md"), []byte("---\nname: em-dash-mu-1\ndescription: prefers em-dashes\n---\n\nPrefers em-dashes over semicolons.\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(projDir, "MEMORY.md"), []byte("# Memory Index\n\n- [Pnpm only](pnpm-mp-1.md) — never run npm install\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(projDir, "pnpm-mp-1.md"), []byte("---\nname: pnpm-mp-1\n---\n\nThis repo uses pnpm workspaces. Never run npm install at the repo root.\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
 	got := BuildSystemPrompt(SystemPromptInput{
-		Agent:             model.AgentConfig{ID: "a", Name: "Aria"},
-		Runtime:           model.RuntimeRecord{ID: "rt", Provider: "claude"},
-		UserMemoryPath:    userPath,
-		ProjectMemoryPath: projPath,
+		Agent:            model.AgentConfig{ID: "a", Name: "Aria"},
+		Runtime:          model.RuntimeRecord{ID: "rt", Provider: "claude"},
+		UserMemoryDir:    userDir,
+		ProjectMemoryDir: projDir,
 	})
 	if !strings.Contains(got, "## User Memory") {
 		t.Fatalf("expected ## User Memory section\n%s", got)
 	}
+	if !strings.Contains(got, "### Em-dash style") {
+		t.Fatalf("expected per-entry title heading inlined\n%s", got)
+	}
 	if !strings.Contains(got, "Prefers em-dashes over semicolons.") {
-		t.Fatalf("expected USER.md body inlined\n%s", got)
+		t.Fatalf("expected user memory body inlined\n%s", got)
+	}
+	if strings.Contains(got, "description: prefers em-dashes") {
+		t.Fatalf("frontmatter should be stripped before injection\n%s", got)
 	}
 	if !strings.Contains(got, "## Project Memory") {
 		t.Fatalf("expected ## Project Memory section\n%s", got)
 	}
 	if !strings.Contains(got, "pnpm workspaces") {
-		t.Fatalf("expected MEMORY.md body inlined\n%s", got)
+		t.Fatalf("expected project memory body inlined\n%s", got)
 	}
 
-	// Missing path → section omitted.
+	// Missing dir → section omitted.
 	got2 := BuildSystemPrompt(SystemPromptInput{
-		Agent:          model.AgentConfig{ID: "a", Name: "Aria"},
-		Runtime:        model.RuntimeRecord{ID: "rt"},
-		UserMemoryPath: filepath.Join(dir, "nope.md"),
+		Agent:         model.AgentConfig{ID: "a", Name: "Aria"},
+		Runtime:       model.RuntimeRecord{ID: "rt"},
+		UserMemoryDir: filepath.Join(dir, "nope"),
 	})
 	if strings.Contains(got2, "## User Memory") {
-		t.Fatalf("missing memory file must not emit section\n%s", got2)
-	}
-
-	// Empty path string → section omitted (do not stat cwd).
-	got3 := BuildSystemPrompt(SystemPromptInput{
-		Agent:          model.AgentConfig{ID: "a", Name: "Aria"},
-		Runtime:        model.RuntimeRecord{ID: "rt"},
-		UserMemoryPath: "",
-	})
-	if strings.Contains(got3, "## User Memory") {
-		t.Fatalf("empty path must not emit section\n%s", got3)
+		t.Fatalf("missing memory dir must not emit section\n%s", got2)
 	}
 }
 
-func TestReadMemoryFileCapsRunawayInput(t *testing.T) {
+func TestBuildSystemPromptFallsBackToLegacyMemoryFile(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "USER.md")
-	big := strings.Repeat("a", memoryReadCap*2)
-	if err := os.WriteFile(path, []byte(big), 0o644); err != nil {
+	legacy := filepath.Join(dir, "USER.md")
+	if err := os.WriteFile(legacy, []byte("- Prefers em-dashes over semicolons.\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	got := readMemoryFile(path)
-	if len(got) > memoryReadCap+len("\n[memory truncated]") {
-		t.Fatalf("memory file read not capped: len=%d", len(got))
+
+	got := BuildSystemPrompt(SystemPromptInput{
+		Agent:                model.AgentConfig{ID: "a", Name: "Aria"},
+		Runtime:              model.RuntimeRecord{ID: "rt"},
+		UserMemoryDir:        filepath.Join(dir, "memory"), // does not exist yet
+		LegacyUserMemoryPath: legacy,
+	})
+	if !strings.Contains(got, "## User Memory") {
+		t.Fatalf("legacy fallback should emit User Memory section\n%s", got)
 	}
+	if !strings.Contains(got, "Prefers em-dashes over semicolons.") {
+		t.Fatalf("legacy file body must be inlined\n%s", got)
+	}
+}
+
+func TestExpandMemoryIndexCapsRunawayBodies(t *testing.T) {
+	dir := t.TempDir()
+	memDir := filepath.Join(dir, "memory")
+	if err := os.MkdirAll(memDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	big := strings.Repeat("a", memoryReadCap*2)
+	if err := os.WriteFile(filepath.Join(memDir, "big-mu-1.md"), []byte("---\nname: big-mu-1\n---\n\n"+big+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(memDir, "MEMORY.md"), []byte("- [Big](big-mu-1.md) — runaway\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got := expandMemoryIndex(memDir)
 	if !strings.Contains(got, "[memory truncated]") {
 		t.Fatalf("expected truncation marker on oversized memory")
+	}
+}
+
+func TestExpandMemoryIndexRejectsTraversalLinks(t *testing.T) {
+	dir := t.TempDir()
+	memDir := filepath.Join(dir, "memory")
+	if err := os.MkdirAll(memDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// A sibling file the renderer must refuse to read via a `..` link.
+	if err := os.WriteFile(filepath.Join(dir, "secret.md"), []byte("secret\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(memDir, "MEMORY.md"), []byte("- [Sneaky](../secret.md) — escape\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := expandMemoryIndex(memDir); strings.Contains(got, "secret") {
+		t.Fatalf("traversal link must be ignored, got %q", got)
 	}
 }
 

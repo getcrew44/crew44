@@ -4,15 +4,17 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/sqtech/crew-ai/crewai-repo/internal/model"
 )
 
-// memoryReadCap bounds the bytes injected into every system prompt from
-// USER.md / project MEMORY.md. The optimizer accept handler enforces its own
-// cap on appends, but a hand-edited or restored memory file can already be
-// larger; this is the last line of defense before the LLM sees it.
+// memoryReadCap bounds the bytes injected into every system prompt from the
+// per-user / per-project memory scope. The optimizer accept handler enforces
+// its own cap on the MEMORY.md index, but per-entry bodies are unbounded; this
+// is the last line of defense before the LLM sees the concatenated memories.
 const memoryReadCap = 8 * 1024
 
 const CrewAIContext = "CrewAI Desktop is a local-first multi-agent workteam. The product is organized around agents, skills, runtimes, projects, and chats. User-owned state lives under `~/.crewai`: agent configs, skill directories, runtime inventory, project records, chat timelines, summaries, and preset mappings. Treat these records as user data and avoid overwriting them unless the task explicitly calls for migration, reset, or repair behavior."
@@ -22,14 +24,16 @@ type Skill struct {
 }
 
 type SystemPromptInput struct {
-	Agent             model.AgentConfig
-	Runtime           model.RuntimeRecord
-	AvailableAgents   []model.AgentConfig
-	Skills            []Skill
-	SummaryPath       string
-	HandoverNote      string
-	UserMemoryPath    string // ~/.crewai/USER.md; empty if missing/disabled
-	ProjectMemoryPath string // ~/.crewai/projects/<id>/MEMORY.md; empty if missing
+	Agent                   model.AgentConfig
+	Runtime                 model.RuntimeRecord
+	AvailableAgents         []model.AgentConfig
+	Skills                  []Skill
+	SummaryPath             string
+	HandoverNote            string
+	UserMemoryDir           string // ~/.crewai/memory; reader expands MEMORY.md + per-entry files
+	ProjectMemoryDir        string // ~/.crewai/projects/<id>/memory
+	LegacyUserMemoryPath    string // ~/.crewai/USER.md; used when UserMemoryDir has no MEMORY.md yet
+	LegacyProjectMemoryPath string // ~/.crewai/projects/<id>/MEMORY.md; legacy single-file fallback
 }
 
 func BuildSystemPrompt(input SystemPromptInput) string {
@@ -43,8 +47,8 @@ func BuildSystemPrompt(input SystemPromptInput) string {
 	if summary := summaryReference(input.SummaryPath); summary != "" {
 		writeSection(&b, "Conversation Summary", summary)
 	}
-	writeSection(&b, "User Memory", readMemoryFile(input.UserMemoryPath))
-	writeSection(&b, "Project Memory", readMemoryFile(input.ProjectMemoryPath))
+	writeSection(&b, "User Memory", readMemoryScope(input.UserMemoryDir, input.LegacyUserMemoryPath))
+	writeSection(&b, "Project Memory", readMemoryScope(input.ProjectMemoryDir, input.LegacyProjectMemoryPath))
 	if skills := skillSummary(input.Runtime.Provider, input.Skills); skills != "" {
 		writeSection(&b, "Available Skills", skills)
 	}
@@ -53,11 +57,20 @@ func BuildSystemPrompt(input SystemPromptInput) string {
 	return strings.TrimSpace(b.String())
 }
 
-// readMemoryFile reads a bounded curated memory file (USER.md / project MEMORY.md).
-// Returns empty string if the file is missing, empty, or unreadable so the section is omitted.
-// Reads are capped at memoryReadCap to bound prompt size if the file has been
-// hand-edited past the optimizer's append cap.
-func readMemoryFile(path string) string {
+// readMemoryScope expands the per-entry memory directory into a single block
+// the LLM can read. If dir/MEMORY.md exists, each linked body file is loaded
+// (frontmatter stripped) and concatenated under a `### Title` heading. When
+// the new layout is empty or absent, falls back to the legacy single-file
+// path so old user-edited or pre-migration memories keep being honored.
+// Total output is capped at memoryReadCap.
+func readMemoryScope(dir, legacyPath string) string {
+	if expanded := expandMemoryIndex(dir); expanded != "" {
+		return expanded
+	}
+	return readLegacyMemoryFile(legacyPath)
+}
+
+func readLegacyMemoryFile(path string) string {
 	if strings.TrimSpace(path) == "" {
 		return ""
 	}
@@ -74,6 +87,98 @@ func readMemoryFile(path string) string {
 		data = append(data[:memoryReadCap], []byte("\n[memory truncated]")...)
 	}
 	return strings.TrimSpace(string(data))
+}
+
+// memoryIndexLinkRE matches one MEMORY.md index line of the shape
+// `- [Title](slug.md) — desc` (the dash and description are optional).
+var memoryIndexLinkRE = regexp.MustCompile(`^\s*-\s+\[([^\]]+)\]\(([^)]+\.md)\)(?:\s+[—-]\s+(.+))?\s*$`)
+
+func expandMemoryIndex(dir string) string {
+	dir = strings.TrimSpace(dir)
+	if dir == "" {
+		return ""
+	}
+	indexBytes, err := os.ReadFile(filepath.Join(dir, "MEMORY.md"))
+	if err != nil {
+		return ""
+	}
+	var out strings.Builder
+	budget := memoryReadCap
+	truncated := false
+	for _, line := range strings.Split(string(indexBytes), "\n") {
+		match := memoryIndexLinkRE.FindStringSubmatch(line)
+		if match == nil {
+			continue
+		}
+		title, file := match[1], match[2]
+		// Defense in depth: anything that escapes dir is silently skipped.
+		bodyPath, ok := safeMemoryChild(dir, file)
+		if !ok {
+			continue
+		}
+		body, err := os.ReadFile(bodyPath)
+		if err != nil {
+			continue
+		}
+		section := renderMemorySection(title, stripFrontmatter(string(body)))
+		if section == "" {
+			continue
+		}
+		if budget-len(section) < 0 {
+			truncated = true
+			break
+		}
+		if out.Len() > 0 {
+			out.WriteString("\n\n")
+			budget -= 2
+		}
+		out.WriteString(section)
+		budget -= len(section)
+	}
+	if truncated {
+		out.WriteString("\n[memory truncated]")
+	}
+	return strings.TrimSpace(out.String())
+}
+
+func safeMemoryChild(dir, name string) (string, bool) {
+	cleaned := filepath.Clean(filepath.FromSlash(strings.TrimSpace(name)))
+	if cleaned == "." || filepath.IsAbs(cleaned) || cleaned == ".." || strings.HasPrefix(cleaned, ".."+string(filepath.Separator)) {
+		return "", false
+	}
+	full := filepath.Join(dir, cleaned)
+	rel, err := filepath.Rel(dir, full)
+	if err != nil || strings.HasPrefix(rel, "..") {
+		return "", false
+	}
+	return full, true
+}
+
+func renderMemorySection(title, body string) string {
+	body = strings.TrimSpace(body)
+	if body == "" {
+		return ""
+	}
+	return fmt.Sprintf("### %s\n%s", strings.TrimSpace(title), body)
+}
+
+// stripFrontmatter removes a leading `---\n...\n---` YAML block if present.
+// Body content following the closing fence is returned verbatim so the LLM
+// sees the memory itself, not its metadata.
+func stripFrontmatter(s string) string {
+	s = strings.TrimPrefix(s, "\ufeff")
+	if !strings.HasPrefix(s, "---\n") && !strings.HasPrefix(s, "---\r\n") {
+		return s
+	}
+	rest := strings.TrimPrefix(strings.TrimPrefix(s, "---\r\n"), "---\n")
+	idx := strings.Index(rest, "\n---")
+	if idx < 0 {
+		return s
+	}
+	after := rest[idx+len("\n---"):]
+	after = strings.TrimPrefix(after, "\r\n")
+	after = strings.TrimPrefix(after, "\n")
+	return after
 }
 
 func writeSection(b *strings.Builder, title, body string) {

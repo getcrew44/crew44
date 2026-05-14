@@ -75,6 +75,7 @@ function ThoughtChip({ thought }) {
             background: '#FCFAF1', border: '1px solid #ECE6D5',
             fontSize: 13, color: '#5C544B', lineHeight: 1.6, fontStyle: 'italic',
             whiteSpace: 'pre-wrap',
+            animation: 'cw-expand-in .18s ease',
           }}
         >{thought.reasoning || ''}</div>
       )}
@@ -85,6 +86,25 @@ function ThoughtChip({ thought }) {
 function MessageEvent({ event, agentsMap, thought }) {
   const agent = resolveAuthor(event.author, agentsMap) || HUMAN_USER;
   const isUser = agent.kind === 'human';
+
+  if (isUser) {
+    return (
+      <div style={{ display: 'flex', justifyContent: 'flex-end', padding: '14px 0' }}>
+        <div style={{
+          maxWidth: '72%',
+          background: '#EFE9D8',
+          color: '#1C1A17',
+          fontSize: 14, lineHeight: 1.55,
+          padding: '10px 16px',
+          borderRadius: 18,
+          fontFamily: UI_FONT,
+        }}>
+          <RichText text={event.body} />
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div style={{ display: 'flex', gap: 14, padding: '14px 0' }}>
       <Avatar agent={agent} size={28} />
@@ -99,15 +119,7 @@ function MessageEvent({ event, agentsMap, thought }) {
             <ThoughtChip thought={thought} />
           </div>
         )}
-        <div
-          style={{
-            fontSize: 14, color: '#1C1A17', lineHeight: 1.55,
-            ...(isUser ? {
-              background: '#FFFEF8', border: '1px solid #ECE6D5',
-              borderRadius: 10, padding: '10px 14px',
-            } : {}),
-          }}
-        >
+        <div style={{ fontSize: 14, color: '#1C1A17', lineHeight: 1.55 }}>
           <RichText text={event.body} />
         </div>
       </div>
@@ -133,29 +145,19 @@ function ThinkingEvent({ event, agentsMap }) {
   );
 }
 
-const ToolBadge = {
-  display: 'inline-flex', alignItems: 'center',
-  padding: '2px 8px', borderRadius: 999,
-  background: '#F0EAD8', color: '#5C544B',
-  fontSize: 11.5, fontWeight: 500, fontFamily: MONO_FONT,
-};
-
-function ToolResultIndicator({ result }) {
+function ToolStatusChip({ result }) {
   if (result === 'pending') {
-    return <span style={{ fontSize: 11.5, color: '#A89F92', flexShrink: 0 }}>running…</span>;
-  }
-  if (result === 'ok') {
     return (
       <span style={{
         display: 'inline-flex', alignItems: 'center', gap: 4,
-        padding: '1px 8px', borderRadius: 999,
-        background: '#E8F1DE', color: '#6E9E5B',
-        fontSize: 11.5, fontWeight: 500, flexShrink: 0,
+        fontSize: 11, color: '#A89F92', flexShrink: 0,
       }}>
-        <svg width="10" height="10" viewBox="0 0 10 10">
-          <path d="M2 5l2 2 4-4" stroke="currentColor" strokeWidth="1.6" fill="none" strokeLinecap="round" strokeLinejoin="round"/>
-        </svg>
-        ok
+        <span style={{ display: 'flex', animation: 'cw-spin 1.2s linear infinite' }}>
+          <svg width="11" height="11" viewBox="0 0 11 11">
+            <circle cx="5.5" cy="5.5" r="3.5" stroke="currentColor" strokeWidth="1" fill="none" strokeDasharray="3 3"/>
+          </svg>
+        </span>
+        running
       </span>
     );
   }
@@ -163,26 +165,27 @@ function ToolResultIndicator({ result }) {
     return (
       <span style={{
         display: 'inline-flex', alignItems: 'center', gap: 4,
-        padding: '1px 8px', borderRadius: 999,
-        background: '#F5DDD4', color: '#B23A2E',
-        fontSize: 11.5, fontWeight: 500, flexShrink: 0,
+        fontSize: 11, color: '#B23A2E', fontWeight: 500, flexShrink: 0,
       }}>
-        <svg width="9" height="9" viewBox="0 0 9 9">
-          <path d="M2 2l5 5M7 2l-5 5" stroke="currentColor" strokeWidth="1.4" fill="none" strokeLinecap="round"/>
-        </svg>
+        <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#B23A2E', display: 'inline-block' }} />
         failed
       </span>
     );
   }
-  if (result) {
-    return <span style={{ fontSize: 12, color: '#C4644A', flexShrink: 0 }}>{result}</span>;
+  if (result === 'ok' || result) {
+    return (
+      <span style={{
+        width: 6, height: 6, borderRadius: '50%', background: '#6E9E5B',
+        display: 'inline-block', flexShrink: 0,
+      }} />
+    );
   }
   return null;
 }
 
-// Compact, click-to-expand tool call. Defaults to a single inline row
-// (icon + tool name + truncated command + status). The full command and
-// captured output appear when the row is expanded.
+// Compact, click-to-expand tool call. The collapsed row is transparent — just
+// a chevron, mono tool name, truncated input, time, and a status indicator.
+// Expanding reveals the full input + captured output in a bordered card.
 function ToolEvent({ event, agentsMap, showHeader = true }) {
   const agent = resolveAuthor(event.author, agentsMap);
   const [expanded, setExpanded] = React.useState(false);
@@ -203,70 +206,77 @@ function ToolEvent({ event, agentsMap, showHeader = true }) {
         : <div style={{ width: 28, flexShrink: 0 }} aria-hidden="true" />}
       <div style={{ flex: 1, minWidth: 0 }}>
         {showHeader && (
-          <div style={{ fontSize: 13.5, display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+          <div style={{ fontSize: 13.5, display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
             <span style={{ fontWeight: 600, color: '#1C1A17' }}>{agent.name}</span>
             {agent.archived && <DeletedTag />}
             <span style={{ color: '#A89F92' }}>· {event.time}</span>
           </div>
         )}
-        <div
-          data-testid="tool-event-row"
-          aria-expanded={expanded}
-          onClick={() => { if (canExpand) setExpanded(v => !v); }}
-          style={{
-            display: 'flex', alignItems: 'center', gap: 8,
-            border: '1px solid #ECE6D5', borderRadius: 8, background: '#FCFAF1',
-            padding: '6px 10px',
-            cursor: canExpand ? 'pointer' : 'default',
-            userSelect: 'none',
-          }}
-        >
-          <span
-            aria-hidden="true"
+        <div style={{
+          borderRadius: 6, overflow: 'hidden',
+          background: expanded ? '#FCFAF1' : 'transparent',
+          border: '1px solid ' + (expanded ? '#ECE6D5' : 'transparent'),
+          transition: 'background .15s, border-color .15s',
+        }}>
+          <button
+            type="button"
+            data-testid="tool-event-row"
+            aria-expanded={expanded}
+            onClick={() => { if (canExpand) setExpanded(v => !v); }}
             style={{
-              color: '#A89F92', display: 'inline-flex',
+              display: 'flex', alignItems: 'center', gap: 8,
+              width: '100%', padding: '4px 8px',
+              background: 'transparent', border: 'none',
+              cursor: canExpand ? 'pointer' : 'default',
+              fontFamily: UI_FONT, textAlign: 'left',
+              color: '#807972',
+            }}
+          >
+            <span aria-hidden="true" style={{
+              color: '#A89F92', display: 'flex',
               transform: expanded ? 'rotate(90deg)' : 'none',
-              transition: 'transform 0.15s',
+              transition: 'transform .15s',
               opacity: canExpand ? 1 : 0.3,
-            }}
-          >
-            <svg width="10" height="10" viewBox="0 0 10 10">
-              <path d="M3.5 2L7 5 3.5 8" stroke="currentColor" strokeWidth="1.2" fill="none" strokeLinecap="round" strokeLinejoin="round"/>
-            </svg>
-          </span>
-          <span style={ToolBadge}>
-            <svg width="10" height="10" viewBox="0 0 10 10" style={{ marginRight: 3 }}>
-              <path d="M3 7l-1.5 1.5M6.5 3.5l1-1a1.4 1.4 0 0 1 2 2l-1 1M3 7l3.5-3.5 2 2L5 9 2 9.5 3 7z"
-                stroke="currentColor" strokeWidth="0.8" fill="none" strokeLinecap="round" strokeLinejoin="round"/>
-            </svg>
-            {event.tool}
-          </span>
-          {event.path && (
-            <code style={{
-              flex: 1, minWidth: 0,
-              fontFamily: MONO_FONT, fontSize: 12.5, color: '#A89F92',
-              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-            }}>{event.path}</code>
-          )}
-          <ToolResultIndicator result={event.result} />
-        </div>
-        {expanded && (
-          <div
-            data-testid="tool-event-detail"
-            style={{
-              marginTop: 6, padding: '10px 12px',
-              border: '1px solid #ECE6D5', borderRadius: 8, background: '#FAF5E8',
-              fontFamily: MONO_FONT, fontSize: 12.5, color: '#5C544B',
-              whiteSpace: 'pre-wrap', overflow: 'auto', maxHeight: 400,
-              lineHeight: 1.55,
-            }}
-          >
-            {pathOverflows && (
-              <div style={{ color: '#1C1A17', marginBottom: hasOutput ? 8 : 0 }}>{event.path}</div>
+            }}>
+              <svg width="10" height="10" viewBox="0 0 10 10">
+                <path d="M3.5 2L7 5 3.5 8" stroke="currentColor" strokeWidth="1.4" fill="none" strokeLinecap="round" strokeLinejoin="round"/>
+              </svg>
+            </span>
+            <span style={{
+              fontFamily: MONO_FONT, fontSize: 12, color: '#807972', fontWeight: 400,
+            }}>{event.tool}</span>
+            {event.path && (
+              <span style={{
+                fontFamily: MONO_FONT, fontSize: 12, color: '#A89F92',
+                whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                flex: 1, minWidth: 0,
+              }}>{event.path}</span>
             )}
-            {hasOutput && fullOutput}
-          </div>
-        )}
+            {!event.path && <span style={{ flex: 1 }} />}
+            <span style={{ fontSize: 11, color: '#A89F92', flexShrink: 0 }}>{event.time}</span>
+            <ToolStatusChip result={event.result} />
+          </button>
+          {expanded && (
+            <div
+              data-testid="tool-event-detail"
+              style={{
+                borderTop: '1px solid #ECE6D5', background: '#FFFEF8',
+                padding: '10px 14px',
+                fontFamily: MONO_FONT, fontSize: 12.5, color: '#1C1A17',
+                whiteSpace: 'pre-wrap', overflow: 'auto', maxHeight: 400,
+                lineHeight: 1.55,
+                animation: 'cw-expand-in .18s ease',
+              }}
+            >
+              {pathOverflows && (
+                <div style={{ marginBottom: hasOutput ? 8 : 0 }}>{event.path}</div>
+              )}
+              {hasOutput && (
+                <span style={{ color: event.result === 'error' ? '#B23A2E' : '#1C1A17' }}>{fullOutput}</span>
+              )}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -290,23 +300,69 @@ function ToolResultEvent({ event, agentsMap }) {
   );
 }
 
+// Playful gerunds rotated through the streaming indicator instead of the
+// flat "thinking…" string. Borrowed from Claude Code's waiting-word style.
+const WAITING_GERUNDS = [
+  'Pondering', 'Mulling', 'Marinating', 'Brewing', 'Percolating',
+  'Steeping', 'Simmering', 'Proofing', 'Kneading', 'Fermenting',
+  'Noodling', 'Bootstrapping', 'Crystallizing', 'Distilling',
+  'Synthesizing', 'Untangling', 'Composing', 'Sketching', 'Drafting',
+  'Tinkering', 'Wrangling', 'Weaving', 'Threading', 'Stitching',
+  'Tracing', 'Mapping', 'Plotting', 'Riffing', 'Whittling',
+  'Polishing', 'Refining', 'Conjuring', 'Fluttering', 'Whirring',
+  'Murmuring', 'Untwisting', 'Rummaging', 'Cogitating',
+];
+
+const WAITING_WORD_INTERVAL_MS = 8000;
+
+function pickRandomGerund(previous) {
+  if (WAITING_GERUNDS.length <= 1) return WAITING_GERUNDS[0];
+  let next = previous;
+  while (next === previous) {
+    next = WAITING_GERUNDS[Math.floor(Math.random() * WAITING_GERUNDS.length)];
+  }
+  return next;
+}
+
 function StreamingIndicator({ agentsMap, currentAgentId }) {
   const agent = currentAgentId ? resolveAuthor(currentAgentId, agentsMap) : null;
+  const [word, setWord] = React.useState(() => pickRandomGerund(null));
+  React.useEffect(() => {
+    const id = setInterval(() => {
+      setWord(prev => pickRandomGerund(prev));
+    }, WAITING_WORD_INTERVAL_MS);
+    return () => clearInterval(id);
+  }, []);
+  const subject = agent ? `${agent.name} is` : 'Agent is';
   return (
     <div style={{ display: 'flex', gap: 14, padding: '10px 0' }}>
       {agent && <Avatar agent={agent} size={28} />}
       {!agent && <div style={{ width: 28, height: 28 }} />}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#A89F92', fontSize: 13 }}>
-        <span style={{ display: 'inline-flex', gap: 3 }}>
-          {[0, 1, 2].map(i => (
-            <span key={i} style={{
-              width: 5, height: 5, borderRadius: '50%', background: '#C4644A',
-              animation: `pulse 1.2s ease-in-out ${i * 0.2}s infinite`,
-              opacity: 0.7,
-            }} />
-          ))}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#A89F92', fontSize: 13 }}>
+        <span
+          aria-hidden="true"
+          style={{
+            width: 6,
+            height: 6,
+            borderRadius: '50%',
+            background: '#C4644A',
+            animation: 'pulse 1.6s ease-in-out infinite',
+            flexShrink: 0,
+          }}
+        />
+        <span>
+          {subject}{' '}
+          <span
+            key={word}
+            style={{
+              display: 'inline-block',
+              animation: 'wordFadeIn 360ms ease-out',
+              color: '#7A6F5F',
+            }}
+          >
+            {word}…
+          </span>
         </span>
-        {agent ? `${agent.name} is thinking…` : 'Agent is thinking…'}
       </div>
     </div>
   );
@@ -364,7 +420,6 @@ function TaskHeader({ chat }) {
   }, [isStreaming]);
   if (!chat) return null;
   const age = relativeTime(chat.created_at);
-  const status = isStreaming ? 'running' : chat.status || 'active';
   const participantCount = chat.participant_agent_ids?.length || 0;
   const elapsed = elapsedText(chat.created_at, isStreaming ? null : chat.updated_at);
 
@@ -375,26 +430,17 @@ function TaskHeader({ chat }) {
   return (
     <div style={{ padding: '20px 36px 16px', borderBottom: '1px solid #ECE6D5', background: '#FAF5E8', WebkitAppRegion: 'drag' }}>
       <div style={headerColumn}>
-        <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, fontSize: 12.5, color: '#A89F92', marginBottom: 6 }}>
-          <span style={{ fontFamily: MONO_FONT, color: '#5C544B' }}>{chat.id?.slice(0, 8)}</span>
-          <span>·</span>
-          <span>opened {age}</span>
-        </div>
         <h1 style={{
           margin: 0, fontSize: 22, fontWeight: 600,
           color: '#1C1A17', letterSpacing: -0.2, lineHeight: 1.2,
         }}>{chat.title || 'Untitled chat'}</h1>
         <div style={{
-          display: 'flex', gap: 14, marginTop: 10, flexWrap: 'wrap', alignItems: 'center',
-          fontSize: 12.5, color: '#807972',
+          display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 10,
+          fontSize: 12.5, color: '#A89F92', marginTop: 8,
         }}>
-          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-            <span style={{
-              width: 6, height: 6, borderRadius: '50%',
-              background: isStreaming ? '#C4644A' : '#9C8F77',
-            }} />
-            <span style={{ color: '#1C1A17' }}>{status}</span>
-          </span>
+          <span style={{ fontFamily: MONO_FONT, color: '#5C544B' }}>{chat.id?.slice(0, 8)}</span>
+          <span style={{ color: '#D6CDB6' }}>·</span>
+          <span>opened {age}</span>
           {metaItems.map((m, i) => (
             <React.Fragment key={i}>
               <span style={{ color: '#D6CDB6' }}>·</span>
@@ -418,7 +464,56 @@ function handoverVerb(subtype) {
 function HandoverDivider({ from, to, note, subtype, agentsMap }) {
   const fromAgent = resolveAuthor(from, agentsMap);
   const toAgent = resolveAuthor(to, agentsMap);
+  const [open, setOpen] = React.useState(false);
   if (!fromAgent || !toAgent) return null;
+  const hasNote = Boolean(note);
+  const chipStyle = {
+    display: 'inline-flex', alignItems: 'center', gap: 8,
+    padding: '4px 12px 4px 6px', borderRadius: 999,
+    background: '#FCFAF1', border: '1px solid #ECE6D5',
+    fontFamily: UI_FONT,
+    maxWidth: '80%',
+  };
+  const chipContent = (
+    <>
+      <Avatar agent={fromAgent} size={18} />
+      <svg width="12" height="10" viewBox="0 0 12 10" style={{ color: '#A89F92' }}>
+        <path d="M1 5h9M7 2l3 3-3 3" stroke="currentColor" strokeWidth="1.2" fill="none" strokeLinecap="round" strokeLinejoin="round"/>
+      </svg>
+      <Avatar agent={toAgent} size={18} />
+      <span style={{ fontSize: 12, color: '#5C544B', marginLeft: 2, textAlign: 'left' }}>
+        <span style={{ color: '#807972' }}>{fromAgent.name}{fromAgent.archived && <DeletedTag />} {handoverVerb(subtype)} </span>
+        <span style={{ color: '#1C1A17', fontWeight: 500 }}>{toAgent.name}</span>
+        {toAgent.archived && <DeletedTag />}
+        {open && hasNote && (
+          <span style={{ color: '#A89F92' }}>
+            {Array.from(' · ' + note).map((ch, idx) => (
+              <span
+                key={idx}
+                style={{
+                  display: 'inline-block',
+                  whiteSpace: 'pre',
+                  animation: 'cw-type-jump .14s ease-out both',
+                  animationDelay: `${idx * 7}ms`,
+                }}
+              >{ch}</span>
+            ))}
+          </span>
+        )}
+      </span>
+      {hasNote && (
+        <span aria-hidden="true" style={{
+          color: '#A89F92', display: 'flex', marginLeft: 2, flexShrink: 0,
+          transform: open ? 'rotate(90deg)' : 'none',
+          transition: 'transform .15s',
+        }}>
+          <svg width="10" height="10" viewBox="0 0 10 10">
+            <path d="M3.5 2L7 5 3.5 8" stroke="currentColor" strokeWidth="1.4" fill="none" strokeLinecap="round" strokeLinejoin="round"/>
+          </svg>
+        </span>
+      )}
+    </>
+  );
   return (
     <div
       data-testid="handover-divider"
@@ -428,23 +523,21 @@ function HandoverDivider({ from, to, note, subtype, agentsMap }) {
       }}
     >
       <div style={{ flex: 1, height: 0, borderTop: '1px dashed #DCD3BC' }} />
-      <div style={{
-        display: 'inline-flex', alignItems: 'center', gap: 8,
-        padding: '4px 12px 4px 6px', borderRadius: 999,
-        background: '#FCFAF1', border: '1px solid #ECE6D5',
-      }}>
-        <Avatar agent={fromAgent} size={18} />
-        <svg width="12" height="10" viewBox="0 0 12 10" style={{ color: '#A89F92' }}>
-          <path d="M1 5h9M7 2l3 3-3 3" stroke="currentColor" strokeWidth="1.2" fill="none" strokeLinecap="round" strokeLinejoin="round"/>
-        </svg>
-        <Avatar agent={toAgent} size={18} />
-        <span style={{ fontSize: 12, color: '#5C544B', marginLeft: 2 }}>
-          <span style={{ color: '#807972' }}>{fromAgent.name}{fromAgent.archived && <DeletedTag />} {handoverVerb(subtype)} </span>
-          <span style={{ color: '#1C1A17', fontWeight: 500 }}>{toAgent.name}</span>
-          {toAgent.archived && <DeletedTag />}
-          {note && <span style={{ color: '#A89F92' }}> · {note}</span>}
-        </span>
-      </div>
+      {hasNote ? (
+        <button
+          type="button"
+          data-testid="handover-toggle"
+          aria-expanded={open}
+          onClick={() => setOpen(o => !o)}
+          style={{ ...chipStyle, cursor: 'pointer' }}
+        >
+          {chipContent}
+        </button>
+      ) : (
+        <div style={chipStyle}>
+          {chipContent}
+        </div>
+      )}
       <div style={{ flex: 1, height: 0, borderTop: '1px dashed #DCD3BC' }} />
     </div>
   );
@@ -1130,7 +1223,7 @@ export default function TaskView({ chatId, agentsMap, onStreamingChange }) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: '#FAF5E8' }}>
-      <TaskHeader chat={chat} />
+      <TaskHeader chat={chat} isStreaming={isStreaming} onCancel={handleCancel} />
       <div
         ref={timelineRef}
         data-testid="conversation-scroll"
@@ -1156,7 +1249,7 @@ export default function TaskView({ chatId, agentsMap, onStreamingChange }) {
         targetAgentId={targetAgentId}
         onChangeTargetAgent={setTargetAgentId}
       />
-      <style>{`@keyframes pulse { 0%,100%{opacity:.3} 50%{opacity:1} }`}</style>
+      <style>{`@keyframes pulse { 0%,100%{opacity:.3} 50%{opacity:1} } @keyframes cw-spin { to { transform: rotate(360deg) } } @keyframes wordFadeIn { from { opacity: 0; transform: translateY(2px) } to { opacity: 1; transform: translateY(0) } } @keyframes cw-fade-in { from { opacity: 0 } to { opacity: 1 } } @keyframes cw-expand-in { from { opacity: 0; transform: translateY(-3px) } to { opacity: 1; transform: translateY(0) } } @keyframes cw-type-jump { from { opacity: 0 } to { opacity: 1 } }`}</style>
     </div>
   );
 }

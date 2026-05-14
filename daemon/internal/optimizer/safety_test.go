@@ -191,8 +191,8 @@ func TestApplyAcceptQueuesOverflowForCompaction(t *testing.T) {
 	if got := states[scanID+":mu-1"].State; got != "pending_compaction" {
 		t.Fatalf("overflow should record pending_compaction state, got %q", got)
 	}
-	if !strings.HasSuffix(states[scanID+":mu-1"].AppliedTo, "/USER.md") {
-		t.Fatalf("AppliedTo should be a path, got %q", states[scanID+":mu-1"].AppliedTo)
+	if !strings.HasSuffix(states[scanID+":mu-1"].AppliedTo, ".md") {
+		t.Fatalf("AppliedTo should be a body file path, got %q", states[scanID+":mu-1"].AppliedTo)
 	}
 }
 
