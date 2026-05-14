@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, act, within } from '@testing-library/react';
 import TaskView from '../TaskView.jsx';
 import * as api from '../api.js';
+import { rememberAgents, __resetSeenAgentsCacheForTests } from '../utils.js';
 
 vi.mock('../api.js', () => ({
   getChat: vi.fn(),
@@ -14,18 +15,21 @@ const agentsMap = {
   'agent-1': {
     id: 'agent-1',
     name: 'Aria',
+    kind: 'agent',
     initial: 'A',
     color: '#C4644A',
   },
   'agent-2': {
     id: 'agent-2',
     name: 'Default Agent',
+    kind: 'agent',
     initial: 'D',
     color: '#5B7EDB',
   },
   'agent-3': {
     id: 'agent-3',
     name: 'Coding Agent',
+    kind: 'agent',
     initial: 'C',
     color: '#2F79D8',
   },
@@ -43,6 +47,7 @@ const chat = {
 };
 
 beforeEach(() => {
+  __resetSeenAgentsCacheForTests();
   vi.clearAllMocks();
   api.getChat.mockResolvedValue(chat);
   api.postMessage.mockResolvedValue({ ...chat, stream: { status: 'streaming' } });
@@ -52,6 +57,12 @@ beforeEach(() => {
     return vi.fn();
   });
 });
+
+function emitEvent(stream, event) {
+  return act(async () => {
+    stream[2](event);
+  });
+}
 
 describe('TaskView', () => {
   it('does not show the manual agent mention button in the composer toolbar', async () => {
@@ -163,5 +174,535 @@ describe('TaskView', () => {
     });
 
     expect(screen.getAllByText('请修复这个问题')).toHaveLength(1);
+  });
+
+  it('renders a simplified header with id, opened time, and status meta line', async () => {
+    render(<TaskView chatId="chat-1" agentsMap={agentsMap} />);
+
+    expect(await screen.findByRole('heading', { level: 1 })).toHaveTextContent('Demo chat');
+    // 8-char short id
+    expect(screen.getByText('chat-1')).toBeInTheDocument();
+    expect(screen.getByText(/opened /)).toBeInTheDocument();
+    // status is shown as plain text (no MetaPill), not as the old bordered pill
+    expect(screen.getByText('active')).toBeInTheDocument();
+  });
+
+  it('uses "running" status when the chat is streaming', async () => {
+    api.getChat.mockResolvedValue({ ...chat, stream: { status: 'streaming' } });
+    api.streamChatEvents.mockImplementation(() => vi.fn());
+
+    render(<TaskView chatId="chat-1" agentsMap={agentsMap} />);
+
+    expect(await screen.findByText('running')).toBeInTheDocument();
+  });
+
+  it('does not render a Share button in the header', async () => {
+    render(<TaskView chatId="chat-1" agentsMap={agentsMap} />);
+    await screen.findByRole('heading', { level: 1 });
+    expect(screen.queryByRole('button', { name: /share/i })).not.toBeInTheDocument();
+  });
+
+  it('shows a handover divider between two agent messages', async () => {
+    api.streamChatEvents.mockImplementation(() => vi.fn());
+    const multiAgentChat = { ...chat, participant_agent_ids: ['agent-1', 'agent-2'] };
+    api.getChat.mockResolvedValue(multiAgentChat);
+
+    render(<TaskView chatId="chat-1" agentsMap={agentsMap} />);
+    await screen.findByTestId('composer-input');
+
+    const stream = api.streamChatEvents.mock.calls[0];
+    await emitEvent(stream, {
+      seq: 1, type: 'message', ts: '2026-05-12T10:00:00Z',
+      actor_agent_id: 'agent-1', message: { role: 'assistant', content: 'Hi from Aria' },
+    });
+    await emitEvent(stream, {
+      seq: 2, type: 'message', ts: '2026-05-12T10:00:10Z',
+      actor_agent_id: 'agent-2', message: { role: 'assistant', content: 'Taking it from here' },
+    });
+
+    const dividers = await screen.findAllByTestId('handover-divider');
+    expect(dividers).toHaveLength(1);
+    expect(dividers[0]).toHaveTextContent(/Aria handed off to Default Agent/);
+  });
+
+  it('renders a handover divider across an intervening human turn (agent → human → agent)', async () => {
+    api.streamChatEvents.mockImplementation(() => vi.fn());
+    api.getChat.mockResolvedValue({ ...chat, participant_agent_ids: ['agent-1', 'agent-2'] });
+
+    render(<TaskView chatId="chat-1" agentsMap={agentsMap} />);
+    await screen.findByTestId('composer-input');
+
+    const stream = api.streamChatEvents.mock.calls[0];
+    // Partner-style sequence: Aria speaks, the user redirects to Default Agent,
+    // Default Agent answers. The user turn must not hide the handover.
+    await emitEvent(stream, {
+      seq: 1, type: 'message', ts: '2026-05-12T10:00:00Z',
+      actor_agent_id: 'agent-1', message: { role: 'assistant', content: 'Hi from Aria' },
+    });
+    await emitEvent(stream, {
+      seq: 2, type: 'message', ts: '2026-05-12T10:00:05Z',
+      actor_agent_id: '', message: { role: 'user', content: 'handover to @Default Agent' },
+    });
+    await emitEvent(stream, {
+      seq: 3, type: 'message', ts: '2026-05-12T10:00:10Z',
+      actor_agent_id: 'agent-2', message: { role: 'assistant', content: 'Hello, Default here' },
+    });
+
+    const dividers = await screen.findAllByTestId('handover-divider');
+    expect(dividers).toHaveLength(1);
+    expect(dividers[0]).toHaveTextContent(/Aria handed off to Default Agent/);
+  });
+
+  it('does NOT render a handover divider for human → agent or agent → human transitions', async () => {
+    api.streamChatEvents.mockImplementation(() => vi.fn());
+
+    render(<TaskView chatId="chat-1" agentsMap={agentsMap} />);
+    await screen.findByTestId('composer-input');
+
+    const stream = api.streamChatEvents.mock.calls[0];
+    await emitEvent(stream, {
+      seq: 1, type: 'message', ts: '2026-05-12T10:00:00Z',
+      actor_agent_id: '', message: { role: 'user', content: 'hello' },
+    });
+    await emitEvent(stream, {
+      seq: 2, type: 'message', ts: '2026-05-12T10:00:05Z',
+      actor_agent_id: 'agent-1', message: { role: 'assistant', content: 'hi back' },
+    });
+    await emitEvent(stream, {
+      seq: 3, type: 'message', ts: '2026-05-12T10:00:10Z',
+      actor_agent_id: '', message: { role: 'user', content: 'more' },
+    });
+
+    expect(screen.queryByTestId('handover-divider')).not.toBeInTheDocument();
+  });
+
+  it('shows the current target-agent picker in the composer and sends with the selected target_agent_id', async () => {
+    render(<TaskView chatId="chat-1" agentsMap={agentsMap} />);
+
+    const picker = await screen.findByTestId('composer-agent-picker');
+    // Default target = current_agent_id = agent-1 = Aria
+    expect(picker).toHaveTextContent('Aria');
+
+    fireEvent.click(picker);
+    const option = await screen.findByRole('option', { name: /Default Agent/i });
+    fireEvent.click(option);
+
+    // The pill now reflects the new selection
+    expect(picker).toHaveTextContent('Default Agent');
+
+    const input = screen.getByTestId('composer-input');
+    fireEvent.change(input, { target: { value: 'route this to default' } });
+    fireEvent.click(screen.getByTestId('composer-send'));
+
+    await waitFor(() => expect(api.postMessage).toHaveBeenCalledOnce());
+    expect(api.postMessage).toHaveBeenCalledWith('chat-1', 'route this to default', 'agent-2');
+  });
+
+  it('attributes a message from a deleted agent to that agent (not to the user)', async () => {
+    // Seed the session cache so the deleted agent's original name is still known
+    rememberAgents({
+      'ghost-agent': { id: 'ghost-agent', name: 'Ghosty', kind: 'agent', color: '#abcdef', initial: 'G' },
+    });
+    api.streamChatEvents.mockImplementation(() => vi.fn());
+
+    render(<TaskView chatId="chat-1" agentsMap={agentsMap} />);
+    await screen.findByTestId('composer-input');
+
+    const stream = api.streamChatEvents.mock.calls[0];
+    await emitEvent(stream, {
+      seq: 1, type: 'message', ts: '2026-05-12T10:00:00Z',
+      actor_agent_id: 'ghost-agent',
+      message: { role: 'assistant', content: 'I am no longer in your crew' },
+    });
+
+    const body = await screen.findByText('I am no longer in your crew');
+    const block = body.closest('div').parentElement;
+    expect(within(block).getByText('Ghosty')).toBeInTheDocument();
+    expect(within(block).getByTestId('deleted-agent-tag')).toBeInTheDocument();
+    // Critical: NOT attributed to "You"
+    expect(within(block).queryByText('You')).not.toBeInTheDocument();
+  });
+
+  it('renders an unknown-id author as a "Deleted agent" placeholder, never as "You"', async () => {
+    api.streamChatEvents.mockImplementation(() => vi.fn());
+
+    render(<TaskView chatId="chat-1" agentsMap={agentsMap} />);
+    await screen.findByTestId('composer-input');
+
+    const stream = api.streamChatEvents.mock.calls[0];
+    await emitEvent(stream, {
+      seq: 1, type: 'message', ts: '2026-05-12T10:00:00Z',
+      actor_agent_id: 'never-seen',
+      message: { role: 'assistant', content: 'orphan reply' },
+    });
+
+    const body = await screen.findByText('orphan reply');
+    const block = body.closest('div').parentElement;
+    expect(within(block).getByText('Deleted agent')).toBeInTheDocument();
+    expect(within(block).queryByText('You')).not.toBeInTheDocument();
+  });
+
+  it('advances the elapsed-time meta when the per-second tick fires while running', async () => {
+    // We can't lean on vi.useFakeTimers — it also fakes the setTimeout used
+    // by RTL's waitFor and produces test timeouts. Instead, intercept the
+    // 1s setInterval the header installs, capture its callback, and trigger
+    // it manually after advancing Date.now().
+    const realSetInterval = global.setInterval;
+    const tickCallbacks = [];
+    const intervalSpy = vi.spyOn(global, 'setInterval').mockImplementation((cb, delay) => {
+      if (delay === 1000) {
+        tickCallbacks.push(cb);
+        return /* fake handle */ -1;
+      }
+      return realSetInterval(cb, delay);
+    });
+    const dateNowSpy = vi.spyOn(Date, 'now').mockReturnValue(
+      new Date('2026-05-12T10:01:00Z').getTime()
+    );
+    try {
+      api.getChat.mockResolvedValue({ ...chat, stream: { status: 'streaming' } });
+      api.streamChatEvents.mockImplementation(() => vi.fn());
+
+      render(<TaskView chatId="chat-1" agentsMap={agentsMap} />);
+
+      // Initial render: 1m elapsed (chat created at 10:00:00, "now" = 10:01:00).
+      await screen.findByText(/elapsed 1m/);
+      expect(tickCallbacks.length).toBeGreaterThan(0);
+
+      // Advance "now" and fire the captured tick → header should re-render.
+      dateNowSpy.mockReturnValue(new Date('2026-05-12T10:02:00Z').getTime());
+      await act(async () => {
+        tickCallbacks.forEach(cb => cb());
+      });
+      expect(screen.getByText(/elapsed 2m/)).toBeInTheDocument();
+    } finally {
+      intervalSpy.mockRestore();
+      dateNowSpy.mockRestore();
+    }
+  });
+
+  it('does NOT install a per-second tick when the chat is not streaming', async () => {
+    const realSetInterval = global.setInterval;
+    const tickCallbacks = [];
+    const intervalSpy = vi.spyOn(global, 'setInterval').mockImplementation((cb, delay) => {
+      if (delay === 1000) {
+        tickCallbacks.push(cb);
+        return -1;
+      }
+      return realSetInterval(cb, delay);
+    });
+    try {
+      api.getChat.mockResolvedValue({
+        ...chat,
+        stream: { status: 'idle' },
+        updated_at: '2026-05-12T10:00:30Z',
+      });
+      api.streamChatEvents.mockImplementation(() => vi.fn());
+
+      render(<TaskView chatId="chat-1" agentsMap={agentsMap} />);
+      await screen.findByText(/elapsed/);
+      expect(tickCallbacks).toHaveLength(0);
+    } finally {
+      intervalSpy.mockRestore();
+    }
+  });
+
+  it('renders tool calls collapsed by default and expands the output on click', async () => {
+    api.streamChatEvents.mockImplementation(() => vi.fn());
+
+    render(<TaskView chatId="chat-1" agentsMap={agentsMap} />);
+    await screen.findByTestId('composer-input');
+
+    const stream = api.streamChatEvents.mock.calls[0];
+    await emitEvent(stream, {
+      seq: 1, type: 'tool_call', ts: '2026-05-12T10:00:00Z',
+      actor_agent_id: 'agent-1',
+      tool_call: { name: 'Bash', input: { command: "sed -n '1,180p' /tmp/x" } },
+    });
+    await emitEvent(stream, {
+      seq: 2, type: 'tool_call_result', ts: '2026-05-12T10:00:01Z',
+      actor_agent_id: 'agent-1',
+      tool_call_result: { name: 'Bash', output: 'first output line\nsecond output line' },
+    });
+
+    // The compact row is visible; the detail box should be hidden by default.
+    const row = await screen.findByTestId('tool-event-row');
+    expect(row).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByTestId('tool-event-detail')).not.toBeInTheDocument();
+
+    // Clicking expands and reveals the full output.
+    fireEvent.click(row);
+    expect(row).toHaveAttribute('aria-expanded', 'true');
+    const detail = screen.getByTestId('tool-event-detail');
+    expect(detail).toHaveTextContent('first output line');
+    expect(detail).toHaveTextContent('second output line');
+
+    // Clicking again collapses it back.
+    fireEvent.click(row);
+    expect(row).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByTestId('tool-event-detail')).not.toBeInTheDocument();
+  });
+
+  it('omits the agent header on consecutive tool calls from the same agent', async () => {
+    api.streamChatEvents.mockImplementation(() => vi.fn());
+
+    render(<TaskView chatId="chat-1" agentsMap={agentsMap} />);
+    await screen.findByTestId('composer-input');
+
+    const stream = api.streamChatEvents.mock.calls[0];
+    await emitEvent(stream, {
+      seq: 1, type: 'tool_call', ts: '2026-05-12T10:00:00Z',
+      actor_agent_id: 'agent-1',
+      tool_call: { name: 'Bash', input: { command: 'a' } },
+    });
+    await emitEvent(stream, {
+      seq: 2, type: 'tool_call', ts: '2026-05-12T10:00:01Z',
+      actor_agent_id: 'agent-1',
+      tool_call: { name: 'Bash', input: { command: 'b' } },
+    });
+    await emitEvent(stream, {
+      seq: 3, type: 'tool_call', ts: '2026-05-12T10:00:02Z',
+      actor_agent_id: 'agent-1',
+      tool_call: { name: 'Bash', input: { command: 'c' } },
+    });
+
+    // Each tool event still renders its compact row.
+    const rows = await screen.findAllByTestId('tool-event-row');
+    expect(rows).toHaveLength(3);
+    // But the "Aria" agent name should only show on the first one.
+    // (Scope to the conversation column to ignore the AgentPicker pill in the composer.)
+    const column = screen.getByTestId('conversation-column');
+    expect(within(column).getAllByText('Aria')).toHaveLength(1);
+  });
+
+  it('re-shows the agent header when a non-tool event sits between two tool calls from the same agent', async () => {
+    api.streamChatEvents.mockImplementation(() => vi.fn());
+
+    render(<TaskView chatId="chat-1" agentsMap={agentsMap} />);
+    await screen.findByTestId('composer-input');
+
+    const stream = api.streamChatEvents.mock.calls[0];
+    await emitEvent(stream, {
+      seq: 1, type: 'tool_call', ts: '2026-05-12T10:00:00Z',
+      actor_agent_id: 'agent-1',
+      tool_call: { name: 'Bash', input: { command: 'a' } },
+    });
+    await emitEvent(stream, {
+      seq: 2, type: 'message', ts: '2026-05-12T10:00:05Z',
+      actor_agent_id: 'agent-1', message: { role: 'assistant', content: 'thinking out loud' },
+    });
+    await emitEvent(stream, {
+      seq: 3, type: 'tool_call', ts: '2026-05-12T10:00:10Z',
+      actor_agent_id: 'agent-1',
+      tool_call: { name: 'Bash', input: { command: 'b' } },
+    });
+
+    await screen.findAllByTestId('tool-event-row');
+    // Aria appears for: first tool row, the message, and the second tool row → 3 headers.
+    const column = screen.getByTestId('conversation-column');
+    expect(within(column).getAllByText('Aria')).toHaveLength(3);
+  });
+
+  it('renders an explicit backend handover event with the right verb and target', async () => {
+    api.streamChatEvents.mockImplementation(() => vi.fn());
+
+    render(<TaskView chatId="chat-1" agentsMap={agentsMap} />);
+    await screen.findByTestId('composer-input');
+
+    const stream = api.streamChatEvents.mock.calls[0];
+    await emitEvent(stream, {
+      seq: 1, type: 'message', ts: '2026-05-12T10:00:00Z',
+      actor_agent_id: 'agent-1', message: { role: 'assistant', content: 'planning…' },
+    });
+    await emitEvent(stream, {
+      seq: 2, type: 'handover', ts: '2026-05-12T10:00:05Z',
+      actor_agent_id: 'agent-1',
+      handover: { subtype: 'delegate', agent_id: 'agent-2', agent_name: 'Default Agent', note: 'write the composer' },
+    });
+    await emitEvent(stream, {
+      seq: 3, type: 'message', ts: '2026-05-12T10:00:10Z',
+      actor_agent_id: 'agent-2', message: { role: 'assistant', content: 'on it' },
+    });
+
+    const dividers = await screen.findAllByTestId('handover-divider');
+    // Only ONE divider — the explicit one. No synthesized duplicate from the
+    // actor change that follows.
+    expect(dividers).toHaveLength(1);
+    expect(dividers[0]).toHaveTextContent(/Aria handed off to Default Agent/);
+    expect(dividers[0]).toHaveTextContent(/write the composer/);
+  });
+
+  it('drops degenerate handover events whose source and target are the same agent', async () => {
+    // Regression: the backend emits a `scheduled` handover (source → target,
+    // useful) AND an `occurred` handover (target → target, just an
+    // acknowledgment). The acknowledgment must not render.
+    api.streamChatEvents.mockImplementation(() => vi.fn());
+
+    render(<TaskView chatId="chat-1" agentsMap={agentsMap} />);
+    await screen.findByTestId('composer-input');
+
+    const stream = api.streamChatEvents.mock.calls[0];
+    await emitEvent(stream, {
+      seq: 1, type: 'handover', ts: '2026-05-12T10:00:00Z',
+      actor_agent_id: 'agent-1',
+      handover: { subtype: 'scheduled', agent_id: 'agent-2', agent_name: 'Default Agent', note: 'greet the user' },
+    });
+    await emitEvent(stream, {
+      seq: 2, type: 'handover', ts: '2026-05-12T10:00:01Z',
+      actor_agent_id: 'agent-2',
+      handover: { subtype: 'occurred', agent_id: 'agent-2', agent_name: 'Default Agent', note: 'greet the user' },
+    });
+    await emitEvent(stream, {
+      seq: 3, type: 'message', ts: '2026-05-12T10:00:02Z',
+      actor_agent_id: 'agent-2', message: { role: 'assistant', content: 'hi there' },
+    });
+
+    const dividers = await screen.findAllByTestId('handover-divider');
+    expect(dividers).toHaveLength(1);
+    expect(dividers[0]).toHaveTextContent(/Aria.*Default Agent/);
+    expect(dividers[0]).not.toHaveTextContent(/Default Agent handed off to Default Agent/);
+  });
+
+  it('uses the right verb for return and escalate handover subtypes', async () => {
+    api.streamChatEvents.mockImplementation(() => vi.fn());
+
+    render(<TaskView chatId="chat-1" agentsMap={agentsMap} />);
+    await screen.findByTestId('composer-input');
+
+    const stream = api.streamChatEvents.mock.calls[0];
+    await emitEvent(stream, {
+      seq: 1, type: 'handover', ts: '2026-05-12T10:00:00Z',
+      actor_agent_id: 'agent-2',
+      handover: { subtype: 'return', agent_id: 'agent-1' },
+    });
+    await emitEvent(stream, {
+      seq: 2, type: 'handover', ts: '2026-05-12T10:00:01Z',
+      actor_agent_id: 'agent-1',
+      handover: { subtype: 'escalate', agent_id: 'agent-3' },
+    });
+
+    const dividers = await screen.findAllByTestId('handover-divider');
+    expect(dividers[0]).toHaveTextContent(/returned to/);
+    expect(dividers[1]).toHaveTextContent(/escalated to/);
+  });
+
+  it('skips runtime_session events from the timeline', async () => {
+    api.streamChatEvents.mockImplementation(() => vi.fn());
+
+    render(<TaskView chatId="chat-1" agentsMap={agentsMap} />);
+    await screen.findByTestId('composer-input');
+
+    const stream = api.streamChatEvents.mock.calls[0];
+    await emitEvent(stream, {
+      seq: 1, type: 'runtime_session', ts: '2026-05-12T10:00:00Z',
+      actor_agent_id: 'agent-1',
+      runtime_session: { runtime_id: 'r-1', session_id: 's-1', status: 'starting' },
+    });
+    await emitEvent(stream, {
+      seq: 2, type: 'message', ts: '2026-05-12T10:00:01Z',
+      actor_agent_id: 'agent-1', message: { role: 'assistant', content: 'hello' },
+    });
+
+    await screen.findByText('hello');
+    // The runtime_session event must not produce a fallback "Deleted agent"
+    // or empty block — it should simply be absent.
+    const column = screen.getByTestId('conversation-column');
+    expect(within(column).queryByText(/runtime|session/i)).not.toBeInTheDocument();
+  });
+
+  it('renders an error event with subtype, code, message, and agent metadata', async () => {
+    api.streamChatEvents.mockImplementation(() => vi.fn());
+
+    render(<TaskView chatId="chat-1" agentsMap={agentsMap} />);
+    await screen.findByTestId('composer-input');
+
+    const stream = api.streamChatEvents.mock.calls[0];
+    await emitEvent(stream, {
+      seq: 1, type: 'error', ts: '2026-05-12T10:00:00Z',
+      actor_agent_id: 'agent-1',
+      error: {
+        subtype: 'tool_error', code: 'E_TIMEOUT',
+        message: 'run_tests exceeded 30s',
+        agent_id: 'agent-1', agent_name: 'Aria',
+      },
+    });
+
+    const block = await screen.findByTestId('error-event');
+    expect(within(block).getByText(/tool error/)).toBeInTheDocument();
+    expect(within(block).getByText('E_TIMEOUT')).toBeInTheDocument();
+    expect(within(block).getByText(/run_tests exceeded 30s/)).toBeInTheDocument();
+    expect(within(block).getByText('Aria')).toBeInTheDocument();
+  });
+
+  it('pairs a thinking event with the next message from the same author (renders as inline chip, not standalone)', async () => {
+    api.streamChatEvents.mockImplementation(() => vi.fn());
+
+    render(<TaskView chatId="chat-1" agentsMap={agentsMap} />);
+    await screen.findByTestId('composer-input');
+
+    const stream = api.streamChatEvents.mock.calls[0];
+    await emitEvent(stream, {
+      seq: 1, type: 'thinking', ts: '2026-05-12T10:00:00Z',
+      actor_agent_id: 'agent-1', thinking: { content: 'considering the plan' },
+    });
+    await emitEvent(stream, {
+      seq: 2, type: 'message', ts: '2026-05-12T10:00:01Z',
+      actor_agent_id: 'agent-1', message: { role: 'assistant', content: 'here is the plan' },
+    });
+
+    await screen.findByText('here is the plan');
+    // Only ONE thought chip — attached to the message — no standalone thinking block.
+    expect(screen.getAllByTestId('thought-chip')).toHaveLength(1);
+    // And the Aria header appears exactly once for the combined block.
+    const column = screen.getByTestId('conversation-column');
+    expect(within(column).getAllByText('Aria')).toHaveLength(1);
+  });
+
+  it('renders a standalone thinking event when no message from the same author follows', async () => {
+    api.streamChatEvents.mockImplementation(() => vi.fn());
+
+    render(<TaskView chatId="chat-1" agentsMap={agentsMap} />);
+    await screen.findByTestId('composer-input');
+
+    const stream = api.streamChatEvents.mock.calls[0];
+    await emitEvent(stream, {
+      seq: 1, type: 'thinking', ts: '2026-05-12T10:00:00Z',
+      actor_agent_id: 'agent-1', thinking: { content: 'still thinking' },
+    });
+    await emitEvent(stream, {
+      seq: 2, type: 'message', ts: '2026-05-12T10:00:01Z',
+      actor_agent_id: 'agent-2', message: { role: 'assistant', content: 'unrelated reply' },
+    });
+
+    await screen.findByText('unrelated reply');
+    // Aria's thinking is rendered standalone (chip plus name).
+    const column = screen.getByTestId('conversation-column');
+    expect(within(column).getByText('Aria')).toBeInTheDocument();
+    expect(screen.getByTestId('thought-chip')).toBeInTheDocument();
+  });
+
+  it('keeps the streaming indicator on after the user navigates away from a running chat', async () => {
+    api.getChat.mockResolvedValue({ ...chat, stream: { status: 'streaming' } });
+    // streamChatEvents stays connected — no immediate onDone
+    api.streamChatEvents.mockImplementation(() => vi.fn());
+
+    const onStreamingChange = vi.fn();
+    const { unmount } = render(
+      <TaskView chatId="chat-1" agentsMap={agentsMap} onStreamingChange={onStreamingChange} />
+    );
+
+    // Wait for the streaming=true callback
+    await waitFor(() => {
+      const lastCall = onStreamingChange.mock.calls[onStreamingChange.mock.calls.length - 1];
+      expect(lastCall).toEqual(['chat-1', true]);
+    });
+
+    onStreamingChange.mockClear();
+    unmount();
+
+    // Critically: unmount must NOT report streaming=false. That was the bug —
+    // it caused the sidebar spinner to disappear even while the backend kept
+    // working.
+    expect(onStreamingChange).not.toHaveBeenCalledWith('chat-1', false);
   });
 });

@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
   agentColor, agentInitial, relativeTime, formatTime,
   displayAgent, mapBackendEvent, mergeToolResults, HUMAN_USER,
+  resolveAuthor, rememberAgents, __resetSeenAgentsCacheForTests,
 } from '../utils.js';
 
 // ─── agentColor ────────────────────────────────────────────────────────────────
@@ -200,13 +201,37 @@ describe('mapBackendEvent', () => {
     expect(e.result).toBe('pending');
   });
 
-  it('maps tool_call event with complex input as JSON string', () => {
+  it('maps tool_call event surfacing the meaningful input value (not the JSON envelope)', () => {
     const e = mapBackendEvent({
       ...baseEvent, type: 'tool_call',
       tool_call: { name: 'search', input: { query: 'foo', limit: 10 } },
     });
     expect(e.tool).toBe('search');
-    expect(e.path).toBe(JSON.stringify({ query: 'foo', limit: 10 }));
+    expect(e.path).toBe('foo');
+  });
+
+  it('prefers input.command for shell-style tools', () => {
+    const e = mapBackendEvent({
+      ...baseEvent, type: 'tool_call',
+      tool_call: { name: 'Bash', input: { command: "sed -n '1,220p' /tmp/x" } },
+    });
+    expect(e.path).toBe("sed -n '1,220p' /tmp/x");
+  });
+
+  it('falls back to joined string values when no preferred key matches', () => {
+    const e = mapBackendEvent({
+      ...baseEvent, type: 'tool_call',
+      tool_call: { name: 'weird', input: { a: 'one', b: 'two', n: 3 } },
+    });
+    expect(e.path).toBe('one two');
+  });
+
+  it('falls back to JSON when input has no string values', () => {
+    const e = mapBackendEvent({
+      ...baseEvent, type: 'tool_call',
+      tool_call: { name: 'weird', input: { n: 3, m: 4 } },
+    });
+    expect(e.path).toBe(JSON.stringify({ n: 3, m: 4 }));
   });
 
   it('maps tool_call_result event', () => {
@@ -226,6 +251,62 @@ describe('mapBackendEvent', () => {
   it('handles missing payloads gracefully', () => {
     const e = mapBackendEvent({ ...baseEvent, type: 'thinking' });
     expect(e.reasoning).toBe('');
+  });
+
+  it('maps runtime_session to a marker the renderer can skip', () => {
+    const e = mapBackendEvent({ ...baseEvent, type: 'runtime_session' });
+    expect(e.kind).toBe('runtime_session');
+    expect(e._seq).toBe(1);
+  });
+
+  it('maps handover event: actor is the source, payload.agent_id is the target', () => {
+    const e = mapBackendEvent({
+      ...baseEvent, type: 'handover',
+      handover: { subtype: 'delegate', agent_id: 'nico', agent_name: 'Nico', note: 'take the composer' },
+    });
+    expect(e).toEqual({
+      kind: 'handover',
+      author: 'aria',
+      time: expect.any(String),
+      subtype: 'delegate',
+      agent_id: 'aria',
+      target_agent_id: 'nico',
+      target_agent_name: 'Nico',
+      note: 'take the composer',
+      _seq: 1,
+    });
+  });
+
+  it('defaults handover subtype to delegate when missing', () => {
+    const e = mapBackendEvent({
+      ...baseEvent, type: 'handover',
+      handover: { agent_id: 'nico' },
+    });
+    expect(e.subtype).toBe('delegate');
+  });
+
+  it('maps error event with subtype, code, message, and agent metadata', () => {
+    const e = mapBackendEvent({
+      ...baseEvent, type: 'error',
+      error: {
+        subtype: 'tool_error', code: 'E_TIMEOUT',
+        message: 'run_tests exceeded 30s',
+        agent_id: 'nico', agent_name: 'Nico',
+      },
+    });
+    expect(e).toEqual({
+      kind: 'error',
+      author: 'aria',
+      time: expect.any(String),
+      subtype: 'tool_error',
+      code: 'E_TIMEOUT',
+      message: 'run_tests exceeded 30s',
+      agent_id: 'nico',
+      agent_name: 'Nico',
+      target_agent_id: '',
+      target_agent_name: '',
+      _seq: 1,
+    });
   });
 });
 
@@ -293,5 +374,85 @@ describe('HUMAN_USER', () => {
     expect(HUMAN_USER.name).toBeTruthy();
     expect(HUMAN_USER.color).toMatch(/^#[0-9A-F]{6}$/);
     expect(HUMAN_USER.initial).toBeTruthy();
+  });
+});
+
+// ─── resolveAuthor + rememberAgents ───────────────────────────────────────────
+describe('resolveAuthor', () => {
+  beforeEach(() => { __resetSeenAgentsCacheForTests(); });
+
+  it('returns null for falsy author ids', () => {
+    expect(resolveAuthor(null, {})).toBeNull();
+    expect(resolveAuthor(undefined, {})).toBeNull();
+    expect(resolveAuthor('', {})).toBeNull();
+  });
+
+  it('returns HUMAN_USER for the human sentinel', () => {
+    expect(resolveAuthor('__human__', {})).toBe(HUMAN_USER);
+  });
+
+  it('returns the live agent when present in agentsMap', () => {
+    const aria = { id: 'a-1', name: 'Aria', kind: 'agent', color: '#000', initial: 'A' };
+    expect(resolveAuthor('a-1', { 'a-1': aria })).toBe(aria);
+  });
+
+  it('returns a synthetic Deleted-agent placeholder when never seen', () => {
+    const got = resolveAuthor('ghost', {});
+    expect(got.name).toBe('Deleted agent');
+    expect(got.kind).toBe('agent');
+    expect(got.initial).toBe('?');
+    expect(got.archived).toBe(true);
+    expect(got.color).toMatch(/^#[0-9A-F]{6}$/);
+  });
+
+  it('does NOT mistakenly fall through to a human-attributed identity for missing agent ids', () => {
+    // This is the bug we just fixed: unknown agents must not render as "You".
+    const got = resolveAuthor('vanished-agent', {});
+    expect(got.kind).not.toBe('human');
+    expect(got.name).not.toBe(HUMAN_USER.name);
+  });
+
+  it('preserves the original name (with archived flag) for agents seen earlier in this session', () => {
+    rememberAgents({
+      'nico': { id: 'nico', name: 'Nico', kind: 'agent', color: '#123456', initial: 'N' },
+    });
+    // Agent is now gone from the live map
+    const got = resolveAuthor('nico', {});
+    expect(got.name).toBe('Nico');
+    expect(got.color).toBe('#123456');
+    expect(got.archived).toBe(true);
+  });
+
+  it('prefers the live agent over the remembered one (and does not mark archived)', () => {
+    rememberAgents({
+      'nico': { id: 'nico', name: 'Nico old', kind: 'agent', color: '#000', initial: 'N' },
+    });
+    const live = { id: 'nico', name: 'Nico', kind: 'agent', color: '#fff', initial: 'N' };
+    const got = resolveAuthor('nico', { nico: live });
+    expect(got).toBe(live);
+    expect(got.archived).toBeUndefined();
+  });
+});
+
+describe('rememberAgents', () => {
+  beforeEach(() => { __resetSeenAgentsCacheForTests(); });
+
+  it('skips the human sentinel', () => {
+    rememberAgents({ '__human__': HUMAN_USER });
+    expect(resolveAuthor('__human__', {})).toBe(HUMAN_USER);
+    // Cache should not have grown — a missing real agent still falls through to the synthetic placeholder
+    expect(resolveAuthor('nobody', {}).name).toBe('Deleted agent');
+  });
+
+  it('is a no-op for null/undefined input', () => {
+    expect(() => rememberAgents(null)).not.toThrow();
+    expect(() => rememberAgents(undefined)).not.toThrow();
+  });
+
+  it('only remembers entries with kind === agent', () => {
+    rememberAgents({
+      'broken': { id: 'broken', name: 'Broken' }, // missing kind
+    });
+    expect(resolveAuthor('broken', {}).name).toBe('Deleted agent');
   });
 });

@@ -1,21 +1,113 @@
 import React from 'react';
-import { Avatar, MetaPill, RichText, UI_FONT, MONO_FONT } from './components.jsx';
-import { mapBackendEvent, mergeToolResults, relativeTime, formatTime, HUMAN_USER } from './utils.js';
+import { Avatar, RichText, UI_FONT, MONO_FONT } from './components.jsx';
+import { mapBackendEvent, mergeToolResults, relativeTime, formatTime, HUMAN_USER, resolveAuthor } from './utils.js';
 import * as api from './api.js';
 
 // ─── Event renderers ──────────────────────────────────────────────────────────
 
-function MessageEvent({ event, agentsMap }) {
-  const agent = agentsMap[event.author] || HUMAN_USER;
+function DeletedTag() {
+  return (
+    <span
+      data-testid="deleted-agent-tag"
+      title="This agent has been deleted"
+      style={{
+        marginLeft: 6,
+        padding: '1px 6px',
+        borderRadius: 4,
+        background: '#F0EAD8',
+        color: '#807972',
+        fontSize: 10.5,
+        fontWeight: 500,
+        textTransform: 'uppercase',
+        letterSpacing: 0.4,
+      }}
+    >deleted</span>
+  );
+}
+
+// Collapsible "thought for Ns" chip — used standalone in ThinkingEvent and
+// inlined inside MessageEvent when a thinking event immediately precedes a
+// message from the same author.
+function ThoughtChip({ thought }) {
+  const [open, setOpen] = React.useState(false);
+  return (
+    <div>
+      <button
+        data-testid="thought-chip"
+        aria-expanded={open}
+        onClick={() => setOpen(!open)}
+        style={{
+          display: 'inline-flex', alignItems: 'center', gap: 8,
+          padding: '4px 10px 4px 8px', borderRadius: 999,
+          background: open ? '#F7EFDD' : '#FCFAF1',
+          border: '1px solid ' + (open ? '#E9D7B6' : '#ECE6D5'),
+          color: '#5C544B', fontSize: 12.5, cursor: 'pointer',
+          fontFamily: UI_FONT,
+        }}
+      >
+        <span style={{ color: '#C4644A', display: 'flex' }}>
+          <svg width="11" height="11" viewBox="0 0 11 11">
+            <circle cx="3" cy="5.5" r="0.9" fill="currentColor"/>
+            <circle cx="5.5" cy="5.5" r="0.9" fill="currentColor"/>
+            <circle cx="8" cy="5.5" r="0.9" fill="currentColor"/>
+          </svg>
+        </span>
+        <span style={{ color: '#807972' }}>
+          {thought.seconds > 0 ? `thought for ${thought.seconds}s` : 'thinking'}
+        </span>
+        <span
+          aria-hidden="true"
+          style={{
+            color: '#A89F92', display: 'flex',
+            transform: open ? 'rotate(90deg)' : 'none', transition: 'transform .15s',
+          }}
+        >
+          <svg width="10" height="10" viewBox="0 0 10 10">
+            <path d="M3.5 2L7 5 3.5 8" stroke="currentColor" strokeWidth="1.4" fill="none" strokeLinecap="round" strokeLinejoin="round"/>
+          </svg>
+        </span>
+      </button>
+      {open && (
+        <div
+          data-testid="thought-chip-body"
+          style={{
+            marginTop: 8, padding: '12px 14px', borderRadius: 8,
+            background: '#FCFAF1', border: '1px solid #ECE6D5',
+            fontSize: 13, color: '#5C544B', lineHeight: 1.6, fontStyle: 'italic',
+            whiteSpace: 'pre-wrap',
+          }}
+        >{thought.reasoning || ''}</div>
+      )}
+    </div>
+  );
+}
+
+function MessageEvent({ event, agentsMap, thought }) {
+  const agent = resolveAuthor(event.author, agentsMap) || HUMAN_USER;
+  const isUser = agent.kind === 'human';
   return (
     <div style={{ display: 'flex', gap: 14, padding: '14px 0' }}>
       <Avatar agent={agent} size={28} />
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontSize: 13.5, marginBottom: 4 }}>
+        <div style={{ fontSize: 13.5, marginBottom: 4, display: 'flex', alignItems: 'center', gap: 8 }}>
           <span style={{ fontWeight: 600, color: '#1C1A17' }}>{agent.name}</span>
-          <span style={{ color: '#A89F92', marginLeft: 8 }}>· {event.time}</span>
+          {agent.archived && <DeletedTag />}
+          <span style={{ color: '#A89F92' }}>· {event.time}</span>
         </div>
-        <div style={{ fontSize: 14, color: '#1C1A17', lineHeight: 1.55 }}>
+        {thought && (
+          <div style={{ marginBottom: 8 }}>
+            <ThoughtChip thought={thought} />
+          </div>
+        )}
+        <div
+          style={{
+            fontSize: 14, color: '#1C1A17', lineHeight: 1.55,
+            ...(isUser ? {
+              background: '#FFFEF8', border: '1px solid #ECE6D5',
+              borderRadius: 10, padding: '10px 14px',
+            } : {}),
+          }}
+        >
           <RichText text={event.body} />
         </div>
       </div>
@@ -24,43 +116,18 @@ function MessageEvent({ event, agentsMap }) {
 }
 
 function ThinkingEvent({ event, agentsMap }) {
-  const agent = agentsMap[event.author];
-  const [open, setOpen] = React.useState(false);
-  if (!agent) return null;
+  const agent = resolveAuthor(event.author, agentsMap);
+  if (!agent || agent.kind !== 'agent') return null;
   return (
     <div style={{ display: 'flex', gap: 14, padding: '10px 0' }}>
       <Avatar agent={agent} size={28} />
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontSize: 13.5, display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+        <div style={{ fontSize: 13.5, marginBottom: 4, display: 'flex', alignItems: 'center', gap: 8 }}>
           <span style={{ fontWeight: 600, color: '#1C1A17' }}>{agent.name}</span>
+          {agent.archived && <DeletedTag />}
           <span style={{ color: '#A89F92' }}>· {event.time}</span>
-          <span style={{
-            display: 'inline-flex', alignItems: 'center', gap: 4,
-            padding: '2px 8px', borderRadius: 999,
-            background: '#F7EFDD', color: '#C4644A', fontSize: 11.5, fontWeight: 500,
-          }}>
-            <svg width="11" height="11" viewBox="0 0 11 11">
-              <circle cx="3" cy="5.5" r="1" fill="currentColor"/>
-              <circle cx="5.5" cy="5.5" r="1" fill="currentColor"/>
-              <circle cx="8" cy="5.5" r="1" fill="currentColor"/>
-            </svg>
-            {event.seconds > 0 ? `thought ${event.seconds}s` : 'thinking'}
-          </span>
         </div>
-        <div
-          onClick={() => setOpen(!open)}
-          style={{ fontSize: 13, color: '#807972', cursor: 'pointer', userSelect: 'none', display: 'inline-flex', alignItems: 'center', gap: 4 }}
-        >
-          <span style={{ transform: open ? 'rotate(90deg)' : 'none', display: 'inline-block', transition: 'transform 0.15s' }}>›</span>
-          {open ? 'Hide reasoning' : 'Show reasoning'}
-        </div>
-        {open && (
-          <div style={{
-            marginTop: 8, padding: '10px 14px', borderRadius: 8,
-            background: '#FAF5E8', border: '1px solid #ECE6D5',
-            fontSize: 13, color: '#5C544B', lineHeight: 1.55, fontStyle: 'italic',
-          }}>{event.reasoning}</div>
-        )}
+        <ThoughtChip thought={event} />
       </div>
     </div>
   );
@@ -73,16 +140,100 @@ const ToolBadge = {
   fontSize: 11.5, fontWeight: 500, fontFamily: MONO_FONT,
 };
 
-function ToolEvent({ event, agentsMap }) {
-  const agent = agentsMap[event.author];
-  if (!agent) return null;
+function ToolResultIndicator({ result }) {
+  if (result === 'pending') {
+    return <span style={{ fontSize: 11.5, color: '#A89F92', flexShrink: 0 }}>running…</span>;
+  }
+  if (result === 'ok') {
+    return (
+      <span style={{
+        display: 'inline-flex', alignItems: 'center', gap: 4,
+        padding: '1px 8px', borderRadius: 999,
+        background: '#E8F1DE', color: '#6E9E5B',
+        fontSize: 11.5, fontWeight: 500, flexShrink: 0,
+      }}>
+        <svg width="10" height="10" viewBox="0 0 10 10">
+          <path d="M2 5l2 2 4-4" stroke="currentColor" strokeWidth="1.6" fill="none" strokeLinecap="round" strokeLinejoin="round"/>
+        </svg>
+        ok
+      </span>
+    );
+  }
+  if (result === 'error') {
+    return (
+      <span style={{
+        display: 'inline-flex', alignItems: 'center', gap: 4,
+        padding: '1px 8px', borderRadius: 999,
+        background: '#F5DDD4', color: '#B23A2E',
+        fontSize: 11.5, fontWeight: 500, flexShrink: 0,
+      }}>
+        <svg width="9" height="9" viewBox="0 0 9 9">
+          <path d="M2 2l5 5M7 2l-5 5" stroke="currentColor" strokeWidth="1.4" fill="none" strokeLinecap="round"/>
+        </svg>
+        failed
+      </span>
+    );
+  }
+  if (result) {
+    return <span style={{ fontSize: 12, color: '#C4644A', flexShrink: 0 }}>{result}</span>;
+  }
+  return null;
+}
+
+// Compact, click-to-expand tool call. Defaults to a single inline row
+// (icon + tool name + truncated command + status). The full command and
+// captured output appear when the row is expanded.
+function ToolEvent({ event, agentsMap, showHeader = true }) {
+  const agent = resolveAuthor(event.author, agentsMap);
+  const [expanded, setExpanded] = React.useState(false);
+  if (!agent || agent.kind !== 'agent') return null;
+
+  const fullOutput = event.output || event.detail || '';
+  const hasOutput = Boolean(fullOutput);
+  const pathOverflows = Boolean(event.path && event.path.length > 80);
+  const canExpand = hasOutput || pathOverflows;
+
   return (
-    <div style={{ display: 'flex', gap: 14, padding: '10px 0' }}>
-      <Avatar agent={agent} size={28} />
+    <div
+      data-testid="tool-event"
+      style={{ display: 'flex', gap: 14, padding: showHeader ? '10px 0' : '2px 0' }}
+    >
+      {showHeader
+        ? <Avatar agent={agent} size={28} />
+        : <div style={{ width: 28, flexShrink: 0 }} aria-hidden="true" />}
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontSize: 13.5, display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-          <span style={{ fontWeight: 600, color: '#1C1A17' }}>{agent.name}</span>
-          <span style={{ color: '#A89F92' }}>· {event.time}</span>
+        {showHeader && (
+          <div style={{ fontSize: 13.5, display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+            <span style={{ fontWeight: 600, color: '#1C1A17' }}>{agent.name}</span>
+            {agent.archived && <DeletedTag />}
+            <span style={{ color: '#A89F92' }}>· {event.time}</span>
+          </div>
+        )}
+        <div
+          data-testid="tool-event-row"
+          aria-expanded={expanded}
+          onClick={() => { if (canExpand) setExpanded(v => !v); }}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 8,
+            border: '1px solid #ECE6D5', borderRadius: 8, background: '#FCFAF1',
+            padding: '6px 10px',
+            cursor: canExpand ? 'pointer' : 'default',
+            userSelect: 'none',
+          }}
+        >
+          <span
+            aria-hidden="true"
+            style={{
+              color: '#A89F92', display: 'inline-flex',
+              transform: expanded ? 'rotate(90deg)' : 'none',
+              transition: 'transform 0.15s',
+              opacity: canExpand ? 1 : 0.3,
+            }}
+          >
+            <svg width="10" height="10" viewBox="0 0 10 10">
+              <path d="M3.5 2L7 5 3.5 8" stroke="currentColor" strokeWidth="1.2" fill="none" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
+          </span>
           <span style={ToolBadge}>
             <svg width="10" height="10" viewBox="0 0 10 10" style={{ marginRight: 3 }}>
               <path d="M3 7l-1.5 1.5M6.5 3.5l1-1a1.4 1.4 0 0 1 2 2l-1 1M3 7l3.5-3.5 2 2L5 9 2 9.5 3 7z"
@@ -90,39 +241,30 @@ function ToolEvent({ event, agentsMap }) {
             </svg>
             {event.tool}
           </span>
+          {event.path && (
+            <code style={{
+              flex: 1, minWidth: 0,
+              fontFamily: MONO_FONT, fontSize: 12.5, color: '#A89F92',
+              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+            }}>{event.path}</code>
+          )}
+          <ToolResultIndicator result={event.result} />
         </div>
-        {event.path && (
-          <div style={{
-            border: '1px solid #ECE6D5', borderRadius: 8, background: '#FCFAF1',
-            padding: '10px 14px', display: 'flex', alignItems: 'center', gap: 8,
-          }}>
-            <span style={{ color: '#807972', display: 'flex' }}>
-              <svg width="13" height="13" viewBox="0 0 13 13">
-                <path d="M2.5 2h5l3 3v6a1 1 0 0 1-1 1h-7a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1z M7.5 2v3h3"
-                  stroke="currentColor" strokeWidth="1" fill="none" strokeLinejoin="round"/>
-              </svg>
-            </span>
-            <code style={{ fontFamily: MONO_FONT, fontSize: 12.5, color: '#1C1A17', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {event.path}
-            </code>
-            {event.result && event.result !== 'pending' && (
-              <span style={{ fontSize: 12, color: event.result === 'ok' ? '#6E9E5B' : '#C4644A', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                {event.result === 'ok' && (
-                  <svg width="10" height="10" viewBox="0 0 10 10">
-                    <path d="M2 5l2 2 4-4" stroke="currentColor" strokeWidth="1.4" fill="none" strokeLinecap="round" strokeLinejoin="round"/>
-                  </svg>
-                )}
-                {event.result}
-              </span>
+        {expanded && (
+          <div
+            data-testid="tool-event-detail"
+            style={{
+              marginTop: 6, padding: '10px 12px',
+              border: '1px solid #ECE6D5', borderRadius: 8, background: '#FAF5E8',
+              fontFamily: MONO_FONT, fontSize: 12.5, color: '#5C544B',
+              whiteSpace: 'pre-wrap', overflow: 'auto', maxHeight: 400,
+              lineHeight: 1.55,
+            }}
+          >
+            {pathOverflows && (
+              <div style={{ color: '#1C1A17', marginBottom: hasOutput ? 8 : 0 }}>{event.path}</div>
             )}
-            {event.result === 'pending' && (
-              <span style={{ fontSize: 11.5, color: '#A89F92' }}>running…</span>
-            )}
-          </div>
-        )}
-        {event.detail && (
-          <div style={{ padding: '4px 14px 0', fontSize: 12, color: '#807972', fontFamily: MONO_FONT }}>
-            {event.detail}
+            {hasOutput && fullOutput}
           </div>
         )}
       </div>
@@ -131,8 +273,8 @@ function ToolEvent({ event, agentsMap }) {
 }
 
 function ToolResultEvent({ event, agentsMap }) {
-  const agent = agentsMap[event.author];
-  if (!agent) return null;
+  const agent = resolveAuthor(event.author, agentsMap);
+  if (!agent || agent.kind !== 'agent') return null;
   return (
     <div style={{ display: 'flex', gap: 14, padding: '6px 0 6px 42px' }}>
       <div style={{ flex: 1, minWidth: 0 }}>
@@ -149,7 +291,7 @@ function ToolResultEvent({ event, agentsMap }) {
 }
 
 function StreamingIndicator({ agentsMap, currentAgentId }) {
-  const agent = currentAgentId ? agentsMap[currentAgentId] : null;
+  const agent = currentAgentId ? resolveAuthor(currentAgentId, agentsMap) : null;
   return (
     <div style={{ display: 'flex', gap: 14, padding: '10px 0' }}>
       {agent && <Avatar agent={agent} size={28} />}
@@ -170,21 +312,17 @@ function StreamingIndicator({ agentsMap, currentAgentId }) {
   );
 }
 
-function EventRouter({ event, agentsMap }) {
-  if (event.kind === 'message') return <MessageEvent event={event} agentsMap={agentsMap} />;
+function EventRouter({ event, agentsMap, showHeader = true, thought }) {
+  if (event.kind === 'message') return <MessageEvent event={event} agentsMap={agentsMap} thought={thought} />;
   if (event.kind === 'thinking') return <ThinkingEvent event={event} agentsMap={agentsMap} />;
-  if (event.kind === 'tool') return <ToolEvent event={event} agentsMap={agentsMap} />;
+  if (event.kind === 'tool') return <ToolEvent event={event} agentsMap={agentsMap} showHeader={showHeader} />;
   if (event.kind === 'tool_result') return <ToolResultEvent event={event} agentsMap={agentsMap} />;
+  if (event.kind === 'error') return <ErrorEvent event={event} agentsMap={agentsMap} />;
+  // runtime_session is intentionally swallowed; no UI for it.
   return null;
 }
 
 // ─── Task header ──────────────────────────────────────────────────────────────
-
-const headerBtn = {
-  padding: '5px 12px', borderRadius: 6, fontSize: 12.5, fontWeight: 500,
-  border: '1px solid #DCD3BC', background: '#FCFAF1', color: '#1C1A17',
-  cursor: 'pointer', fontFamily: UI_FONT, WebkitAppRegion: 'no-drag',
-};
 
 const conversationColumn = {
   width: '100%',
@@ -192,43 +330,288 @@ const conversationColumn = {
   margin: '0 auto',
 };
 
-function TaskHeader({ chat, agentsMap }) {
+const headerColumn = {
+  width: '100%',
+  maxWidth: 960,
+  margin: '0 auto',
+};
+
+function elapsedText(start, end) {
+  if (!start) return '';
+  const startMs = new Date(start).getTime();
+  if (Number.isNaN(startMs)) return '';
+  const endMs = end ? new Date(end).getTime() : Date.now();
+  let secs = Math.max(0, Math.floor((endMs - startMs) / 1000));
+  if (secs < 60) return `${secs}s`;
+  const days = Math.floor(secs / 86400); secs -= days * 86400;
+  const hours = Math.floor(secs / 3600); secs -= hours * 3600;
+  const mins = Math.floor(secs / 60);
+  const parts = [];
+  if (days) parts.push(`${days}d`);
+  if (hours) parts.push(`${hours}h`);
+  if (mins || (!days && !hours)) parts.push(`${mins}m`);
+  return parts.join(' ');
+}
+
+function TaskHeader({ chat }) {
+  const isStreaming = chat?.stream?.status === 'streaming';
+  // Tick once per second while running so the elapsed string advances live.
+  const [, forceTick] = React.useReducer(x => x + 1, 0);
+  React.useEffect(() => {
+    if (!isStreaming) return;
+    const t = setInterval(forceTick, 1000);
+    return () => clearInterval(t);
+  }, [isStreaming]);
   if (!chat) return null;
-  const leadAgent = agentsMap[chat.main_agent_id] || agentsMap[chat.current_agent_id];
   const age = relativeTime(chat.created_at);
-  const status = chat.stream?.status === 'streaming' ? 'running' : chat.status || 'active';
+  const status = isStreaming ? 'running' : chat.status || 'active';
+  const participantCount = chat.participant_agent_ids?.length || 0;
+  const elapsed = elapsedText(chat.created_at, isStreaming ? null : chat.updated_at);
+
+  const metaItems = [];
+  if (participantCount > 1) metaItems.push(`${participantCount} agents`);
+  if (elapsed) metaItems.push(`elapsed ${elapsed}`);
 
   return (
     <div style={{ padding: '20px 36px 16px', borderBottom: '1px solid #ECE6D5', background: '#FAF5E8', WebkitAppRegion: 'drag' }}>
-      <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, fontSize: 12.5, color: '#A89F92', marginBottom: 6 }}>
-        <span style={{ fontFamily: MONO_FONT, color: '#5C544B' }}>{chat.id?.slice(0, 8)}</span>
-        <span>·</span>
-        <span>opened {age}</span>
-      </div>
-      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 16 }}>
+      <div style={headerColumn}>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, fontSize: 12.5, color: '#A89F92', marginBottom: 6 }}>
+          <span style={{ fontFamily: MONO_FONT, color: '#5C544B' }}>{chat.id?.slice(0, 8)}</span>
+          <span>·</span>
+          <span>opened {age}</span>
+        </div>
         <h1 style={{
-          flex: 1, margin: 0, fontSize: 22, fontWeight: 600,
+          margin: 0, fontSize: 22, fontWeight: 600,
           color: '#1C1A17', letterSpacing: -0.2, lineHeight: 1.2,
         }}>{chat.title || 'Untitled chat'}</h1>
-        <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
-          <button style={headerBtn}>Share…</button>
+        <div style={{
+          display: 'flex', gap: 14, marginTop: 10, flexWrap: 'wrap', alignItems: 'center',
+          fontSize: 12.5, color: '#807972',
+        }}>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+            <span style={{
+              width: 6, height: 6, borderRadius: '50%',
+              background: isStreaming ? '#C4644A' : '#9C8F77',
+            }} />
+            <span style={{ color: '#1C1A17' }}>{status}</span>
+          </span>
+          {metaItems.map((m, i) => (
+            <React.Fragment key={i}>
+              <span style={{ color: '#D6CDB6' }}>·</span>
+              <span>{m}</span>
+            </React.Fragment>
+          ))}
         </div>
-      </div>
-      <div style={{ display: 'flex', gap: 6, marginTop: 12, flexWrap: 'wrap', alignItems: 'center' }}>
-        <MetaPill dot dotColor={status === 'running' ? '#C4644A' : '#9C8F77'}>
-          <span style={{ color: '#1C1A17', fontWeight: 500 }}>{status}</span>
-        </MetaPill>
-        {leadAgent && (
-          <MetaPill>
-            <Avatar agent={leadAgent} size={14} /> lead · {leadAgent.name}
-          </MetaPill>
-        )}
-        {chat.participant_agent_ids?.length > 1 && (
-          <MetaPill>{chat.participant_agent_ids.length} agents</MetaPill>
-        )}
       </div>
     </div>
   );
+}
+
+// ─── Handover divider ─────────────────────────────────────────────────────────
+
+function handoverVerb(subtype) {
+  if (subtype === 'return') return 'returned to';
+  if (subtype === 'escalate') return 'escalated to';
+  return 'handed off to';
+}
+
+function HandoverDivider({ from, to, note, subtype, agentsMap }) {
+  const fromAgent = resolveAuthor(from, agentsMap);
+  const toAgent = resolveAuthor(to, agentsMap);
+  if (!fromAgent || !toAgent) return null;
+  return (
+    <div
+      data-testid="handover-divider"
+      style={{
+        display: 'flex', alignItems: 'center', gap: 12,
+        padding: '14px 0 10px', userSelect: 'none',
+      }}
+    >
+      <div style={{ flex: 1, height: 0, borderTop: '1px dashed #DCD3BC' }} />
+      <div style={{
+        display: 'inline-flex', alignItems: 'center', gap: 8,
+        padding: '4px 12px 4px 6px', borderRadius: 999,
+        background: '#FCFAF1', border: '1px solid #ECE6D5',
+      }}>
+        <Avatar agent={fromAgent} size={18} />
+        <svg width="12" height="10" viewBox="0 0 12 10" style={{ color: '#A89F92' }}>
+          <path d="M1 5h9M7 2l3 3-3 3" stroke="currentColor" strokeWidth="1.2" fill="none" strokeLinecap="round" strokeLinejoin="round"/>
+        </svg>
+        <Avatar agent={toAgent} size={18} />
+        <span style={{ fontSize: 12, color: '#5C544B', marginLeft: 2 }}>
+          <span style={{ color: '#807972' }}>{fromAgent.name}{fromAgent.archived && <DeletedTag />} {handoverVerb(subtype)} </span>
+          <span style={{ color: '#1C1A17', fontWeight: 500 }}>{toAgent.name}</span>
+          {toAgent.archived && <DeletedTag />}
+          {note && <span style={{ color: '#A89F92' }}> · {note}</span>}
+        </span>
+      </div>
+      <div style={{ flex: 1, height: 0, borderTop: '1px dashed #DCD3BC' }} />
+    </div>
+  );
+}
+
+// ─── Error event ──────────────────────────────────────────────────────────────
+
+function ErrorEvent({ event, agentsMap }) {
+  const author = event.agent_id || event.author;
+  const agent = author ? resolveAuthor(author, agentsMap) : null;
+  return (
+    <div data-testid="error-event" style={{ display: 'flex', gap: 14, padding: '8px 0' }}>
+      {agent && agent.kind === 'agent'
+        ? <Avatar agent={agent} size={28} />
+        : <div style={{ width: 28, flexShrink: 0 }} aria-hidden="true" />}
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{
+          border: '1px solid #E9C5BC', borderRadius: 10,
+          background: '#FBEEE7', overflow: 'hidden',
+        }}>
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 8,
+            padding: '8px 12px',
+            borderBottom: '1px solid #EFD3C9', background: '#FBE6DC',
+          }}>
+            <span style={{ color: '#B23A2E', display: 'flex' }}>
+              <svg width="11" height="11" viewBox="0 0 11 11">
+                <path d="M5.5 2v4M5.5 8v0.5" stroke="currentColor" strokeWidth="1.4" fill="none" strokeLinecap="round"/>
+                <circle cx="5.5" cy="5.5" r="4.5" stroke="currentColor" strokeWidth="1" fill="none"/>
+              </svg>
+            </span>
+            <span style={{ fontSize: 12.5, fontWeight: 600, color: '#B23A2E', letterSpacing: 0.2 }}>
+              {(event.subtype || 'error').replace(/_/g, ' ')}
+            </span>
+            {event.code && (
+              <code style={{
+                fontFamily: MONO_FONT, fontSize: 11.5, color: '#B23A2E',
+                background: '#F1D4C9', padding: '1px 6px', borderRadius: 4,
+              }}>{event.code}</code>
+            )}
+            <div style={{ flex: 1 }} />
+            <span style={{ fontSize: 11.5, color: '#9C5142' }}>{event.time}</span>
+          </div>
+          <div style={{ padding: '10px 14px' }}>
+            <div style={{ fontSize: 13.5, color: '#1C1A17', lineHeight: 1.55 }}>
+              <RichText text={event.message} />
+            </div>
+            {(event.agent_name || event.target_agent_name) && (
+              <div style={{
+                marginTop: 8, fontSize: 11.5, color: '#9C5142',
+                display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap',
+              }}>
+                {event.agent_name && (
+                  <span>raised by <b style={{ color: '#B23A2E', fontWeight: 600 }}>{event.agent_name}</b></span>
+                )}
+                {event.target_agent_name && (
+                  <>
+                    <span>·</span>
+                    <span>target <b style={{ color: '#B23A2E', fontWeight: 600 }}>{event.target_agent_name}</b></span>
+                  </>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Pre-pass: drop runtime_session events (no UI), and when a thinking event
+// is immediately followed by a message from the same author, attach it to
+// that message as `_thought` so the message can render the chip inline
+// instead of standalone.
+function prepareEvents(events) {
+  const visible = events.filter(e => e && e.kind !== 'runtime_session');
+  const out = [];
+  for (let i = 0; i < visible.length; i++) {
+    const e = visible[i];
+    if (e.kind === 'thinking') {
+      const next = visible[i + 1];
+      if (next && next.kind === 'message' && next.author === e.author) {
+        out.push({ ...next, _thought: e });
+        i += 1;
+        continue;
+      }
+    }
+    out.push(e);
+  }
+  return out;
+}
+
+function renderEventsWithHandovers({ events, agentsMap }) {
+  const prepared = prepareEvents(events);
+  const out = [];
+  // Track the last *agent* actor, not the last event author. A human turn
+  // between two agents (e.g. "@Designer take it from here") should still let
+  // us recognize the agent-to-agent handover that follows it.
+  let prevAgentActor = null;
+  // Track the previous event's tool author so consecutive tool calls from
+  // the same agent share one header (avatar+name+time) instead of repeating.
+  let prevToolAuthor = null;
+  const isAgentActor = (id) => id && id !== '__human__';
+
+  prepared.forEach((e, i) => {
+    // 1. Explicit backend-emitted handover → render directly and update the
+    //    last-agent tracker so the next agent message doesn't synthesize a
+    //    duplicate divider.
+    //
+    //    The daemon emits TWO handover events per handoff: a "scheduled"
+    //    event (source → target, what the user actually wants to see) and
+    //    an "occurred" event written as the new agent activates with both
+    //    sides set to that new agent (source === target — degenerate).
+    //    Drop the degenerate one so we don't render "Designer → Designer".
+    if (e.kind === 'handover') {
+      const from = e.agent_id || e.author;
+      const to = e.target_agent_id;
+      if (from && to && from !== to) {
+        out.push(
+          <HandoverDivider
+            key={`h-${e._seq ?? i}`}
+            from={from}
+            to={to}
+            subtype={e.subtype}
+            note={e.note}
+            agentsMap={agentsMap}
+          />
+        );
+        prevAgentActor = to;
+        prevToolAuthor = null;
+      } else if (from && to && from === to) {
+        // Still update the actor tracker so subsequent events don't
+        // synthesize a fallback divider for the same identity.
+        prevAgentActor = to;
+      }
+      return;
+    }
+
+    // 2. Synthesized fallback for actor changes without an explicit handover
+    //    event (e.g. user retargets via the composer's AgentPicker).
+    const actor = e.author;
+    if (isAgentActor(actor) && prevAgentActor && actor !== prevAgentActor) {
+      out.push(
+        <HandoverDivider
+          key={`syn-${e._seq ?? i}`}
+          from={prevAgentActor}
+          to={actor}
+          agentsMap={agentsMap}
+        />
+      );
+    }
+
+    const showHeader = !(e.kind === 'tool' && prevToolAuthor === actor && actor);
+    out.push(
+      <EventRouter
+        key={e._seq ?? i}
+        event={e}
+        agentsMap={agentsMap}
+        showHeader={showHeader}
+        thought={e._thought}
+      />
+    );
+
+    if (isAgentActor(actor)) prevAgentActor = actor;
+    prevToolAuthor = e.kind === 'tool' ? actor : null;
+  });
+  return out;
 }
 
 // ─── Composer ─────────────────────────────────────────────────────────────────
@@ -297,7 +680,85 @@ function HighlightedComposerText({ text, agents }) {
   );
 }
 
-function Composer({ onSend, isStreaming, onCancel, agentsMap }) {
+function AgentPicker({ value, onChange, agents }) {
+  const [open, setOpen] = React.useState(false);
+  const ref = React.useRef(null);
+  const agent = agents.find(a => a.id === value) || agents[0];
+  React.useEffect(() => {
+    if (!open) return;
+    const close = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener('mousedown', close);
+    return () => document.removeEventListener('mousedown', close);
+  }, [open]);
+  if (!agent) return null;
+  return (
+    <div ref={ref} style={{ position: 'relative' }}>
+      <button
+        data-testid="composer-agent-picker"
+        onClick={() => setOpen(!open)}
+        title={`Talking to ${agent.name} — click to redirect`}
+        style={{
+          display: 'inline-flex', alignItems: 'center', gap: 6,
+          padding: '3px 8px 3px 3px', borderRadius: 999,
+          border: '1px solid #E6DFCC', background: '#FCFAF1', cursor: 'pointer',
+          fontFamily: UI_FONT,
+        }}
+      >
+        <Avatar agent={agent} size={18} />
+        <span style={{ fontSize: 12.5, color: '#1C1A17', fontWeight: 500 }}>{agent.name}</span>
+        <svg width="9" height="9" viewBox="0 0 9 9" style={{ color: '#A89F92', marginLeft: 1 }}>
+          <path d="M2 3.5l2.5 2.5L7 3.5" stroke="currentColor" strokeWidth="1.2" fill="none" strokeLinecap="round" strokeLinejoin="round"/>
+        </svg>
+      </button>
+      {open && (
+        <div
+          role="listbox"
+          aria-label="Direct message to"
+          style={{
+            position: 'absolute', bottom: 'calc(100% + 6px)', left: 0,
+            minWidth: 220, padding: 4, borderRadius: 10,
+            background: '#FFFEF8', border: '1px solid #DCD3BC',
+            boxShadow: '0 10px 30px -10px rgba(40,30,15,0.3), 0 4px 10px rgba(40,30,15,0.08)',
+            zIndex: 30,
+          }}
+        >
+          <div style={{ padding: '6px 10px 4px', fontSize: 11, color: '#A89F92', textTransform: 'uppercase', letterSpacing: 0.5 }}>Direct to</div>
+          {agents.map(a => {
+            const active = a.id === value;
+            return (
+              <div
+                key={a.id}
+                role="option"
+                aria-selected={active}
+                onClick={() => { onChange(a.id); setOpen(false); }}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 10,
+                  padding: '7px 10px', borderRadius: 6, cursor: 'pointer',
+                  background: active ? '#F7EFDD' : 'transparent',
+                }}
+                onMouseEnter={(e) => { if (!active) e.currentTarget.style.background = '#FAF5E8'; }}
+                onMouseLeave={(e) => { if (!active) e.currentTarget.style.background = 'transparent'; }}
+              >
+                <Avatar agent={a} size={22} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 13, fontWeight: 500, color: '#1C1A17' }}>{a.name}</div>
+                  {a.role && <div style={{ fontSize: 11.5, color: '#807972' }}>{a.role}</div>}
+                </div>
+                {active && (
+                  <svg width="12" height="12" viewBox="0 0 12 12" style={{ color: '#C4644A' }}>
+                    <path d="M2.5 6l2.5 2.5L9.5 3.5" stroke="currentColor" strokeWidth="1.6" fill="none" strokeLinecap="round" strokeLinejoin="round"/>
+                  </svg>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Composer({ onSend, isStreaming, onCancel, agentsMap, targetAgentId, onChangeTargetAgent }) {
   const [val, setVal] = React.useState('');
   const [cursor, setCursor] = React.useState(0);
   const [activeSuggestion, setActiveSuggestion] = React.useState(0);
@@ -484,6 +945,9 @@ function Composer({ onSend, isStreaming, onCancel, agentsMap }) {
           />
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6 }}>
+          {agents.length > 0 && onChangeTargetAgent && (
+            <AgentPicker value={targetAgentId} onChange={onChangeTargetAgent} agents={agents} />
+          )}
           <button style={chip}>Plan ▾</button>
           <div style={{ flex: 1 }} />
           <span style={{ fontSize: 11.5, color: '#A89F92' }}>⌘↵ send</span>
@@ -512,6 +976,7 @@ export default function TaskView({ chatId, agentsMap, onStreamingChange }) {
   const [events, setEvents] = React.useState([]);
   const [isStreaming, setIsStreaming] = React.useState(false);
   const [error, setError] = React.useState(null);
+  const [targetAgentId, setTargetAgentId] = React.useState(null);
   const timelineRef = React.useRef(null);
   const lastSeqRef = React.useRef(0);
   const streamCleanupRef = React.useRef(() => {});
@@ -526,7 +991,9 @@ export default function TaskView({ chatId, agentsMap, onStreamingChange }) {
   React.useEffect(() => {
     if (!chatId) return;
     onStreamingChange?.(chatId, isStreaming);
-    return () => onStreamingChange?.(chatId, false);
+    // Intentionally no cleanup: a chat may still be streaming on the backend
+    // after the user switches away. The sidebar indicator should stay until
+    // App.jsx confirms via its background poll that the run actually ended.
   }, [chatId, isStreaming, onStreamingChange]);
 
   const connectEventStream = React.useCallback((id, after) => {
@@ -562,7 +1029,12 @@ export default function TaskView({ chatId, agentsMap, onStreamingChange }) {
             const updated = [...prev];
             for (let i = updated.length - 1; i >= 0; i--) {
               if (updated[i].kind === 'tool' && updated[i].tool === mapped.name && updated[i].result === 'pending') {
-                updated[i] = { ...updated[i], result: 'ok', detail: mapped.output?.slice(0, 120) };
+                updated[i] = {
+                  ...updated[i],
+                  result: 'ok',
+                  output: mapped.output || '',
+                  detail: mapped.output?.slice(0, 120),
+                };
                 return updated;
               }
             }
@@ -598,6 +1070,7 @@ export default function TaskView({ chatId, agentsMap, onStreamingChange }) {
       .then(c => {
         setChat(c);
         setIsStreaming(c.stream?.status === 'streaming');
+        setTargetAgentId(c.current_agent_id || c.main_agent_id || null);
       })
       .catch(err => setError(err.message));
 
@@ -625,16 +1098,16 @@ export default function TaskView({ chatId, agentsMap, onStreamingChange }) {
     }]);
 
     try {
-      // target_agent_id is required by the backend — use current agent, fall back to lead
-      const targetAgentId = chat?.current_agent_id || chat?.main_agent_id;
-      await api.postMessage(chatId, text, targetAgentId);
+      // target_agent_id is required by the backend — prefer user-selected, fall back to current/lead
+      const effectiveTarget = targetAgentId || chat?.current_agent_id || chat?.main_agent_id;
+      await api.postMessage(chatId, text, effectiveTarget);
       // Reconnect after the last known seq to get agent response
       connectEventStream(chatId, lastSeqRef.current);
     } catch (err) {
       console.error('Send failed:', err);
       setIsStreaming(false);
     }
-  }, [chatId, chat, connectEventStream]);
+  }, [chatId, chat, connectEventStream, targetAgentId]);
 
   const handleCancel = React.useCallback(async () => {
     if (!chatId) return;
@@ -657,17 +1130,14 @@ export default function TaskView({ chatId, agentsMap, onStreamingChange }) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: '#FAF5E8' }}>
-      <TaskHeader
-        chat={chat}
-        agentsMap={agentsMap}
-      />
+      <TaskHeader chat={chat} />
       <div
         ref={timelineRef}
         data-testid="conversation-scroll"
         style={{ flex: 1, overflow: 'auto', padding: '8px 36px 0' }}
       >
         <div data-testid="conversation-column" style={conversationColumn}>
-          {events.map((e, i) => <EventRouter key={e._seq ?? i} event={e} agentsMap={agentsMap} />)}
+          {renderEventsWithHandovers({ events, agentsMap })}
           {isStreaming && events.length > 0 && (
             <StreamingIndicator agentsMap={agentsMap} currentAgentId={chat?.current_agent_id} />
           )}
@@ -678,7 +1148,14 @@ export default function TaskView({ chatId, agentsMap, onStreamingChange }) {
           )}
         </div>
       </div>
-      <Composer onSend={handleSend} isStreaming={isStreaming} onCancel={handleCancel} agentsMap={agentsMap} />
+      <Composer
+        onSend={handleSend}
+        isStreaming={isStreaming}
+        onCancel={handleCancel}
+        agentsMap={agentsMap}
+        targetAgentId={targetAgentId}
+        onChangeTargetAgent={setTargetAgentId}
+      />
       <style>{`@keyframes pulse { 0%,100%{opacity:.3} 50%{opacity:1} }`}</style>
     </div>
   );

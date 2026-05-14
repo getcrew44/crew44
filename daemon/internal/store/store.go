@@ -35,6 +35,18 @@ func (s *Store) SummaryPath(chatID string) string {
 	return filepath.Join(s.root, "chats", "chat-"+chatID, "summary.md")
 }
 
+// UserMemoryPath is the global per-user memory file injected into every chat's
+// system prompt. See design doc memory-file-design.
+func (s *Store) UserMemoryPath() string {
+	return filepath.Join(s.root, "USER.md")
+}
+
+// ProjectMemoryPath is the per-project memory file injected when a chat is
+// scoped to that project.
+func (s *Store) ProjectMemoryPath(projectID string) string {
+	return filepath.Join(s.root, "projects", "proj-"+projectID, "MEMORY.md")
+}
+
 func (s *Store) RuntimeEnvDir(chatID, agentID string) string {
 	return filepath.Join(s.root, "runtime-env", "chat-"+chatID, "agent-"+agentID)
 }

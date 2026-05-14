@@ -5,8 +5,9 @@ import CrewRoute from './CrewRoute.jsx';
 import NewTaskRoute from './NewTaskRoute.jsx';
 import OnboardingRoute from './OnboardingRoute.jsx';
 import PairMobileDialog from './PairMobileDialog.jsx';
+import AutoRoute from './AutoRoute.jsx';
 import { Icon } from './components.jsx';
-import { displayAgent, relativeTime, HUMAN_USER } from './utils.js';
+import { displayAgent, relativeTime, rememberAgents, HUMAN_USER } from './utils.js';
 import * as api from './api.js';
 import { createExistingFolderProject } from './existingFolderProject.js';
 
@@ -185,6 +186,7 @@ export default function App() {
       // Build agents map with display properties
       const map = { '__human__': HUMAN_USER };
       agts.forEach(a => { map[a.id] = displayAgent(a); });
+      rememberAgents(map);
       setAgentsMap(map);
 
       // Fetch chats for each project
@@ -224,7 +226,59 @@ export default function App() {
       delete next[chatId];
       return next;
     });
+    if (!isStreaming) {
+      api.getChat(chatId).then(c => {
+        if (!c?.id || !c?.project_id) return;
+        setProjectChats(prev => {
+          const list = prev[c.project_id];
+          if (!list) return prev;
+          const idx = list.findIndex(x => x.id === c.id);
+          if (idx === -1) return prev;
+          const updated = list.slice();
+          updated[idx] = { ...updated[idx], updated_at: c.updated_at, status: c.status };
+          return { ...prev, [c.project_id]: updated };
+        });
+      }).catch(() => {});
+    }
   }, []);
+
+  // Reconcile sidebar running indicators for chats the user is not currently
+  // viewing. TaskView's stream subscription closes when the user switches
+  // away, so without this loop the override would stick at "running" forever
+  // (or, before this loop existed, get falsely cleared on unmount).
+  const runningChatIdsKey = React.useMemo(
+    () => Object.entries(chatStatusOverrides)
+      .filter(([, v]) => v === 'running')
+      .map(([id]) => id)
+      .sort()
+      .join(','),
+    [chatStatusOverrides]
+  );
+  React.useEffect(() => {
+    if (!runningChatIdsKey) return;
+    const ids = runningChatIdsKey.split(',');
+    let cancelled = false;
+    const reconcile = async () => {
+      for (const id of ids) {
+        try {
+          const c = await api.getChat(id);
+          if (cancelled) return;
+          if (c?.stream?.status !== 'streaming') {
+            setChatStatusOverrides(prev => {
+              if (!prev[id]) return prev;
+              const next = { ...prev };
+              delete next[id];
+              return next;
+            });
+          }
+        } catch {
+          // Backend hiccup — try again next tick.
+        }
+      }
+    };
+    const interval = setInterval(reconcile, 5000);
+    return () => { cancelled = true; clearInterval(interval); };
+  }, [runningChatIdsKey]);
 
   const handleDataRefresh = React.useCallback(() => {
     loadData();
@@ -344,6 +398,12 @@ export default function App() {
     }
   }, [showToast]);
 
+  const [nowTick, setNowTick] = React.useState(0);
+  React.useEffect(() => {
+    const id = setInterval(() => setNowTick(t => t + 1), 30000);
+    return () => clearInterval(id);
+  }, []);
+
   // Build sidebar-compatible project list from backend data
   const sidebarProjects = React.useMemo(() =>
     projects.map(p => ({
@@ -357,7 +417,7 @@ export default function App() {
         age: relativeTime(c.updated_at),
       })),
     })),
-    [projects, projectChats, chatStatusOverrides]
+    [projects, projectChats, chatStatusOverrides, nowTick]
   );
 
   const deskName = runtimes[0]?.name || 'CrewAI Desktop';
@@ -427,10 +487,7 @@ export default function App() {
         body="Search across every conversation, edit, and file the crew has touched. ⌘K from anywhere." />
     );
   } else if (route === 'auto') {
-    content = (
-      <EmptyRoute icon="auto" title="Auto optimization"
-        body="Suggest model swaps, prompt tightening, and tool consolidations based on the last week of runs." />
-    );
+    content = <AutoRoute onToast={showToast} />;
   } else {
     content = <NewTaskRoute projects={projects} agents={agentsList} onNewTask={handleNewTask} onExistingFolder={handleExistingFolder} initialProjectId={newTaskProjectId} />;
   }

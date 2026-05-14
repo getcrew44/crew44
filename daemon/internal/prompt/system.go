@@ -2,10 +2,18 @@ package prompt
 
 import (
 	"fmt"
+	"io"
+	"os"
 	"strings"
 
 	"github.com/sqtech/crew-ai/crewai-repo/internal/model"
 )
+
+// memoryReadCap bounds the bytes injected into every system prompt from
+// USER.md / project MEMORY.md. The optimizer accept handler enforces its own
+// cap on appends, but a hand-edited or restored memory file can already be
+// larger; this is the last line of defense before the LLM sees it.
+const memoryReadCap = 8 * 1024
 
 const CrewAIContext = "CrewAI Desktop is a local-first multi-agent workteam. The product is organized around agents, skills, runtimes, projects, and chats. User-owned state lives under `~/.crewai`: agent configs, skill directories, runtime inventory, project records, chat timelines, summaries, and preset mappings. Treat these records as user data and avoid overwriting them unless the task explicitly calls for migration, reset, or repair behavior."
 
@@ -14,12 +22,14 @@ type Skill struct {
 }
 
 type SystemPromptInput struct {
-	Agent           model.AgentConfig
-	Runtime         model.RuntimeRecord
-	AvailableAgents []model.AgentConfig
-	Skills          []Skill
-	SummaryPath     string
-	HandoverNote    string
+	Agent             model.AgentConfig
+	Runtime           model.RuntimeRecord
+	AvailableAgents   []model.AgentConfig
+	Skills            []Skill
+	SummaryPath       string
+	HandoverNote      string
+	UserMemoryPath    string // ~/.crewai/USER.md; empty if missing/disabled
+	ProjectMemoryPath string // ~/.crewai/projects/<id>/MEMORY.md; empty if missing
 }
 
 func BuildSystemPrompt(input SystemPromptInput) string {
@@ -33,12 +43,37 @@ func BuildSystemPrompt(input SystemPromptInput) string {
 	if summary := summaryReference(input.SummaryPath); summary != "" {
 		writeSection(&b, "Conversation Summary", summary)
 	}
+	writeSection(&b, "User Memory", readMemoryFile(input.UserMemoryPath))
+	writeSection(&b, "Project Memory", readMemoryFile(input.ProjectMemoryPath))
 	if skills := skillSummary(input.Runtime.Provider, input.Skills); skills != "" {
 		writeSection(&b, "Available Skills", skills)
 	}
 	writeSection(&b, "Available Agents For Handover", availableAgents(input.Agent.ID, input.AvailableAgents))
 	writeSection(&b, "Handover Output Protocol", handoverProtocol())
 	return strings.TrimSpace(b.String())
+}
+
+// readMemoryFile reads a bounded curated memory file (USER.md / project MEMORY.md).
+// Returns empty string if the file is missing, empty, or unreadable so the section is omitted.
+// Reads are capped at memoryReadCap to bound prompt size if the file has been
+// hand-edited past the optimizer's append cap.
+func readMemoryFile(path string) string {
+	if strings.TrimSpace(path) == "" {
+		return ""
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+	data, err := io.ReadAll(io.LimitReader(f, memoryReadCap+1))
+	if err != nil {
+		return ""
+	}
+	if len(data) > memoryReadCap {
+		data = append(data[:memoryReadCap], []byte("\n[memory truncated]")...)
+	}
+	return strings.TrimSpace(string(data))
 }
 
 func writeSection(b *strings.Builder, title, body string) {

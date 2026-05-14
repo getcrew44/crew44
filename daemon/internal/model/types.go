@@ -68,13 +68,14 @@ type ProjectIndexEntry struct {
 }
 
 type ProjectRecord struct {
-	ID          string    `json:"id"`
-	Name        string    `json:"name"`
-	Workdir     string    `json:"workdir"`
-	MainAgentID string    `json:"main_agent_id"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
-	ArchivedAt  time.Time `json:"archived_at,omitempty"`
+	ID           string    `json:"id"`
+	Name         string    `json:"name"`
+	Workdir      string    `json:"workdir"`
+	MainAgentID  string    `json:"main_agent_id"`
+	SystemHidden bool      `json:"system_hidden,omitempty"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
+	ArchivedAt   time.Time `json:"archived_at,omitempty"`
 }
 
 type ChatIndexEntry struct {
