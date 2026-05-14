@@ -217,3 +217,35 @@ export function streamChatEvents(chatId, after, onEvent, onDone, onError) {
     }
   };
 }
+
+// ---------- Auto-optimizer ----------
+
+export async function listOptimizerSuggestions() {
+  return rpc.call('optimizer.suggestions.list');
+}
+
+export async function runOptimizerScan() {
+  return rpc.call('optimizer.scan.run');
+}
+
+export async function actOnSuggestion(id, action, editedPreview) {
+  const params = { id, action };
+  if (editedPreview) params.edited_preview = editedPreview;
+  return rpc.call('optimizer.suggestions.act', params);
+}
+
+export async function getOptimizerSchedule() {
+  return rpc.call('optimizer.schedule.get');
+}
+
+export async function setOptimizerSchedule(schedule) {
+  return rpc.call('optimizer.schedule.set', schedule);
+}
+
+export async function getOptimizerScan(id) {
+  return rpc.call('optimizer.scans.get', { id });
+}
+
+export async function purgeOptimizerScans() {
+  return rpc.call('optimizer.scans.purge');
+}

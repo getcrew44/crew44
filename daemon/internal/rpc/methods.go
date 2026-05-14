@@ -58,6 +58,14 @@ func (s *Server) registerMethods() {
 		"chats.events.subscribe":    s.chatsEventsSubscribe,
 		"chats.events.unsubscribe":  s.chatsEventsUnsubscribe,
 		"chats.cancel":              s.chatsCancel,
+
+		"optimizer.suggestions.list": s.optimizerSuggestionsList,
+		"optimizer.scan.run":         s.optimizerScanRun,
+		"optimizer.suggestions.act":  s.optimizerSuggestionsAct,
+		"optimizer.schedule.get":     s.optimizerScheduleGet,
+		"optimizer.schedule.set":     s.optimizerScheduleSet,
+		"optimizer.scans.get":        s.optimizerScansGet,
+		"optimizer.scans.purge":      s.optimizerScansPurge,
 	}
 }
 

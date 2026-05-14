@@ -365,12 +365,11 @@ function SessionItem({ session, active, onPick }) {
       <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
         {session.title}
       </span>
-      {session.age && (
-        <span style={{ color: '#A89F92', fontSize: 12.5, flexShrink: 0 }}>{session.age}</span>
-      )}
-      {session.status === 'running' && (
+      {session.status === 'running' ? (
         <SessionProgress title={session.title} />
-      )}
+      ) : session.age ? (
+        <span style={{ color: '#A89F92', fontSize: 12.5, flexShrink: 0 }}>{session.age}</span>
+      ) : null}
     </div>
   );
 }

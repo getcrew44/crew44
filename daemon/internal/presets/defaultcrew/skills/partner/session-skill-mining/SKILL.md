@@ -1,11 +1,17 @@
 ---
 name: session-skill-mining
-description: Use when the user explicitly asks to inspect Codex or Claude Code session conversations from a specific time range and extract reusable workflows, prompts, conventions, procedures, or agent roles that could become CrewAI skills or agent+skill bundles.
+description: Use when the user explicitly asks to inspect past Codex or Claude Code sessions, runs, or chats from a specific time range and extract reusable upgrades (skills to codify, memories to pin, or strategic nudges on routing/scheduling/agent shape). Also invoked by the auto-optimizer scheduler to produce structured JSON suggestions for the Auto-optimization route.
 ---
 
 # Session Skill Mining
 
-Review AI coding sessions from an explicit time range and identify reusable knowledge worth turning into skills, agent roles, or agent+skill bundles.
+Review AI coding sessions, run metadata, and edit history from an explicit time range and identify three kinds of upgrades:
+
+1. **Skills** — repeated workflows worth codifying as a SKILL.md
+2. **Memories** — facts about the project or the user worth pinning so the agent does not rediscover them every session
+3. **Strategy** — co-founder-style nudges on routing, scheduling, agent shape, cost
+
+The auto-optimizer (`Auto optimization` route in CrewAI Desktop) invokes this skill on a schedule and parses the JSON block from your response. When invoked manually by the user, emit both the readable summary and the JSON so the user can see what would be persisted.
 
 ## Guardrails
 
@@ -21,6 +27,9 @@ Review AI coding sessions from an explicit time range and identify reusable know
 - The user wants patterns from Codex or Claude Code conversations.
 - The user asks to mine past sessions for reusable prompts, workflows, debugging methods, review checklists, or project conventions.
 - The user asks whether repeated work should become a new CrewAI role, not just a skill.
+- The user asks for memory candidates (project preferences, personal style, scheduling habits) worth pinning.
+- The user asks for strategy nudges (routing imbalance, schedule-time vs cost overlap, gaps in agent coverage).
+- The auto-optimizer fires this skill on a cron. The prompt tells you which surfaces to scan (`skill`, `memory`, `strategy`) and the threshold (`all`/`med`/`high`). Respect both: do not emit candidates for disabled surfaces, and drop candidates below the threshold.
 
 ## Sources
 
@@ -51,6 +60,19 @@ Timestamps are usually ISO-8601 UTC in each JSONL record. Normalize the user's r
    - repeated handoffs from generalist work to a specialist mode;
    - a stable bundle of skills that should travel together;
    - a clear "when to route here" rule for Partner.
+8. Identify memory candidates (project-scoped — `memory-project`):
+   - facts the agent rediscovered multiple times for the same project (build tooling, lockfile conventions, deployment quirks);
+   - rollback-after-tool-failure patterns that codify what NOT to run;
+   - project conventions Partner had to inject manually each session.
+9. Identify memory candidates (user-scoped — `memory-user`):
+   - repeated user edits to agent-written drafts (style preferences);
+   - scheduling habits (when the user triages, batches, ships);
+   - escalation patterns (which agent the user falls back to and when).
+10. Identify strategy candidates:
+    - agent idle vs queue-wait imbalance across the roster;
+    - schedule firings that overlap peak-cost windows;
+    - tag coverage gaps (e.g., topic with no owner agent);
+    - tool-cost regressions (queue time creeping up, retries rising).
 8. Classify each finding as one of:
    - `skill`: one reusable procedure inside an existing role;
    - `agent+skills`: a durable specialist role plus one or more skills;
@@ -72,6 +94,13 @@ find "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects" -name '*.jsonl' -print
 ```
 
 For large ranges, avoid printing full transcripts. Extract compact fields with `jq` or a small script, then inspect only promising sessions.
+
+When inspecting SQLite or JSONL indexes, keep every command bounded:
+
+- Use metadata-first queries with `LIMIT`.
+- Select snippets and lengths, not raw long fields: `substr(title,1,120)`, `substr(first_user_message,1,240)`, `length(first_user_message)`.
+- Never run `select *` or print full transcript/tool-output/blob columns.
+- If a source is too large to inspect safely, sample or report the coverage limit instead of dumping it.
 
 ## Output format
 
@@ -129,6 +158,107 @@ Route here when: ...
 Required skills:
 - ...
 ```
+
+## Structured output (required when invoked by auto-optimizer; recommended for manual use)
+
+Reply with a short plain-English summary the user can skim, then a single fenced JSON block. The block must match the schema below; the daemon parses it. If you cannot produce valid JSON, do not invent it — emit an empty `suggestions` array instead.
+
+```json
+{
+  "schema_version": 1,
+  "scan_summary": { "window": "2026-05-06..2026-05-13", "runs_analyzed": 142 },
+  "suggestions": [
+    {
+      "id": "k-1",
+      "kind": "skill",
+      "priority": "high",
+      "title": "Bundle the 6-step locale video prep into a skill",
+      "body": "Milo runs the same prep ritual before every doubao-tts job: check 16:9 crop, normalize audio to -14 LUFS, name subtitles {locale}.vtt, copy to /out/locale/, verify duration <= 90s, log to ledger. Five runs in 8 days, near-identical.",
+      "impact": "-4m/run",
+      "evidence": { "runs": ["t-091","t-088","t-082"], "windows": ["5 runs, 8d window"] },
+      "preview": {
+        "type": "skill",
+        "name": "locale-video-prep",
+        "lines": [
+          "# locale-video-prep",
+          "",
+          "Required reading before any locale promo render.",
+          "",
+          "## Steps",
+          "1. Verify aspect ratio is 16:9 (crop, do not pad).",
+          "2. Normalize audio to -14 LUFS."
+        ]
+      }
+    },
+    {
+      "id": "m-1",
+      "kind": "memory-project",
+      "priority": "high",
+      "title": "This repo uses pnpm workspaces; npm install breaks it",
+      "body": "Three lockfile-recovery sessions in the last week. Worth pinning so no agent runs npm install at the repo root again.",
+      "impact": "Prevents 10m/slip",
+      "evidence": { "runs": ["t-114","t-112","t-109"], "windows": ["3 lockfile-recovery sessions"] },
+      "preview": {
+        "type": "memory",
+        "scope": "crewai-desktop",
+        "scope_id": "PASTE-PROJECT-UUID-HERE",
+        "text": "Project uses pnpm workspaces. Never run npm install at the repo root."
+      }
+    },
+    {
+      "id": "u-1",
+      "kind": "memory-user",
+      "priority": "med",
+      "title": "Jordan prefers em-dashes over semicolons in copy",
+      "body": "Across 7 copy reviews, you replaced 19 of 21 agent-written semicolons with em-dashes.",
+      "impact": "Style fit",
+      "evidence": { "runs": ["t-114","t-082"], "windows": ["7 copy reviews, 14d"] },
+      "preview": {
+        "type": "memory",
+        "scope": "Jordan",
+        "text": "In copy, prefer em-dashes over semicolons."
+      }
+    },
+    {
+      "id": "s-1",
+      "kind": "strategy",
+      "priority": "high",
+      "title": "Aria is idle 38% of the week — Milo is the bottleneck",
+      "body": "Milo sat in queue for an average of 11m across 9 tasks last week while Aria had three idle stretches.",
+      "impact": "+22% throughput",
+      "evidence": { "runs": ["t-114","t-112"], "windows": ["Tue 14-18, Thu 09-11"] },
+      "preview": {
+        "type": "plan",
+        "lines": [
+          "Route locale-video pre-prep -> aria",
+          "Keep doubao-tts on -> milo",
+          "Estimated lift: +22% throughput, -$1.40/wk spend"
+        ]
+      }
+    }
+  ]
+}
+```
+
+### Field rules
+
+- `schema_version`: always `1`.
+- `id`: short kebab/letter hint (`k-1`, `m-1`, `u-1`, `s-1`). The daemon rewrites this to `<scan_id>:<hint>` server-side, so hints do not need to be globally unique.
+- `kind`: one of `skill`, `memory-project`, `memory-user`, `strategy`.
+- `priority`: `high` for clear wins, `med` for likely wins, `low` for speculation. Drop `low` if the prompt's threshold is `med` or `high`.
+- `title`: one line, lead with what the user gains.
+- `body`: 1-3 sentences, name the pattern and the cost of not fixing it.
+- `impact`: short chip text (`-4m/run`, `+22% throughput`, `Prevents 10m/slip`, `Style fit`).
+- `evidence.runs`: chat or turn IDs you can quote. `evidence.windows`: short human-readable spans.
+- `preview.type` follows `kind`:
+  - `skill` → `type: "skill"`, set `name` (kebab-case), `lines` is the SKILL.md body.
+  - `memory-project` → `type: "memory"`, set `scope` (project display name), `scope_id` (project UUID), `text` (the one-line bullet to append).
+  - `memory-user` → `type: "memory"`, set `scope` (user display name), `text`. Omit `scope_id`.
+  - `strategy` → `type: "plan"` (numbered options/lift estimates) or `type: "diff"` (cron/config change preview); set `lines`.
+
+### Honor surfaces and threshold
+
+The auto-optimizer's scan prompt lists which surfaces are enabled and the priority threshold. If `surfaces.memory=false` you must skip both `memory-project` and `memory-user`. If `threshold=high` you must skip `med` and `low` candidates. The daemon also re-validates server-side; emitting filtered candidates wastes tokens but does not harm the system.
 
 ## Privacy rules
 

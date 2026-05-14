@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 )
 
 // codexBlockedArgs are flags hardcoded by the daemon that must not be
@@ -27,6 +28,9 @@ var codexBlockedArgs = map[string]blockedArgMode{
 // other agents stays easy if codex starts shipping longer failure traces.
 const (
 	codexStderrTailBytes                  = 2048
+	codexStdoutInitialBufferBytes         = 1024 * 1024
+	codexStdoutMaxLineBytes               = 64 * 1024 * 1024
+	codexToolOutputMaxBytes               = 256 * 1024
 	defaultCodexSemanticInactivityTimeout = 10 * time.Minute
 )
 
@@ -134,13 +138,18 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 	go func() {
 		defer close(readerDone)
 		scanner := bufio.NewScanner(stdout)
-		scanner.Buffer(make([]byte, 0, 1024*1024), 10*1024*1024)
+		scanner.Buffer(make([]byte, 0, codexStdoutInitialBufferBytes), codexStdoutMaxLineBytes)
 		for scanner.Scan() {
 			line := strings.TrimSpace(scanner.Text())
 			if line == "" {
 				continue
 			}
 			c.handleLine(line)
+		}
+		if err := scanner.Err(); err != nil {
+			c.setTurnError(err.Error())
+			c.closeAllPending(err)
+			return
 		}
 		c.closeAllPending(fmt.Errorf("codex process exited"))
 	}()
@@ -252,6 +261,18 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 				lastSemanticActivity = time.Now()
 				lastSemanticActivityDescription = activity
 				resetTimer(semanticTimer, semanticInactivityTimeout)
+			case <-readerDone:
+				// Reader exited before turnDone fired. This means stdout was
+				// closed (process died), or scanner hit codexStdoutMaxLineBytes
+				// on an oversized JSON line. Without this case we'd sit on
+				// semanticTimer for 10 min before failing. Fail fast instead.
+				waitingForTurn = false
+				finalStatus = "failed"
+				if errMsg := c.getTurnError(); errMsg != "" {
+					finalError = errMsg
+				} else {
+					finalError = "codex stdout closed before turn completed"
+				}
 			case <-semanticTimer.C:
 				waitingForTurn = false
 				finalStatus = "timeout"
@@ -430,6 +451,25 @@ func describeCodexSemanticActivity(msg Message) string {
 		}
 	}
 	return string(msg.Type)
+}
+
+func boundCodexToolOutput(output string) string {
+	if len(output) <= codexToolOutputMaxBytes {
+		return output
+	}
+	total := len(output)
+	marker := fmt.Sprintf("\n\n[output truncated by CrewAI: kept %d of %d bytes]", codexToolOutputMaxBytes, total)
+	keep := codexToolOutputMaxBytes - len(marker)
+	if keep < 0 {
+		keep = 0
+	}
+	// Back off to the previous UTF-8 rune boundary so the marker doesn't get
+	// appended mid-rune (which would corrupt the last visible character when
+	// JSON-marshalled — invalid sequences become U+FFFD).
+	for keep > 0 && !utf8.RuneStart(output[keep]) {
+		keep--
+	}
+	return output[:keep] + marker
 }
 
 // ── codexClient: JSON-RPC 2.0 transport ──
@@ -725,7 +765,7 @@ func (c *codexClient) handleEvent(msg map[string]any) {
 				Type:   MessageToolResult,
 				Tool:   "exec_command",
 				CallID: callID,
-				Output: output,
+				Output: boundCodexToolOutput(output),
 			})
 		}
 	case "patch_apply_begin":
@@ -881,7 +921,7 @@ func (c *codexClient) handleItemNotification(method string, params map[string]an
 				Type:   MessageToolResult,
 				Tool:   "exec_command",
 				CallID: itemID,
-				Output: output,
+				Output: boundCodexToolOutput(output),
 			})
 		}
 

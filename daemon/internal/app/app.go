@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -12,6 +13,7 @@ import (
 	"github.com/sqtech/crew-ai/crewai-repo/internal/broker"
 	"github.com/sqtech/crew-ai/crewai-repo/internal/id"
 	"github.com/sqtech/crew-ai/crewai-repo/internal/model"
+	"github.com/sqtech/crew-ai/crewai-repo/internal/optimizer"
 	"github.com/sqtech/crew-ai/crewai-repo/internal/presets"
 	"github.com/sqtech/crew-ai/crewai-repo/internal/runtime"
 	"github.com/sqtech/crew-ai/crewai-repo/internal/store"
@@ -37,6 +39,10 @@ type App struct {
 	// presetMu serializes seed/reset operations on the same preset so two
 	// concurrent API calls cannot create duplicate records.
 	presetMu sync.Mutex
+
+	// Optimizer subsystem; wired in initOptimizer after bootstrap.
+	optimizer          *optimizer.Manager
+	optimizerScheduler *optimizer.Scheduler
 }
 
 func New(cfg Config) (*App, error) {
@@ -58,7 +64,69 @@ func New(cfg Config) (*App, error) {
 	if err := app.bootstrapDefaultState(); err != nil {
 		return nil, err
 	}
+	if err := app.seedOptimizerProject(); err != nil {
+		return nil, err
+	}
+	if err := app.initOptimizer(); err != nil {
+		return nil, err
+	}
 	return app, nil
+}
+
+// seedOptimizerProject ensures the hidden __optimizer__ project exists.
+// Auto-scan chats live here so they don't pollute real project chat lists.
+// Idempotent: also migrates older hidden projects that were seeded without a
+// workdir before runtime skill injection required one, or whose workdir
+// still points at the legacy projects/proj-__optimizer__/workdir location.
+//
+// Trust boundary: Partner runs against untrusted historical transcripts and
+// can be prompt-injected into invoking its bash/file tools. The workdir
+// becomes the cwd for that process, and the runtime's workspace-write
+// sandbox confines writes to the cwd subtree. We deliberately place this
+// workdir OUTSIDE state/projects/ so a sandbox escape would still not land
+// next to user projects' MEMORY.md files.
+func (a *App) seedOptimizerProject() error {
+	workdir := a.optimizerProjectWorkdir()
+	if err := os.MkdirAll(workdir, 0o755); err != nil {
+		return err
+	}
+	legacyWorkdir := a.legacyOptimizerProjectWorkdir()
+	if project, err := a.store.GetProject(optimizer.SystemProjectID); err == nil {
+		changed := false
+		current := strings.TrimSpace(project.Workdir)
+		if current == "" || current == legacyWorkdir {
+			project.Workdir = workdir
+			changed = true
+		}
+		if !project.SystemHidden {
+			project.SystemHidden = true
+			changed = true
+		}
+		if !changed {
+			return nil
+		}
+		project.UpdatedAt = time.Now().UTC()
+		return a.store.SaveProject(project)
+	} else if !errors.Is(err, store.ErrNotFound) {
+		return err
+	}
+	now := time.Now().UTC()
+	return a.store.SaveProject(model.ProjectRecord{
+		ID:           optimizer.SystemProjectID,
+		Name:         "Auto-optimizer",
+		Workdir:      workdir,
+		SystemHidden: true,
+		CreatedAt:    now,
+		UpdatedAt:    now,
+	})
+}
+
+func (a *App) optimizerProjectWorkdir() string {
+	return filepath.Join(a.store.Root(), "optimizer", "scan-workdir")
+}
+
+func (a *App) legacyOptimizerProjectWorkdir() string {
+	return filepath.Join(a.store.Root(), "projects", "proj-"+optimizer.SystemProjectID, "workdir")
 }
 
 func firstEngine(engine runtime.Engine) runtime.Engine {
@@ -537,6 +605,23 @@ func (a *App) resolveAgentSkills(skillIDs []string) ([]runtime.SkillContext, err
 }
 
 func (a *App) ListProjects() ([]model.ProjectRecord, error) {
+	all, err := a.store.ListProjects()
+	if err != nil {
+		return nil, err
+	}
+	visible := make([]model.ProjectRecord, 0, len(all))
+	for _, p := range all {
+		if p.SystemHidden {
+			continue
+		}
+		visible = append(visible, p)
+	}
+	return visible, nil
+}
+
+// ListAllProjects returns every project including hidden system projects.
+// Optimizer internals use this; user-facing endpoints stay on ListProjects.
+func (a *App) ListAllProjects() ([]model.ProjectRecord, error) {
 	return a.store.ListProjects()
 }
 
@@ -638,7 +723,7 @@ func (a *App) CreateChat(projectID, title, mainAgentID string) (model.ChatRecord
 
 func (a *App) ListChats(projectID string) ([]model.ChatRecord, error) {
 	if projectID == "" {
-		projects, err := a.store.ListProjects()
+		projects, err := a.ListProjects()
 		if err != nil {
 			return nil, err
 		}

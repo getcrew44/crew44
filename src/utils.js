@@ -41,6 +41,46 @@ export const HUMAN_USER = {
   initial: 'Y',
 };
 
+// Session-local memory of every agent we have seen this run. Lets us still
+// label messages from agents that have since been deleted from the live list.
+// Not persisted — a hard reload starts empty.
+const seenAgentsCache = new Map();
+
+export function rememberAgents(agentsMap) {
+  if (!agentsMap) return;
+  for (const agent of Object.values(agentsMap)) {
+    if (agent?.id && agent.id !== '__human__' && agent.kind === 'agent') {
+      seenAgentsCache.set(agent.id, agent);
+    }
+  }
+}
+
+// Exposed for tests.
+export function __resetSeenAgentsCacheForTests() {
+  seenAgentsCache.clear();
+}
+
+// Look up an event's author. Returns HUMAN_USER for human messages, the live
+// agent record when available, the session-remembered agent flagged as
+// archived if it's no longer live, or a generic placeholder as a last resort.
+export function resolveAuthor(authorId, agentsMap) {
+  if (!authorId) return null;
+  if (authorId === '__human__') return HUMAN_USER;
+  const known = agentsMap?.[authorId];
+  if (known) return known;
+  const remembered = seenAgentsCache.get(authorId);
+  if (remembered) return { ...remembered, archived: true };
+  return {
+    id: authorId,
+    name: 'Deleted agent',
+    kind: 'agent',
+    role: '',
+    color: agentColor(authorId),
+    initial: '?',
+    archived: true,
+  };
+}
+
 export function displayAgent(cfg) {
   if (!cfg) return null;
   return {
@@ -53,6 +93,22 @@ export function displayAgent(cfg) {
     // keep all original fields
     ...cfg,
   };
+}
+
+// Surface the meaningful content of a tool's input — the command, query, or
+// prompt the model actually wrote — rather than the JSON envelope around it.
+// Falls back to the JSON dump only when no string values are present.
+function summarizeToolInput(input) {
+  if (input == null) return '';
+  if (typeof input !== 'object') return String(input);
+  const preferred = ['command', 'cmd', 'path', 'file_path', 'file', 'args', 'query', 'prompt', 'pattern', 'url'];
+  for (const key of preferred) {
+    const v = input[key];
+    if (typeof v === 'string' && v) return v;
+  }
+  const values = Object.values(input).filter(v => typeof v === 'string' && v);
+  if (values.length) return values.join(' ');
+  return JSON.stringify(input);
 }
 
 export function mapBackendEvent(event) {
@@ -78,14 +134,12 @@ export function mapBackendEvent(event) {
     };
   }
   if (event.type === 'tool_call') {
-    const input = event.tool_call?.input;
-    const path = input?.path || input?.file || (typeof input === 'object' ? JSON.stringify(input) : String(input || ''));
     return {
       kind: 'tool',
       author: event.actor_agent_id,
       time: ts,
       tool: event.tool_call?.name || 'tool',
-      path,
+      path: summarizeToolInput(event.tool_call?.input),
       result: 'pending',
       _seq: event.seq,
     };
@@ -97,6 +151,41 @@ export function mapBackendEvent(event) {
       time: ts,
       name: event.tool_call_result?.name || '',
       output: event.tool_call_result?.output || '',
+      _seq: event.seq,
+    };
+  }
+  if (event.type === 'runtime_session') {
+    // Mapped so renderers can skip it explicitly rather than silently
+    // dropping at the SSE boundary.
+    return { kind: 'runtime_session', author: event.actor_agent_id, time: ts, _seq: event.seq };
+  }
+  if (event.type === 'handover') {
+    // Backend convention: Event.actor_agent_id is the source agent (the one
+    // handing off); the Handover payload's agent_id is the destination.
+    return {
+      kind: 'handover',
+      author: event.actor_agent_id,
+      time: ts,
+      subtype: event.handover?.subtype || 'delegate',
+      agent_id: event.actor_agent_id,
+      target_agent_id: event.handover?.agent_id || '',
+      target_agent_name: event.handover?.agent_name || '',
+      note: event.handover?.note || '',
+      _seq: event.seq,
+    };
+  }
+  if (event.type === 'error') {
+    return {
+      kind: 'error',
+      author: event.actor_agent_id,
+      time: ts,
+      subtype: event.error?.subtype || 'error',
+      code: event.error?.code || '',
+      message: event.error?.message || '',
+      agent_id: event.error?.agent_id || event.actor_agent_id || '',
+      agent_name: event.error?.agent_name || '',
+      target_agent_id: event.error?.target_agent_id || '',
+      target_agent_name: event.error?.target_agent_name || '',
       _seq: event.seq,
     };
   }
