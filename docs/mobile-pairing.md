@@ -34,8 +34,41 @@ mobile app:
 ws://<lan-ip>:8090/relay
 ```
 
+The desktop Pair Mobile dialog defaults to the Mindive Labs relay:
+
+```text
+wss://relay.mindivelabs.com/relay
+```
+
+The HTTP health endpoint for that relay is:
+
+```text
+https://relay.mindivelabs.com/health
+```
+
 Do not use `localhost` in the relay URL for a physical phone; that would point
 at the phone itself.
+
+## Use Expo Go Outside The LAN
+
+When the iPhone is not on the same LAN as the development machine, start Expo
+with tunnel mode from the repository root:
+
+```bash
+npm run mobile:start -- --tunnel --clear
+```
+
+Expo tunnel mode uses ngrok to publish the Metro development server. Keep the
+terminal session running, open Expo Go on the iPhone, and scan the printed QR or
+enter the printed `exp://*.exp.direct` URL.
+
+This only makes the Expo development app reachable. The remote pairing and chat
+connection still uses the relay URL from the pairing QR, so use a relay that is
+also reachable outside the LAN, such as:
+
+```text
+wss://relay.mindivelabs.com/relay
+```
 
 ## Generate A Pairing QR
 

@@ -15,11 +15,19 @@ npm run mobile:start -- --lan --port 8085 --clear
 Install Expo Go on the phone, keep the phone on the same network as the
 development machine, then scan the QR printed by Expo.
 
-Use `--tunnel` when LAN discovery is blocked by the network:
+Use `--tunnel` when the phone is not on the same LAN as the development
+machine, or when LAN discovery is blocked by the network:
 
 ```bash
 npm run mobile:start -- --tunnel --clear
 ```
+
+Tunnel mode uses the package-local `@expo/ngrok` dev dependency, so Expo should
+not need to install ngrok globally at startup. Keep the Metro terminal running,
+open Expo Go on the iPhone, and scan the tunnel QR or enter the printed
+`exp://*.exp.direct` URL. The tunnel is only for loading the development app in
+Expo Go; pairing and chat traffic still require a relay URL that is reachable
+from both the phone and the daemon.
 
 ## Pair With The Daemon
 
@@ -29,6 +37,12 @@ machine's LAN IP:
 
 ```text
 ws://<lan-ip>:8090/relay
+```
+
+The desktop Pair Mobile dialog defaults to the Mindive Labs relay:
+
+```text
+wss://relay.mindivelabs.com/relay
 ```
 
 The normal development flow is:

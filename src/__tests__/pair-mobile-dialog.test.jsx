@@ -41,6 +41,21 @@ describe('PairMobileDialog', () => {
     expect(await screen.findByTestId('mobile-pair-qr')).toBeInTheDocument();
   });
 
+  it('uses the deployed relay as the default when no relay was saved', async () => {
+    createRemotePairing.mockResolvedValue({
+      qr_text: '{"type":"crewai-remote-pairing"}',
+      offer: { expires_at: '2026-05-13T12:00:00.000Z' },
+    });
+    render(<PairMobileDialog onClose={() => {}} />);
+
+    expect(screen.getByLabelText('Relay WebSocket URL')).toHaveValue('wss://relay.mindivelabs.com/relay');
+    fireEvent.click(screen.getByTestId('create-mobile-pairing'));
+
+    await waitFor(() => {
+      expect(createRemotePairing).toHaveBeenCalledWith('wss://relay.mindivelabs.com/relay');
+    });
+  });
+
   it('shows RPC errors from pairing creation', async () => {
     createRemotePairing.mockRejectedValue(new Error('relay_url is required'));
     render(<PairMobileDialog onClose={() => {}} />);
