@@ -13,9 +13,9 @@ export async function createExistingFolderProject({
   }
 
   try {
-    await createProject(folderName, workdir, mainAgentId);
+    const project = await createProject(folderName, workdir, mainAgentId);
     await refreshProjects?.();
-    return true;
+    return project || true;
   } catch (err) {
     showToast?.(`Failed to create project: ${err.message}`);
     return false;

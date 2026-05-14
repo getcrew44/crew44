@@ -38,3 +38,20 @@ func TestClaudeToolResultIncludesToolNameFromToolUseID(t *testing.T) {
 		t.Fatalf("expected completed tool id to be removed")
 	}
 }
+
+func TestBuildClaudeArgsIncludesExtraSettingSources(t *testing.T) {
+	args := buildClaudeArgs(ExecOptions{
+		ExtraArgs: []string{"--setting-sources", "user"},
+	}, nil)
+
+	found := false
+	for i := 0; i < len(args)-1; i++ {
+		if args[i] == "--setting-sources" && args[i+1] == "user" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected --setting-sources args, got %#v", args)
+	}
+}

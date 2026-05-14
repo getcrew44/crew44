@@ -14,36 +14,85 @@ const skillManifestFile = ".crewai-skill-manifest.json"
 
 var nonAlphaNum = regexp.MustCompile(`[^a-z0-9]+`)
 
-func prepareSkillEnvironment(request RunRequest) (map[string]string, error) {
-	if len(request.AgentSkills) == 0 {
-		return nil, nil
+type preparedSkillEnvironment struct {
+	Env       map[string]string
+	ExtraArgs []string
+}
+
+func prepareSkillEnvironment(request RunRequest) (preparedSkillEnvironment, error) {
+	if len(request.AgentSkills) == 0 && request.Runtime.Provider != "claude" && request.Runtime.Provider != "codex" {
+		return preparedSkillEnvironment{}, nil
 	}
 	if strings.TrimSpace(request.WorkDir) == "" {
-		return nil, fmt.Errorf("runtime skill injection requires a workdir")
+		return preparedSkillEnvironment{}, fmt.Errorf("runtime skill injection requires a workdir")
 	}
 
-	if request.Runtime.Provider == "codex" {
+	switch request.Runtime.Provider {
+	case "claude":
+		runtimeEnvDir := strings.TrimSpace(request.RuntimeEnvDir)
+		if runtimeEnvDir == "" {
+			return preparedSkillEnvironment{}, fmt.Errorf("claude skill injection requires a runtime env dir")
+		}
+		claudeConfigDir := filepath.Join(runtimeEnvDir, "claude-config")
+		homeDir := filepath.Join(runtimeEnvDir, "home")
+		if err := os.MkdirAll(claudeConfigDir, 0o755); err != nil {
+			return preparedSkillEnvironment{}, fmt.Errorf("create claude config dir: %w", err)
+		}
+		if err := os.MkdirAll(homeDir, 0o755); err != nil {
+			return preparedSkillEnvironment{}, fmt.Errorf("create claude home dir: %w", err)
+		}
+		if err := prepareClaudeConfig(claudeConfigDir); err != nil {
+			return preparedSkillEnvironment{}, fmt.Errorf("prepare claude config: %w", err)
+		}
+		if err := writeSkillFiles(filepath.Join(claudeConfigDir, "skills"), request.AgentSkills); err != nil {
+			return preparedSkillEnvironment{}, fmt.Errorf("write claude skills: %w", err)
+		}
+		return preparedSkillEnvironment{
+			Env: map[string]string{
+				"CLAUDE_CONFIG_DIR": claudeConfigDir,
+				"HOME":              homeDir,
+			},
+			ExtraArgs: []string{"--setting-sources", "user"},
+		}, nil
+	case "codex":
+		runtimeEnvDir := strings.TrimSpace(request.RuntimeEnvDir)
+		if runtimeEnvDir == "" {
+			return preparedSkillEnvironment{}, fmt.Errorf("codex skill injection requires a runtime env dir")
+		}
 		codexHome := filepath.Join(request.RuntimeEnvDir, "codex-home")
-		if codexHome == "codex-home" {
-			codexHome = filepath.Join(request.WorkDir, ".crewai-runtime", "codex-home")
+		homeDir := filepath.Join(request.RuntimeEnvDir, "home")
+		if err := os.MkdirAll(homeDir, 0o755); err != nil {
+			return preparedSkillEnvironment{}, fmt.Errorf("create codex home dir: %w", err)
 		}
 		if err := prepareCodexHome(codexHome); err != nil {
-			return nil, fmt.Errorf("prepare codex home: %w", err)
+			return preparedSkillEnvironment{}, fmt.Errorf("prepare codex home: %w", err)
+		}
+		if err := clearSkillDirs(filepath.Join(codexHome, "skills"), request.AgentSkills); err != nil {
+			return preparedSkillEnvironment{}, fmt.Errorf("clear codex skill shadows: %w", err)
 		}
 		if err := writeSkillFiles(filepath.Join(codexHome, "skills"), request.AgentSkills); err != nil {
-			return nil, fmt.Errorf("write codex skills: %w", err)
+			return preparedSkillEnvironment{}, fmt.Errorf("write codex skills: %w", err)
 		}
-		return map[string]string{"CODEX_HOME": codexHome}, nil
+		return preparedSkillEnvironment{Env: map[string]string{"CODEX_HOME": codexHome, "HOME": homeDir}}, nil
 	}
 
 	skillsDir, err := resolveSkillsDir(request.WorkDir, request.Runtime.Provider)
 	if err != nil {
-		return nil, fmt.Errorf("resolve skills dir: %w", err)
+		return preparedSkillEnvironment{}, fmt.Errorf("resolve skills dir: %w", err)
 	}
 	if err := writeSkillFiles(skillsDir, request.AgentSkills); err != nil {
-		return nil, fmt.Errorf("write skill files: %w", err)
+		return preparedSkillEnvironment{}, fmt.Errorf("write skill files: %w", err)
 	}
-	return nil, nil
+	return preparedSkillEnvironment{}, nil
+}
+
+func clearSkillDirs(skillsDir string, skills []SkillContext) error {
+	for _, skill := range skills {
+		if err := os.RemoveAll(filepath.Join(skillsDir, sanitizeSkillName(skill.Name))); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func resolveSkillsDir(workDir, provider string) (string, error) {

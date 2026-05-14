@@ -10,6 +10,7 @@ import { Icon } from './components.jsx';
 import { displayAgent, relativeTime, rememberAgents, HUMAN_USER } from './utils.js';
 import * as api from './api.js';
 import { createExistingFolderProject } from './existingFolderProject.js';
+import { dataTransferHasFiles } from './dragDrop.js';
 
 // Minimal toast — renders a small pill at the bottom-center of the window
 function Toast({ message, onDone }) {
@@ -206,6 +207,20 @@ export default function App() {
 
   React.useEffect(() => { loadData(); }, [loadData]);
 
+  React.useEffect(() => {
+    const preventFileNavigation = (event) => {
+      if (!dataTransferHasFiles(event.dataTransfer)) return;
+      event.preventDefault();
+    };
+
+    document.addEventListener('dragover', preventFileNavigation);
+    document.addEventListener('drop', preventFileNavigation);
+    return () => {
+      document.removeEventListener('dragover', preventFileNavigation);
+      document.removeEventListener('drop', preventFileNavigation);
+    };
+  }, []);
+
   const handlePickChat = React.useCallback((chatId) => {
     setCurrentChatId(chatId);
     setRoute('task');
@@ -292,9 +307,9 @@ export default function App() {
 
   const createProjectFromFolderPath = React.useCallback(async (folderPath) => {
     const normalizedPath = folderPath.trim();
-    if (!normalizedPath) return;
+    if (!normalizedPath) return false;
     const folderName = normalizedPath.split(/[\\/]/).filter(Boolean).pop() || normalizedPath;
-    await createExistingFolderProject({
+    const createdProject = await createExistingFolderProject({
       folderName,
       workdir: normalizedPath,
       agents: agentsList,
@@ -302,7 +317,20 @@ export default function App() {
       refreshProjects: loadData,
       showToast,
     });
+    if (createdProject?.id) setNewTaskProjectId(createdProject.id);
+    return createdProject;
   }, [agentsList, loadData, showToast]);
+
+  const handleDroppedProjectFolders = React.useCallback(async (folderPaths) => {
+    let lastCreatedProject = null;
+    for (const folderPath of folderPaths) {
+      const createdProject = await createProjectFromFolderPath(folderPath);
+      if (createdProject?.id) lastCreatedProject = createdProject;
+    }
+    if (lastCreatedProject?.id && route === 'new') {
+      setNewTaskProjectId(lastCreatedProject.id);
+    }
+  }, [createProjectFromFolderPath, route]);
 
   const handleExistingFolder = React.useCallback(() => {
     if (window.electronAPI?.openFolderDialog) {
@@ -328,7 +356,8 @@ export default function App() {
     }
     try {
       const folder = await window.electronAPI.createBlankProjectFolder(name);
-      await api.createProject(name, folder.path, mainAgentId);
+      const project = await api.createProject(name, folder.path, mainAgentId);
+      if (project?.id) setNewTaskProjectId(project.id);
       loadData();
     } catch (err) {
       showToast(`Failed to create project: ${err.message}`);
@@ -523,6 +552,7 @@ export default function App() {
         onRemoveProject={handleRemoveProject}
         onResetOnboarding={resetOnboarding}
         onPairMobile={() => setPairMobileOpen(true)}
+        onDroppedProjectFolders={handleDroppedProjectFolders}
       />
       <div style={{ flex: 1, minWidth: 0, height: '100%', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
         {content}

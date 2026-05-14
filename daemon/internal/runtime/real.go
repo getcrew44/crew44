@@ -13,13 +13,13 @@ import (
 type RealEngine struct{}
 
 func (RealEngine) Run(ctx context.Context, request RunRequest, emit func(StreamEvent) error) (RunResult, error) {
-	env, err := prepareSkillEnvironment(request)
+	preparedEnv, err := prepareSkillEnvironment(request)
 	if err != nil {
 		return RunResult{}, err
 	}
 	backend, err := backendagent.New(request.Runtime.Provider, backendagent.Config{
 		ExecutablePath: request.Runtime.BinaryPath,
-		Env:            env,
+		Env:            preparedEnv.Env,
 	})
 	if err != nil {
 		return RunResult{}, err
@@ -39,6 +39,7 @@ func (RealEngine) Run(ctx context.Context, request RunRequest, emit func(StreamE
 		Model:           modelName,
 		SystemPrompt:    systemPrompt,
 		ResumeSessionID: request.ResumeSessionID,
+		ExtraArgs:       preparedEnv.ExtraArgs,
 	})
 	if err != nil {
 		return RunResult{}, err

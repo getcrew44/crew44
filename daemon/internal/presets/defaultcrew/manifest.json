@@ -9,7 +9,6 @@
       "is_default": true,
       "skill_refs": [
         "partner/problem-framing",
-        "partner/handoff-routing",
         "partner/session-skill-mining"
       ]
     },

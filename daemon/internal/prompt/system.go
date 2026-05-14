@@ -255,14 +255,14 @@ func availableAgents(currentAgentID string, agents []model.AgentConfig) string {
 		b.WriteString("- none")
 	}
 	b.WriteString("\n\nRules:\n")
+	b.WriteString("- Use only UUIDs listed above as handover targets.\n")
 	b.WriteString("- Do not hand over to yourself.\n")
-	b.WriteString("- Only hand over when another listed agent is better suited to continue.\n")
-	b.WriteString("- If you are receiving a handover, perform the Handover Task directly unless another listed agent is clearly required.")
+	b.WriteString("- If you are receiving a handover, perform the Handover Task directly. Do not describe the handover.")
 	return strings.TrimSpace(b.String())
 }
 
 func handoverProtocol() string {
-	return "If another listed agent should continue this chat, output exactly one standalone line using this marker format: " +
+	return "To hand over this chat to another listed agent, output exactly one standalone line using this marker format: " +
 		model.AgentHandoverMarkerExample +
 		"\nReplace agent_uuid with the target agent uuid from the list above. Replace the sentence with a concise instruction for the next agent. Do not put any other text on that output line."
 }

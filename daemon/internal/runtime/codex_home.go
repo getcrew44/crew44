@@ -15,12 +15,6 @@ var codexSymlinkedFiles = []string{
 	"auth.json",
 }
 
-var codexCopiedFiles = []string{
-	"config.json",
-	"config.toml",
-	"instructions.md",
-}
-
 func prepareCodexHome(codexHome string) error {
 	sharedHome := resolveSharedCodexHome()
 	if err := os.MkdirAll(codexHome, 0o755); err != nil {
@@ -37,12 +31,7 @@ func prepareCodexHome(codexHome string) error {
 		dst := filepath.Join(codexHome, name)
 		_ = ensureSymlinkOrCopy(src, dst)
 	}
-	for _, name := range codexCopiedFiles {
-		src := filepath.Join(sharedHome, name)
-		dst := filepath.Join(codexHome, name)
-		_ = copyFileIfExists(src, dst)
-	}
-	return sanitizeCopiedCodexConfig(filepath.Join(codexHome, "config.toml"))
+	return nil
 }
 
 func resolveSharedCodexHome() string {

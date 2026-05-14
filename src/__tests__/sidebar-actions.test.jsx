@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import Sidebar from '../Sidebar.jsx';
 
 const noop = () => {};
@@ -159,6 +159,37 @@ describe('Sidebar project rendering', () => {
       fontWeight: '400',
     });
     expect(screen.getByTestId('chat-c1')).toHaveStyle({ fontSize: '14px' });
+  });
+
+  it('adds dropped directories as projects from the sidebar only', async () => {
+    const onDroppedProjectFolders = vi.fn();
+    const file = new File([''], 'dropped-project');
+    Object.defineProperty(file, 'path', { value: '/tmp/dropped-project' });
+    window.electronAPI = {
+      getPathInfo: vi.fn(async () => [
+        { path: '/tmp/dropped-project', name: 'dropped-project', isDirectory: true },
+      ]),
+    };
+
+    const { container } = render(
+      <Sidebar
+        {...baseProps}
+        projects={sampleProjects}
+        onDroppedProjectFolders={onDroppedProjectFolders}
+      />
+    );
+
+    fireEvent.drop(container.firstChild, {
+      dataTransfer: {
+        types: ['Files'],
+        files: [file],
+        items: [],
+      },
+    });
+
+    await waitFor(() => {
+      expect(onDroppedProjectFolders).toHaveBeenCalledWith(['/tmp/dropped-project']);
+    });
   });
 });
 

@@ -1,5 +1,6 @@
 import React from 'react';
 import { Icon } from './components.jsx';
+import { dataTransferHasFiles, getDroppedDirectoryPaths } from './dragDrop.js';
 
 function TrafficLights() {
   return (
@@ -545,10 +546,11 @@ function DropItem({ icon, label, onClick }) {
   );
 }
 
-export default function Sidebar({ projects, currentChatId, route, setRoute, onPick, deskName, backendOnline, onNewProject, onNewChat, onRenameProject, onShowInFinder, onCreateProject, onRemoveProject, onResetOnboarding, onPairMobile }) {
+export default function Sidebar({ projects, currentChatId, route, setRoute, onPick, deskName, backendOnline, onNewProject, onNewChat, onRenameProject, onShowInFinder, onCreateProject, onRemoveProject, onResetOnboarding, onPairMobile, onDroppedProjectFolders }) {
   const [openIds, setOpenIds] = React.useState(() => new Set(projects.map(p => p.id)));
   const [creatingProject, setCreatingProject] = React.useState(false);
   const [newProjectName, setNewProjectName] = React.useState('');
+  const [dropActive, setDropActive] = React.useState(false);
   const newProjectInputRef = React.useRef(null);
   const knownProjectIds = React.useRef(new Set(projects.map(p => p.id)));
   const activeChatId = route === 'task' ? currentChatId : null;
@@ -584,6 +586,24 @@ export default function Sidebar({ projects, currentChatId, route, setRoute, onPi
     return next;
   });
 
+  const handleDragOver = (event) => {
+    if (!dataTransferHasFiles(event.dataTransfer)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    event.dataTransfer.dropEffect = 'copy';
+    setDropActive(true);
+  };
+
+  const handleDrop = async (event) => {
+    if (!dataTransferHasFiles(event.dataTransfer)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    setDropActive(false);
+
+    const folderPaths = await getDroppedDirectoryPaths(event.dataTransfer);
+    if (folderPaths.length > 0) onDroppedProjectFolders?.(folderPaths);
+  };
+
   return (
     <div style={{
       width: 264, height: '100%', background: '#F4EFE0',
@@ -591,7 +611,14 @@ export default function Sidebar({ projects, currentChatId, route, setRoute, onPi
       display: 'flex', flexDirection: 'column',
       fontFamily: '-apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif',
       flexShrink: 0,
-    }}>
+      outline: dropActive ? '2px solid rgba(196,100,74,0.45)' : 'none',
+      outlineOffset: -2,
+    }}
+      onDragEnter={handleDragOver}
+      onDragOver={handleDragOver}
+      onDragLeave={() => setDropActive(false)}
+      onDrop={handleDrop}
+    >
       {/* Window chrome */}
       <div style={{
         height: 38,

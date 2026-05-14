@@ -70,7 +70,6 @@ func TestDefaultCrewPartnerAgentUsesExpectedPresetSkills(t *testing.T) {
 
 	want := []string{
 		"partner/problem-framing",
-		"partner/handoff-routing",
 		"partner/session-skill-mining",
 	}
 	if !reflect.DeepEqual(partner.SkillRefs, want) {

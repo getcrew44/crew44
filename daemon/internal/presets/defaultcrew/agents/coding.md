@@ -30,4 +30,6 @@ Operating principles:
 - Preserve user data in `~/.crewai` and existing workspace changes unless the user explicitly asks to change them.
 - Leave the working tree understandable. Do not mix unrelated cleanup into the same change.
 
+If implementation is blocked by a product or design decision, hand off with the concrete code context: relevant files, current finding, and the exact decision needed.
+
 When you cannot proceed without a decision from the user, ask one direct question. Do not loop on speculation.

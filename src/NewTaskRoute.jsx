@@ -2,6 +2,13 @@ import React from 'react';
 import { UI_FONT } from './components.jsx';
 import { CustomPicker, PickerRow } from './CustomPicker.jsx';
 import * as api from './api.js';
+import {
+  clearComposerDraft,
+  readComposerDraft,
+  readLastNewChatProjectId,
+  writeComposerDraft,
+  writeLastNewChatProjectId,
+} from './draftStore.js';
 
 const chip = {
   padding: '4px 10px', borderRadius: 6, fontSize: 12.5,
@@ -61,9 +68,11 @@ const SUGGESTIONS = [
 ];
 
 export default function NewTaskRoute({ projects, agents, onNewTask, onExistingFolder, initialProjectId }) {
-  const [val, setVal] = React.useState('');
-  const [selectedProjectId, setSelectedProjectId] = React.useState(initialProjectId || '');
-  const [selectedAgentId, setSelectedAgentId] = React.useState('');
+  const initialStoredProjectId = React.useMemo(() => initialProjectId || readLastNewChatProjectId(), [initialProjectId]);
+  const initialDraft = React.useMemo(() => readComposerDraft(initialStoredProjectId, ''), [initialStoredProjectId]);
+  const [val, setVal] = React.useState(initialDraft.text || '');
+  const [selectedProjectId, setSelectedProjectId] = React.useState(initialStoredProjectId || '');
+  const [selectedAgentId, setSelectedAgentId] = React.useState(initialDraft.targetAgentId || '');
   const [submitting, setSubmitting] = React.useState(false);
   const [error, setError] = React.useState(null);
 
@@ -73,8 +82,23 @@ export default function NewTaskRoute({ projects, agents, onNewTask, onExistingFo
   }, [initialProjectId]);
 
   React.useEffect(() => {
+    const draft = readComposerDraft(selectedProjectId, '');
+    setVal(current => draft.text || current);
+    setSelectedAgentId(draft.targetAgentId || '');
+    writeLastNewChatProjectId(selectedProjectId);
+  }, [selectedProjectId]);
+
+  React.useEffect(() => {
     if (agents.length > 0 && !selectedAgentId) setSelectedAgentId(agents[0].id);
   }, [agents, selectedAgentId]);
+
+  React.useEffect(() => {
+    writeComposerDraft(selectedProjectId, '', {
+      text: val,
+      targetAgentId: selectedAgentId,
+      targetProjectId: selectedProjectId,
+    });
+  }, [selectedProjectId, selectedAgentId, val]);
 
   const projectItems = projects.map(p => ({ id: p.id, label: p.name }));
   const agentItems = agents.map(a => ({ id: a.id, label: a.name }));
@@ -98,6 +122,7 @@ export default function NewTaskRoute({ projects, agents, onNewTask, onExistingFo
       const title = text.length > 55 ? text.slice(0, 52) + '…' : text;
       const chat = await api.createChat(projectId, title, agentId);
       await api.postMessage(chat.id, text, chat.main_agent_id);
+      clearComposerDraft(projectId, '');
       onNewTask(chat.id);
     } catch (err) {
       setError(err.message);
