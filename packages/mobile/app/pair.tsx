@@ -33,7 +33,7 @@ export default function PairScreen() {
     <Screen>
       <Header title="Pair device" />
       <View style={styles.body}>
-        <Text style={styles.copy}>Scan the QR code from CrewAI Desktop's Pair Mobile dialog.</Text>
+        <Text style={styles.copy}>Scan the QR code from Crew44's Pair Mobile dialog.</Text>
         <View style={styles.cameraBox}>
           {permission?.granted ? (
             <CameraView

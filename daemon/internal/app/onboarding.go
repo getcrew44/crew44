@@ -3,8 +3,8 @@ package app
 import (
 	"errors"
 
-	"github.com/sqtech/crew-ai/crewai-repo/internal/model"
-	"github.com/sqtech/crew-ai/crewai-repo/internal/store"
+	"github.com/getcrew44/crew44/daemon/internal/model"
+	"github.com/getcrew44/crew44/daemon/internal/store"
 )
 
 const currentOnboardingVersion = "1"

@@ -9,12 +9,12 @@ import (
 	"sync"
 
 	"github.com/gorilla/websocket"
-	"github.com/sqtech/crew-ai/crewai-repo/internal/app"
+	"github.com/getcrew44/crew44/daemon/internal/app"
 )
 
 const (
-	ProtocolV1     = "crewai.rpc.v1"
-	tokenPrefix    = "crewai.bearer."
+	ProtocolV1     = "crew44.rpc.v1"
+	tokenPrefix    = "crew44.bearer."
 	writeQueueSize = 64
 )
 

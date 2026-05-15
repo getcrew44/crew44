@@ -8,7 +8,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/sqtech/crew-ai/crewai-repo/internal/model"
+	"github.com/getcrew44/crew44/daemon/internal/model"
 )
 
 // memoryReadCap bounds the bytes injected into every system prompt from the
@@ -17,7 +17,7 @@ import (
 // is the last line of defense before the LLM sees the concatenated memories.
 const memoryReadCap = 8 * 1024
 
-const CrewAIContext = "CrewAI Desktop is a local-first multi-agent workteam. The product is organized around agents, skills, runtimes, projects, and chats. User-owned state lives under `~/.crewai`: agent configs, skill directories, runtime inventory, project records, chat timelines, summaries, and preset mappings. Treat these records as user data and avoid overwriting them unless the task explicitly calls for migration, reset, or repair behavior."
+const Crew44Context = "Crew44 is a local-first multi-agent workteam. The product is organized around agents, skills, runtimes, projects, and chats. User-owned state lives under `~/.crew44`: agent configs, skill directories, runtime inventory, project records, chat timelines, summaries, and preset mappings. Treat these records as user data and avoid overwriting them unless the task explicitly calls for migration, reset, or repair behavior."
 
 type Skill struct {
 	Name string
@@ -30,15 +30,15 @@ type SystemPromptInput struct {
 	Skills                  []Skill
 	SummaryPath             string
 	HandoverNote            string
-	UserMemoryDir           string // ~/.crewai/memory; reader expands MEMORY.md + per-entry files
-	ProjectMemoryDir        string // ~/.crewai/projects/<id>/memory
-	LegacyUserMemoryPath    string // ~/.crewai/USER.md; used when UserMemoryDir has no MEMORY.md yet
-	LegacyProjectMemoryPath string // ~/.crewai/projects/<id>/MEMORY.md; legacy single-file fallback
+	UserMemoryDir           string // ~/.crew44/memory; reader expands MEMORY.md + per-entry files
+	ProjectMemoryDir        string // ~/.crew44/projects/<id>/memory
+	LegacyUserMemoryPath    string // ~/.crew44/USER.md; used when UserMemoryDir has no MEMORY.md yet
+	LegacyProjectMemoryPath string // ~/.crew44/projects/<id>/MEMORY.md; legacy single-file fallback
 }
 
 func BuildSystemPrompt(input SystemPromptInput) string {
 	var b strings.Builder
-	writeSection(&b, "CrewAI Context", CrewAIContext)
+	writeSection(&b, "Crew44 Context", Crew44Context)
 	writeSection(&b, "Agent Identity", agentIdentity(input.Agent, input.Runtime))
 	writeSection(&b, "Agent Instructions", input.Agent.Instruction)
 	if note := strings.TrimSpace(input.HandoverNote); note != "" {

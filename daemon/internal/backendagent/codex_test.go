@@ -40,7 +40,7 @@ func TestCodexCommandExecutionOutputIsBounded(t *testing.T) {
 	if len(msg.Output) > codexToolOutputMaxBytes {
 		t.Fatalf("output length = %d, want <= %d", len(msg.Output), codexToolOutputMaxBytes)
 	}
-	if !strings.Contains(msg.Output, "output truncated by CrewAI") {
+	if !strings.Contains(msg.Output, "output truncated by Crew44") {
 		t.Fatalf("bounded output missing truncation marker")
 	}
 }
@@ -60,7 +60,7 @@ func TestBoundCodexToolOutputPreservesUTF8(t *testing.T) {
 	if !utf8.ValidString(bounded) {
 		t.Fatalf("boundCodexToolOutput produced invalid UTF-8")
 	}
-	if !strings.Contains(bounded, "output truncated by CrewAI") {
+	if !strings.Contains(bounded, "output truncated by Crew44") {
 		t.Fatalf("bounded output missing truncation marker")
 	}
 }

@@ -1,4 +1,4 @@
-const DRAFT_PREFIX = 'crewai-composer-draft:v1';
+const DRAFT_PREFIX = 'crew44-composer-draft:v1';
 const NEW_CHAT_PROJECT_KEY = `${DRAFT_PREFIX}:new-chat-project`;
 
 function storage() {

@@ -25,7 +25,7 @@ describe('PairMobileDialog', () => {
 
   it('calls remote.pairing.create and renders a QR result', async () => {
     createRemotePairing.mockResolvedValue({
-      qr_text: '{"type":"crewai-remote-pairing"}',
+      qr_text: '{"type":"crew44-remote-pairing"}',
       offer: { expires_at: '2026-05-13T12:00:00.000Z' },
     });
     render(<PairMobileDialog onClose={() => {}} />);
@@ -43,7 +43,7 @@ describe('PairMobileDialog', () => {
 
   it('uses the deployed relay as the default when no relay was saved', async () => {
     createRemotePairing.mockResolvedValue({
-      qr_text: '{"type":"crewai-remote-pairing"}',
+      qr_text: '{"type":"crew44-remote-pairing"}',
       offer: { expires_at: '2026-05-13T12:00:00.000Z' },
     });
     render(<PairMobileDialog onClose={() => {}} />);

@@ -5,10 +5,10 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/sqtech/crew-ai/crewai-repo/internal/app"
-	"github.com/sqtech/crew-ai/crewai-repo/internal/remote"
-	"github.com/sqtech/crew-ai/crewai-repo/internal/rpc"
-	"github.com/sqtech/crew-ai/crewai-repo/internal/runtime"
+	"github.com/getcrew44/crew44/daemon/internal/app"
+	"github.com/getcrew44/crew44/daemon/internal/remote"
+	"github.com/getcrew44/crew44/daemon/internal/rpc"
+	"github.com/getcrew44/crew44/daemon/internal/runtime"
 )
 
 type ServerConfig struct {

@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sqtech/crew-ai/crewai-repo/internal/model"
-	"github.com/sqtech/crew-ai/crewai-repo/internal/runtime"
+	"github.com/getcrew44/crew44/daemon/internal/model"
+	"github.com/getcrew44/crew44/daemon/internal/runtime"
 )
 
 func TestChatMessageReplayAndEventList(t *testing.T) {
@@ -83,7 +83,7 @@ func TestChatResolvesAgentSkillsIntoRuntimeRequest(t *testing.T) {
 		if req.RuntimeEnvDir == "" {
 			t.Fatalf("expected runtime env dir")
 		}
-		if !strings.Contains(req.Agent.Instruction, "## CrewAI Context") ||
+		if !strings.Contains(req.Agent.Instruction, "## Crew44 Context") ||
 			!strings.Contains(req.Agent.Instruction, "## Agent Identity") ||
 			!strings.Contains(req.Agent.Instruction, "## Agent Instructions") ||
 			!strings.Contains(req.Agent.Instruction, "## Available Skills") ||
@@ -164,7 +164,7 @@ func TestChatSwitchAgentRebuildsSummaryAndSupportsHandoff(t *testing.T) {
 	if !strings.Contains(summary, "first pass") {
 		t.Fatalf("summary should contain earlier user message, got %q", summary)
 	}
-	if strings.Contains(summary, "CREWAI_AGENT_HANDOVER") {
+	if strings.Contains(summary, "CREW44_AGENT_HANDOVER") {
 		t.Fatalf("summary should not keep handoff marker, got %q", summary)
 	}
 
@@ -178,7 +178,7 @@ func TestChatSwitchAgentRebuildsSummaryAndSupportsHandoff(t *testing.T) {
 	callRPCStatus(t, env.server, "chats.events.list", rpcParams("chat_id", chatID, "after", int64(0)), http.StatusOK, &replay)
 	replayBytes, _ := json.Marshal(replay)
 	replayText := string(replayBytes)
-	if strings.Contains(replayText, "CREWAI_AGENT_HANDOVER") {
+	if strings.Contains(replayText, "CREW44_AGENT_HANDOVER") {
 		t.Fatalf("persisted events should not keep handover marker, got %#v", replay)
 	}
 	if !strings.Contains(replayText, `"type":"handover"`) || !strings.Contains(replayText, `"subtype":"scheduled"`) || !strings.Contains(replayText, `"subtype":"occurred"`) {
@@ -252,7 +252,7 @@ func TestMarkerOnlyHandoverPassesOriginalPromptToTarget(t *testing.T) {
 	if !strings.Contains(replayText, "target received: Continue from the previous agent handover") || !strings.Contains(replayText, "please tell me a short story") {
 		t.Fatalf("expected target agent to receive original prompt after marker-only handover, got %#v", replay)
 	}
-	if strings.Contains(replayText, "CREWAI_AGENT_HANDOVER") {
+	if strings.Contains(replayText, "CREW44_AGENT_HANDOVER") {
 		t.Fatalf("persisted events should strip marker-only handover marker, got %#v", replay)
 	}
 }
@@ -347,7 +347,7 @@ func TestInvalidHandoverTargetsAreStrippedWithoutScheduling(t *testing.T) {
 	if !strings.Contains(replayText, `"type":"error"`) || !strings.Contains(replayText, `"code":"archived_handover_target"`) {
 		t.Fatalf("expected invalid target to emit error event, got %#v", replay)
 	}
-	if strings.Contains(replayText, "CREWAI_AGENT_HANDOVER") {
+	if strings.Contains(replayText, "CREW44_AGENT_HANDOVER") {
 		t.Fatalf("persisted events should strip invalid handover markers, got %#v", replay)
 	}
 }
@@ -463,7 +463,7 @@ func TestHandoffToCurrentAgentStopsLoop(t *testing.T) {
 	if !strings.Contains(replayText, `"type":"runtime_session"`) || !strings.Contains(replayText, `"session_id":"loop-guard-Bex"`) {
 		t.Fatalf("expected target runtime session event to survive self-handover error, got %#v", replay)
 	}
-	if strings.Contains(replayText, "CREWAI_AGENT_HANDOVER") {
+	if strings.Contains(replayText, "CREW44_AGENT_HANDOVER") {
 		t.Fatalf("persisted events should not keep self-handover marker, got %#v", replay)
 	}
 

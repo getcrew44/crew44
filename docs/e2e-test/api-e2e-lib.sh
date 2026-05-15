@@ -2,14 +2,14 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-STATE_ROOT="${CREWAI_API_E2E_ROOT:-/tmp/crewai-api-e2e}"
+STATE_ROOT="${CREW44_API_E2E_ROOT:-/tmp/crew44-api-e2e}"
 STATE_DIR="${STATE_ROOT}/state"
 WORK_DIR="${STATE_ROOT}/workspace"
-BIN_PATH="${STATE_ROOT}/crewai-daemon"
+BIN_PATH="${STATE_ROOT}/crew44-daemon"
 JSONQ_BIN="${STATE_ROOT}/jsonq"
 PID_FILE="${STATE_ROOT}/server.pid"
 LOG_FILE="${STATE_ROOT}/server.log"
-PORT="${CREWAI_API_E2E_PORT:-18766}"
+PORT="${CREW44_API_E2E_PORT:-18766}"
 BASE_URL="http://127.0.0.1:${PORT}"
 
 step() {
@@ -145,18 +145,18 @@ build_binaries() {
   require_cmd curl
   require_cmd go
 
-  step "Build crewai-daemon and jsonq"
+  step "Build crew44-daemon and jsonq"
   (
     cd "${ROOT_DIR}/daemon"
-    go build -o "${BIN_PATH}" ./cmd/crewai-daemon
+    go build -o "${BIN_PATH}" ./cmd/crew44-daemon
     go build -o "${JSONQ_BIN}" ./test-utils/jsonq
   )
 }
 
 start_server() {
   mkdir -p "${STATE_ROOT}"
-  step "Start crewai-daemon"
-  CREWAI_STATE_DIR="${STATE_DIR}" \
+  step "Start crew44-daemon"
+  CREW44_STATE_DIR="${STATE_DIR}" \
   PORT="${PORT}" \
   nohup "${BIN_PATH}" >"${LOG_FILE}" 2>&1 < /dev/null &
   local pid=$!
@@ -167,7 +167,7 @@ start_server() {
 
 destroy_server() {
   if is_server_running; then
-    step "Stop crewai-daemon"
+    step "Stop crew44-daemon"
     kill "$(server_pid)" >/dev/null 2>&1 || true
     sleep 1
   fi
@@ -179,7 +179,7 @@ reset_state() {
   destroy_server || true
   rm -rf "${STATE_ROOT}"
   mkdir -p "${STATE_DIR}" "${WORK_DIR}"
-  printf 'API_E2E_SIGNAL\n' > "${WORK_DIR}/.crewai-e2e-signal.txt"
+  printf 'API_E2E_SIGNAL\n' > "${WORK_DIR}/.crew44-e2e-signal.txt"
 
   assert_file_missing "${STATE_DIR}/runtimes.json"
   assert_file_missing "${STATE_DIR}/agents"

@@ -5,11 +5,11 @@ import (
 	"errors"
 	"time"
 
-	"github.com/sqtech/crew-ai/crewai-repo/internal/broker"
-	"github.com/sqtech/crew-ai/crewai-repo/internal/id"
-	"github.com/sqtech/crew-ai/crewai-repo/internal/model"
-	promptbuilder "github.com/sqtech/crew-ai/crewai-repo/internal/prompt"
-	"github.com/sqtech/crew-ai/crewai-repo/internal/runtime"
+	"github.com/getcrew44/crew44/daemon/internal/broker"
+	"github.com/getcrew44/crew44/daemon/internal/id"
+	"github.com/getcrew44/crew44/daemon/internal/model"
+	promptbuilder "github.com/getcrew44/crew44/daemon/internal/prompt"
+	"github.com/getcrew44/crew44/daemon/internal/runtime"
 )
 
 var errChatStoppedAfterError = errors.New("chat stopped after error event")

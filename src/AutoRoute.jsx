@@ -581,7 +581,7 @@ function WhatItSeesModal({ open, onClose, latestScanId }) {
         <>
           <PrivacyItem title="Runs through your configured Partner agent" body="Wherever your Partner runtime sends data, the scanner sends the same kind of data."/>
           <PrivacyItem title="Output is reviewed before anything changes" body="Suggestions are accepted, edited, or dismissed per row. Nothing mutates skills, memory files, or schedules unless you accept."/>
-          <PrivacyItem title="Retention" body="Scan corpus is kept under ~/.crewai/optimizer/scans/ until you purge it. No automatic aggregation in v1."/>
+          <PrivacyItem title="Retention" body="Scan corpus is kept under ~/.crew44/optimizer/scans/ until you purge it. No automatic aggregation in v1."/>
           <PrivacyItem title="What an accepted suggestion does" body="Strategy → writes a record of intent to applied/. Skill → drops a SKILL.md in your skills folder. Memory → writes a typed markdown file under memory/ and adds a one-line pointer to MEMORY.md."/>
           <div style={{ display: 'flex', gap: 8, marginTop: 14 }}>
             <button style={ghostBtn} onClick={() => purgeOptimizerScans().then(() => setScan(null))}>Purge scan corpus now</button>

@@ -6,20 +6,20 @@ import (
 	"net/http"
 	"os"
 
-	"github.com/sqtech/crew-ai/crewai-repo/internal/relay"
+	"github.com/getcrew44/crew44/daemon/internal/relay"
 )
 
 func main() {
-	host := firstEnv("HOST", "CREWAI_RELAY_HOST")
+	host := firstEnv("HOST", "CREW44_RELAY_HOST")
 	if host == "" {
 		host = "127.0.0.1"
 	}
-	port := firstEnv("PORT", "CREWAI_RELAY_PORT")
+	port := firstEnv("PORT", "CREW44_RELAY_PORT")
 	if port == "" {
 		port = "8090"
 	}
 	addr := net.JoinHostPort(host, port)
-	log.Printf("crewai-relay listening addr=%s", addr)
+	log.Printf("crew44-relay listening addr=%s", addr)
 	if err := http.ListenAndServe(addr, relay.NewServer()); err != nil {
 		log.Fatal(err)
 	}

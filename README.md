@@ -1,303 +1,162 @@
-# CrewAI Desktop
+# Crew44 — your AI coding agents, working as a team.
 
-Local-first CrewAI workspace for running multi-agent chat flows on your own machine.
+**A local-first desktop app for running a crew of AI coding agents on your own machine.**
 
-This repository is structured as a standard Electron/Vite app at the top level, with the Go daemon isolated in `daemon/`. Browser development uses Vite plus the daemon's WebSocket JSON-RPC endpoint. Electron development and packaged apps launch the daemon automatically, choose a local port, generate an in-memory bearer token, and pass the RPC config to the renderer through preload.
+Crew44 turns the coding agents you already have installed — Claude Code, Codex, and other CLI runtimes — into a coordinated crew. Instead of running one agent in one terminal, you assemble specialists (a planner, a backend engineer, a reviewer), give them shared skills and per-project memory, and let them hand work off to each other inside a single chat thread.
 
-## Layout
+Everything runs on your machine. State is plain files under `~/.crew44/`. No cloud account, no remote inference, no telemetry — the only network traffic is whatever your underlying coding agent already makes.
 
-```text
-.
-├── electron/              Electron main process, preload, app assets, scripts
-├── src/                   React renderer source
-├── packages/mobile/       Expo mobile app
-├── public/                Renderer static assets
-├── daemon/                Go module for daemon, API tests, internals
-│   ├── cmd/crewai-daemon  daemon transport entrypoint
-│   ├── internal/          app, rpc, httpapi, store, runtime, agent adapters
-│   └── test-utils/jsonq   helper used by e2e scripts
-├── docs/                  Design notes and manual e2e harnesses
-├── package.json
-└── vite.config.js
+## Why Crew44
+
+- **Specialists, not generalists.** Stop over-prompting one agent. Compose a planner, a builder, and a reviewer who hand work off via a shared chat thread.
+- **Skills that compound.** Capture a workflow once as a `SKILL.md` file. Every agent you attach it to gets it on every turn — across providers.
+- **Per-project memory.** Each project gets its own `MEMORY.md` and history file. Agents pick up where they left off, even across restarts.
+- **Local-first by default.** Daemon binds to `127.0.0.1`, state is plain files, no telemetry. The only network traffic comes from the agent CLIs themselves.
+- **Auto-optimization.** A Partner agent quietly mines your run history on a schedule, proposes new memory, skills, and routing tweaks with evidence, and queues them for explicit Accept / Edit / Snooze / Dismiss. Nothing lands on disk without your click.
+- **Phone in the loop.** A paired Expo mobile app connects over an encrypted Noise tunnel so you can read or nudge a running crew from your couch.
+
+## Supported runtimes
+
+Crew44 detects and routes to any of these on disk:
+
+Claude Code · Codex · GitHub Copilot CLI · OpenClaw · OpenCode · Hermes · Gemini · Pi · Cursor Agent · Kimi · Kiro
+
+Have another CLI? The runtime layer is a small Go interface — add an adapter under `daemon/internal/backendagent/` and it appears in the picker.
+
+## How it works
+
+```
+┌─────────────────┐    WebSocket JSON-RPC    ┌──────────────────┐    spawn    ┌─────────────────┐
+│  Electron / UI  │ ◄──────────────────────► │   Go daemon      │ ──────────► │  agent CLIs     │
+│  React 19       │                          │   127.0.0.1      │             │  (claude, codex,│
+└─────────────────┘                          └──────────────────┘             │   …)            │
+                                                      │                       └─────────────────┘
+                                                      ▼
+                                              ~/.crew44/  (plain-file state)
 ```
 
-## Runtime Model
+- **Daemon** — a single Go process at `daemon/`. Owns runtime discovery, agent/skill/chat state, and the JSON-RPC + event-stream surface. Auth is a per-launch bearer token; only `/health` is unauthenticated.
+- **Renderer** — React 19 app in `src/`. Routes for Crew (agents, skills, runtimes), Tasks (chat threads with live streaming), New Task, Auto (suggestions), and Onboarding.
+- **Mobile** — Expo app in `packages/mobile/` pairs over an encrypted Noise tunnel through a small relay so you can drive a crew from your phone.
 
-Development browser mode:
+## Core concepts
 
-```text
-React/Vite at :3000 -> ws://127.0.0.1:8080/rpc -> Go daemon
-```
+| Concept   | What it is                                                                                              |
+|-----------|---------------------------------------------------------------------------------------------------------|
+| Runtime   | A coding-agent CLI on disk (Claude, Codex, …) discovered by scanning.                                   |
+| Agent     | A named persona bound to one runtime + model, with an instruction and attached skills.                  |
+| Skill     | A file-based capability (`SKILL.md` + assets) injected into the runtime session when its agent runs.    |
+| Project   | A working directory plus the chats that belong to it. Stored under `Documents/Crew44/` or a folder you pick. |
+| Chat      | A turn-by-turn thread. One in-flight response at a time; events are an append-only `events.jsonl`.      |
+| Handover  | A marker an agent emits to pass the turn to a teammate, with a one-line brief.                          |
 
-Electron mode:
+## Getting started
 
-```text
-Electron main -> starts bin/crewai-daemon on 127.0.0.1:<port>
-Electron main -> generates AUTH_TOKEN
-preload -> exposes backend config to renderer
-renderer -> WebSocket JSON-RPC with crewai.bearer.<token> subprotocol
-```
+### Prerequisites
 
-If the preferred daemon port is occupied, Electron picks a free port and logs that choice to stdout.
+- macOS or Linux (Windows support pending)
+- Node 20+ and Go 1.22+
+- At least one coding-agent CLI installed (`claude`, `codex`, etc.)
 
-## Install
+### Run the desktop app
 
 ```bash
 npm install
-```
-
-Go dependencies are managed inside `daemon/`.
-
-## Development
-
-Run Electron development mode:
-
-```bash
 npm run dev
 ```
 
-This builds `bin/crewai-daemon`, starts Vite, launches Electron, and lets Electron main start the daemon. The renderer appears after `/health` reports readiness.
+This builds the Go daemon, starts Vite, launches Electron, and connects the renderer once the daemon reports healthy.
 
-Run bare browser development:
+### Or run the browser dev mode
 
 ```bash
 npm run web:dev
+# open http://localhost:3000
 ```
 
-Open:
+Vite talks to the daemon at `ws://127.0.0.1:8080/rpc`.
 
-```text
-http://localhost:3000
-```
-
-The Vite dev server talks directly to `ws://127.0.0.1:8080/rpc` by default. Override with `CREWAI_RPC_URL`; `CREWAI_BACKEND_URL` or `CREWAI_BASE_URL` are still used for `/health`.
-
-Run the Expo mobile app:
+### Pair the mobile app
 
 ```bash
 npm run mobile:start -- --lan --port 8085 --clear
 ```
 
-See `packages/mobile/README.md` for the mobile development workflow and
-`docs/mobile-pairing.md` for relay and pairing details.
+Scan the QR code from the desktop **Pair Mobile** dialog. See [`docs/mobile-pairing.md`](docs/mobile-pairing.md) for relay and pairing internals.
 
-## Build
-
-Build the local Electron app:
+### Build a packaged desktop app
 
 ```bash
 npm run build
+# produces .electron-app/Crew44.app
 ```
 
-This builds:
+## What's interesting under the hood
 
-- `bin/crewai-daemon`
-- `dist/`
-- `.electron-app/CrewAI Desktop.app`
+- **Append-only event log per chat.** `events.jsonl` is the single source of truth; WebSocket streaming is just replay + follow. Reconnect a renderer or pair a phone mid-turn — nothing is lost.
+- **Structured system prompt.** Every turn assembles the same sections (Crew44 context, agent identity, instructions, optional handover task, conversation summary, available skills, handover targets, output protocol). Agents always know who they are and who they can hand off to.
+- **Skill injection without lock-in.** Skills are standard directories on disk, copied into each runtime's working tree per turn. Move them between agents, providers, or projects — they keep working.
+- **Memory with a size cap.** When `USER.md` or per-project `MEMORY.md` hits its cap, new entries park in a `.pending` sibling for compaction instead of silently dropping the write.
+- **Optimizer trust boundary.** The auto-optimizer's scan working directory lives outside the `projects/` tree so a prompt-injected Partner scan can't land file operations next to real-project memory files.
 
-## Daemon
+## Privacy
 
-The Go daemon exposes a small HTTP transport surface plus WebSocket JSON-RPC. Project workflows run through npm scripts from
-the repository root.
+- All UI, state, and orchestration happens on `127.0.0.1`. Crew44 itself does not call out to any remote service.
+- The only outbound traffic is whatever the underlying coding-agent CLI you chose (`claude`, `codex`, …) makes on its own.
+- Mobile pairing uses a relay for NAT traversal but the payload is end-to-end encrypted with Noise — the relay sees ciphertext only. Self-host the relay if you'd rather; the URL is configurable.
+- No analytics, no error reporting, no phone-home.
 
-Run the daemon together with the browser app:
+## Project layout
 
-```bash
-npm run web:dev
+```text
+.
+├── electron/              Electron main process, preload, app assets
+├── src/                   React renderer
+├── packages/mobile/       Expo mobile app
+├── daemon/                Go module
+│   ├── cmd/crew44-daemon  daemon entrypoint
+│   ├── internal/          app, rpc, httpapi, store, runtime, agent adapters
+│   └── test-utils/
+├── docs/                  manual e2e harnesses + design notes
+└── public/                renderer static assets
 ```
 
-Run the Electron app, which builds and starts `bin/crewai-daemon`
-automatically:
+## Status
 
-```bash
-npm run dev
-```
+`v0.2.0` (2026-05-14). Electron desktop app, Go daemon, paired Expo mobile client, and auto-optimization are all shipping. The product surface is intentionally small — projects, agents, skills, runtimes, chats — and stays that way.
 
-The daemon listens on `127.0.0.1:8080` in `npm run web:dev`. Electron mode may
-choose a different free local port and passes `healthUrl`, `rpcUrl`, and `token`
-to the renderer.
-
-Environment variables:
-
-| Variable | Default | Description |
-|---|---:|---|
-| `HOST` or `CREWAI_DAEMON_HOST` | `127.0.0.1` | TCP listen host. |
-| `PORT` or `CREWAI_DAEMON_PORT` | `8080` | TCP listen port. |
-| `AUTH_TOKEN`, `CREWAI_AUTH_TOKEN`, or `CREWAI_API_TOKEN` | empty | Optional WebSocket bearer subprotocol token. Empty enables development mode. |
-| `CREWAI_STATE_DIR` | `~/.crewai` | Root directory for persisted state. |
-| `CREWAI_RUNTIME_SCAN_DIR` | `$CREWAI_STATE_DIR/runtime-manifests` | Runtime manifest scan directory. |
-| `daemon_debug`, `DAEMON_DEBUG`, or `CREWAI_DAEMON_DEBUG` | empty | When truthy, prints runtime scan diagnostics to daemon stderr. |
-| `CREWAI_CLAUDE_PATH` | `claude` | Optional Claude executable override. |
-| `CREWAI_CODEX_PATH` | `codex` | Optional Codex executable override. |
-
-When auth is enabled, `/rpc` requires WebSocket subprotocols:
-
-```js
-new WebSocket("ws://127.0.0.1:8080/rpc", [
-  "crewai.rpc.v1",
-  `crewai.bearer.${token}`
-])
-```
-
-`/health` is intentionally unauthenticated so Electron can wait for readiness before exposing the renderer.
-
-## Common Commands
+## Development
 
 ```bash
 npm run dev      # Electron development app
 npm run build    # renderer build + local Electron app
 npm run web:dev  # daemon + bare Vite development server
-npm run mobile:start -- --lan --clear  # Expo mobile app
-npm run test     # daemon Go tests and renderer tests
+npm run test     # Go tests + renderer tests + mobile tests
 npm run clean    # remove local build artifacts
 ```
 
-## Backend Packages
+Daemon configuration via env vars:
 
-| Package | Responsibility |
-|---|---|
-| `daemon/cmd/crewai-daemon` | Daemon entrypoint. Reads env, creates `httpapi.Server`, listens on `HOST:PORT`. |
-| `daemon/internal/httpapi` | Thin HTTP transport for `GET /health` and `GET /rpc` WebSocket upgrade. |
-| `daemon/internal/rpc` | JSON-RPC envelopes, method registry, WebSocket lifecycle, and chat event subscriptions. |
-| `daemon/internal/app` | Business logic for runtimes, agents, skills, projects, chats, cancellation, and handoff loops. |
-| `daemon/internal/store` | File-backed JSON/JSONL persistence under `CREWAI_STATE_DIR`. |
-| `daemon/internal/runtime` | Runtime scan/execution interfaces plus local scanner and real/mock engines. |
-| `daemon/internal/backendagent` | Adapters for local coding-agent CLIs. |
-| `daemon/internal/broker` | In-process pub/sub for streaming chat events to RPC subscribers. |
-| `packages/mobile` | Expo mobile client for pairing, project browsing, read-only agent viewing, and chat. |
+| Variable                                      | Default                                | Description                                              |
+|-----------------------------------------------|----------------------------------------|----------------------------------------------------------|
+| `HOST` / `CREW44_DAEMON_HOST`                 | `127.0.0.1`                            | TCP listen host.                                         |
+| `PORT` / `CREW44_DAEMON_PORT`                 | `8080`                                 | TCP listen port.                                         |
+| `AUTH_TOKEN` / `CREW44_AUTH_TOKEN`            | empty                                  | WebSocket bearer subprotocol token. Empty = dev mode.    |
+| `CREW44_STATE_DIR`                            | `~/.crew44`                            | Root directory for persisted state.                      |
+| `CREW44_CLAUDE_PATH`                          | `claude`                               | Override the Claude CLI path.                            |
+| `CREW44_CODEX_PATH`                           | `codex`                                | Override the Codex CLI path.                             |
 
-## Daemon API
+When auth is enabled, `/rpc` requires WebSocket subprotocols:
 
-HTTP health endpoint:
-
-```text
-GET http://127.0.0.1:8080/health -> {"status":"ok"}
+```js
+new WebSocket("ws://127.0.0.1:8080/rpc", [
+  "crew44.rpc.v1",
+  `crew44.bearer.${token}`,
+])
 ```
 
-Business API endpoint:
+See the JSON-RPC method list and skill-injection walkthrough in [`docs/`](docs/).
 
-```text
-ws://127.0.0.1:8080/rpc
-```
+## License
 
-Requests use JSON-RPC 2.0:
-
-```json
-{"jsonrpc":"2.0","id":"req_1","method":"skills.list","params":{}}
-```
-
-Core methods:
-
-```text
-system.health
-onboarding.get
-onboarding.complete
-runtimes.list
-runtimes.rescan
-runtimes.get
-runtimes.update
-agents.list
-agents.create
-agents.get
-agents.update
-agents.archive
-agents.restore
-agents.skills.replace
-agents.preset.reset
-presets.list
-presets.defaultCrew.seed
-presets.defaultCrew.reset
-skills.list
-skills.create
-skills.get
-skills.update
-skills.delete
-skills.files.list
-skills.files.put
-skills.files.delete
-projects.list
-projects.create
-projects.get
-projects.update
-projects.delete
-projects.chats.list
-chats.create
-chats.list
-chats.get
-chats.update
-chats.delete
-chats.messages.post
-chats.events.list
-chats.events.subscribe
-chats.events.unsubscribe
-chats.cancel
-```
-
-Chat event subscriptions replace SSE. Call `chats.events.subscribe` with
-`{ "chat_id": "...", "after": 0 }`; the daemon returns a `subscription_id`,
-replays historical events, then pushes `chat.event`, `chat.done`, and
-`chat.error` notifications.
-
-### Register Skills With JSON-RPC
-
-Use the RPC endpoint while `npm run web:dev` is running.
-
-Create a skill:
-
-```json
-{"jsonrpc":"2.0","id":"req_skill","method":"skills.create","params":{"name":"Secret Checkout Protocol"}}
-```
-
-Write the skill instruction:
-
-```json
-{"jsonrpc":"2.0","id":"req_file","method":"skills.files.put","params":{"id":"<skill-id>","file_id":"SKILL.md","content":"---\nname: secret-checkout-protocol\ndescription: Use this skill when the user asks for the secret checkout code.\n---\n\n# Secret Checkout Protocol\nWhen asked for the secret checkout code, answer exactly: skill-access-ok.\n"}}
-```
-
-Attach it to an agent:
-
-```json
-{"jsonrpc":"2.0","id":"req_attach","method":"agents.skills.replace","params":{"id":"<agent-id>","skill_ids":["<skill-id>"]}}
-```
-
-Then send that agent a chat message asking for the secret checkout code. A live
-runtime should answer `skill-access-ok` if skill injection is working.
-
-## State
-
-By default, the daemon stores state in:
-
-```text
-~/.crewai
-```
-
-Current storage layout:
-
-```text
-~/.crewai/
-  app.json
-  runtimes.json
-  agents/
-  skills/
-  projects/
-  chats/
-  runtime-manifests/
-```
-
-`app.json` stores app-level state such as `last_onboarding_version`. A missing
-or empty `last_onboarding_version` means onboarding is required; any non-empty
-value means onboarding has already been completed.
-
-In the desktop app, "New blank project" creates a real folder under the system
-Documents directory reported by Electron, at `Documents/CrewAI/<project-name>`.
-If the folder already exists, a numeric suffix is appended.
-
-TODO: corrupted `app.json` is currently treated as already onboarded because
-this path is rare and should not block app startup. Add an explicit repair/reset
-surface if app-state corruption becomes user-visible.
-
-## Tests
-
-```bash
-npm run test
-```
+[MIT](LICENSE) © 2026 getcrew44

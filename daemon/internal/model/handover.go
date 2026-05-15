@@ -5,14 +5,14 @@ import (
 	"strings"
 )
 
-const AgentHandoverMarkerExample = "<CREWAI_AGENT_HANDOVER agent_id=\"agent_uuid\">one sentence for the next agent</CREWAI_AGENT_HANDOVER>"
+const AgentHandoverMarkerExample = "<CREW44_AGENT_HANDOVER agent_id=\"agent_uuid\">one sentence for the next agent</CREW44_AGENT_HANDOVER>"
 
 type AgentHandoverMarker struct {
 	AgentID string
 	Note    string
 }
 
-var agentHandoverLineRe = regexp.MustCompile(`(?m)^<CREWAI_AGENT_HANDOVER\s+agent_id="([^"<>\r\n]+)">([^<\r\n]+)</CREWAI_AGENT_HANDOVER>$`)
+var agentHandoverLineRe = regexp.MustCompile(`(?m)^<CREW44_AGENT_HANDOVER\s+agent_id="([^"<>\r\n]+)">([^<\r\n]+)</CREW44_AGENT_HANDOVER>$`)
 
 func ExtractAgentHandoverMarkers(content string) (string, []AgentHandoverMarker) {
 	matches := agentHandoverLineRe.FindAllStringSubmatch(content, -1)

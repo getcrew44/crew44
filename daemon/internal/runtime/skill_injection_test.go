@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sqtech/crew-ai/crewai-repo/internal/model"
+	"github.com/getcrew44/crew44/daemon/internal/model"
 )
 
 func TestPrepareSkillEnvironmentWritesProviderNativeSkills(t *testing.T) {
@@ -264,12 +264,12 @@ func TestPrepareSkillEnvironmentCodexReplacesManagedSkills(t *testing.T) {
 	second.AgentSkills = []SkillContext{{
 		ID:      "skill-2",
 		Name:    "Codex Skill",
-		Content: "# CrewAI Codex Skill\n",
+		Content: "# Crew44 Codex Skill\n",
 	}}
 	if _, err := prepareSkillEnvironment(second); err != nil {
 		t.Fatalf("second prepare failed: %v", err)
 	}
-	assertFileContains(t, filepath.Join(codexHome, "skills", "codex-skill", "SKILL.md"), "# CrewAI Codex Skill")
+	assertFileContains(t, filepath.Join(codexHome, "skills", "codex-skill", "SKILL.md"), "# Crew44 Codex Skill")
 	if _, err := os.Stat(filepath.Join(codexHome, "skills", "other")); !os.IsNotExist(err) {
 		t.Fatalf("expected stale managed skill to be removed, stat err=%v", err)
 	}

@@ -1,4 +1,4 @@
-export const PAIRING_TYPE = "crewai-remote-pairing";
+export const PAIRING_TYPE = "crew44-remote-pairing";
 
 export interface PairingOffer {
   v: number;
@@ -30,7 +30,7 @@ export function parsePairingOffer(text: string, now: Date = new Date()): Pairing
   }
   const obj = raw as Record<string, unknown>;
   if (obj.v !== 1) throw new Error("Unsupported pairing offer version");
-  if (obj.type !== PAIRING_TYPE) throw new Error("QR code is not a CrewAI pairing offer");
+  if (obj.type !== PAIRING_TYPE) throw new Error("QR code is not a Crew44 pairing offer");
 
   const offer: PairingOffer = {
     v: 1,

@@ -115,7 +115,7 @@ func jsonSchemaExample() string {
       "evidence": { "runs": ["t-114"], "windows": ["3 sessions, 7d"] },
       "preview": {
         "type": "memory",
-        "scope": "crewai-desktop",
+        "scope": "crew44",
         "scope_id": "PASTE-PROJECT-UUID-HERE",
         "text": "Project uses pnpm workspaces. Never run npm install at the repo root."
       }

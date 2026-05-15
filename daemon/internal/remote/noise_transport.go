@@ -9,8 +9,8 @@ import (
 
 	"github.com/flynn/noise"
 	"github.com/gorilla/websocket"
-	"github.com/sqtech/crew-ai/crewai-repo/internal/app"
-	"github.com/sqtech/crew-ai/crewai-repo/internal/rpc"
+	"github.com/getcrew44/crew44/daemon/internal/app"
+	"github.com/getcrew44/crew44/daemon/internal/rpc"
 )
 
 type sessionHello struct {

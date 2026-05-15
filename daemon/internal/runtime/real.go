@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"strings"
 
-	backendagent "github.com/sqtech/crew-ai/crewai-repo/internal/backendagent"
-	"github.com/sqtech/crew-ai/crewai-repo/internal/model"
+	backendagent "github.com/getcrew44/crew44/daemon/internal/backendagent"
+	"github.com/getcrew44/crew44/daemon/internal/model"
 )
 
 type RealEngine struct{}

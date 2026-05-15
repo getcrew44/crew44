@@ -1,6 +1,6 @@
-# CrewAI Mobile
+# Crew44 Mobile
 
-TypeScript Expo app for pairing with a CrewAI desktop daemon over the remote
+TypeScript Expo app for pairing with a Crew44 desktop daemon over the remote
 relay protocol. The app is iOS/Android focused; Expo web is not a target for
 this package.
 
@@ -51,8 +51,8 @@ The normal development flow is:
 
    ```bash
    cd daemon
-   go build -o ../bin/crewai-relay ./cmd/crewai-relay
-   HOST=0.0.0.0 PORT=8090 ../bin/crewai-relay
+   go build -o ../bin/crew44-relay ./cmd/crew44-relay
+   HOST=0.0.0.0 PORT=8090 ../bin/crew44-relay
    ```
 
 2. Start the desktop app or daemon.
@@ -67,9 +67,9 @@ non-secret pairing metadata in AsyncStorage.
 From the repository root:
 
 ```bash
-npm run typecheck --workspace=@crewai/mobile
+npm run typecheck --workspace=@crew44/mobile
 npm run test:mobile
-npm --workspace=@crewai/mobile exec expo export -- --platform ios --output-dir /tmp/crewai-mobile-export
+npm --workspace=@crew44/mobile exec expo export -- --platform ios --output-dir /tmp/crew44-mobile-export
 ```
 
 ## Protocol Notes

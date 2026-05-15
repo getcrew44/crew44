@@ -2,8 +2,8 @@ const { spawn } = require('child_process');
 const http = require('http');
 const path = require('path');
 
-const frontendPort = process.env.CREWAI_FRONTEND_PORT || '3000';
-const rendererUrl = process.env.CREWAI_RENDERER_URL || `http://127.0.0.1:${frontendPort}`;
+const frontendPort = process.env.CREW44_FRONTEND_PORT || '3000';
+const rendererUrl = process.env.CREW44_RENDERER_URL || `http://127.0.0.1:${frontendPort}`;
 const cwd = path.resolve(__dirname, '..', '..');
 const viteBin = path.join(cwd, 'node_modules', '.bin', process.platform === 'win32' ? 'vite.cmd' : 'vite');
 
@@ -55,7 +55,7 @@ async function main() {
   try {
     await waitFor(rendererUrl);
     const electron = spawnLogged(process.execPath, [path.join(cwd, 'electron', 'scripts', 'run.cjs')], {
-      CREWAI_RENDERER_URL: rendererUrl,
+      CREW44_RENDERER_URL: rendererUrl,
     });
     electron.on('exit', code => {
       cleanup();

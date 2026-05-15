@@ -5,8 +5,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sqtech/crew-ai/crewai-repo/internal/broker"
-	"github.com/sqtech/crew-ai/crewai-repo/internal/model"
+	"github.com/getcrew44/crew44/daemon/internal/broker"
+	"github.com/getcrew44/crew44/daemon/internal/model"
 )
 
 const (

@@ -10,11 +10,11 @@ import (
 
 	"github.com/flynn/noise"
 	"github.com/gorilla/websocket"
-	"github.com/sqtech/crew-ai/crewai-repo/internal/httpapi"
-	"github.com/sqtech/crew-ai/crewai-repo/internal/relay"
-	"github.com/sqtech/crew-ai/crewai-repo/internal/remote"
-	"github.com/sqtech/crew-ai/crewai-repo/internal/rpc"
-	"github.com/sqtech/crew-ai/crewai-repo/internal/runtime"
+	"github.com/getcrew44/crew44/daemon/internal/httpapi"
+	"github.com/getcrew44/crew44/daemon/internal/relay"
+	"github.com/getcrew44/crew44/daemon/internal/remote"
+	"github.com/getcrew44/crew44/daemon/internal/rpc"
+	"github.com/getcrew44/crew44/daemon/internal/runtime"
 )
 
 func TestRemotePairingAndDeviceRPCOverRelay(t *testing.T) {

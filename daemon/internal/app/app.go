@@ -10,13 +10,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/sqtech/crew-ai/crewai-repo/internal/broker"
-	"github.com/sqtech/crew-ai/crewai-repo/internal/id"
-	"github.com/sqtech/crew-ai/crewai-repo/internal/model"
-	"github.com/sqtech/crew-ai/crewai-repo/internal/optimizer"
-	"github.com/sqtech/crew-ai/crewai-repo/internal/presets"
-	"github.com/sqtech/crew-ai/crewai-repo/internal/runtime"
-	"github.com/sqtech/crew-ai/crewai-repo/internal/store"
+	"github.com/getcrew44/crew44/daemon/internal/broker"
+	"github.com/getcrew44/crew44/daemon/internal/id"
+	"github.com/getcrew44/crew44/daemon/internal/model"
+	"github.com/getcrew44/crew44/daemon/internal/optimizer"
+	"github.com/getcrew44/crew44/daemon/internal/presets"
+	"github.com/getcrew44/crew44/daemon/internal/runtime"
+	"github.com/getcrew44/crew44/daemon/internal/store"
 )
 
 type Config struct {

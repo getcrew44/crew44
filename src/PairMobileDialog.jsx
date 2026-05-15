@@ -3,7 +3,7 @@ import { QRCodeSVG } from 'qrcode.react';
 import { createRemotePairing } from './api.js';
 import { ghostBtn, primaryBtn, UI_FONT, MONO_FONT, Icon } from './components.jsx';
 
-const LAST_RELAY_URL_KEY = 'crewai.lastRelayUrl';
+const LAST_RELAY_URL_KEY = 'crew44.lastRelayUrl';
 export const DEFAULT_RELAY_URL = 'wss://relay.mindivelabs.com/relay';
 
 function readLastRelayUrl() {

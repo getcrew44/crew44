@@ -711,7 +711,7 @@ export default function Sidebar({ projects, currentChatId, route, setRoute, onPi
         <span style={{
           flex: 1, fontSize: 14, color: '#5C544B', fontWeight: 400,
           textAlign: 'center', letterSpacing: 0.1,
-        }}>{deskName || 'CrewAI Desktop'}</span>
+        }}>{deskName || 'Crew44'}</span>
         <button style={iconBtnStyle} title="Mobile app"><Icon name="phone" /></button>
         <button
           style={iconBtnStyle}

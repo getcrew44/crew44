@@ -1,7 +1,7 @@
 .DS_Store
 /bin/
-/crewai-server
-/crewai-daemon
+/crew44-server
+/crew44-daemon
 /node_modules/
 node_modules/
 /packages/*/.expo/

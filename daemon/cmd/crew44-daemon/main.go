@@ -8,7 +8,7 @@ import (
 func main() {
 	logger := log.New(os.Stderr, "", log.LstdFlags)
 	if fields := currentBuildMetadata().LogFields(); fields != "" {
-		logger.Printf("crewai-daemon build %s", fields)
+		logger.Printf("crew44-daemon build %s", fields)
 	}
 	cfg, err := loadServerConfig()
 	if err != nil {

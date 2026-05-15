@@ -10,9 +10,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sqtech/crew-ai/crewai-repo/internal/broker"
-	"github.com/sqtech/crew-ai/crewai-repo/internal/model"
-	"github.com/sqtech/crew-ai/crewai-repo/internal/optimizer"
+	"github.com/getcrew44/crew44/daemon/internal/broker"
+	"github.com/getcrew44/crew44/daemon/internal/model"
+	"github.com/getcrew44/crew44/daemon/internal/optimizer"
 )
 
 // initOptimizer is called from App.New after bootstrap. It wires the

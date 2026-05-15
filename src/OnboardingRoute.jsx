@@ -221,7 +221,7 @@ function WelcomeStep({ onNext }) {
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 28, color: '#807972' }}>
           <span style={{ color: '#C4644A', fontSize: 16 }}>✦</span>
-          <span style={{ fontSize: 13, color: '#5C544B' }}>Welcome to CrewAI</span>
+          <span style={{ fontSize: 13, color: '#5C544B' }}>Welcome to Crew44</span>
         </div>
 
         <h1 style={{

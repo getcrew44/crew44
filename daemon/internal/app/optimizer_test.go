@@ -8,18 +8,18 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sqtech/crew-ai/crewai-repo/internal/broker"
-	"github.com/sqtech/crew-ai/crewai-repo/internal/model"
-	"github.com/sqtech/crew-ai/crewai-repo/internal/optimizer"
-	"github.com/sqtech/crew-ai/crewai-repo/internal/runtime"
-	"github.com/sqtech/crew-ai/crewai-repo/internal/store"
+	"github.com/getcrew44/crew44/daemon/internal/broker"
+	"github.com/getcrew44/crew44/daemon/internal/model"
+	"github.com/getcrew44/crew44/daemon/internal/optimizer"
+	"github.com/getcrew44/crew44/daemon/internal/runtime"
+	"github.com/getcrew44/crew44/daemon/internal/store"
 )
 
 func newOptimizerTestApp(t *testing.T) *App {
 	t.Helper()
 	root := t.TempDir()
 	a, err := New(Config{
-		StateDir:       filepath.Join(root, ".crewai"),
+		StateDir:       filepath.Join(root, ".crew44"),
 		RuntimeScanDir: filepath.Join(root, "runtime-manifests"),
 		Scanner: runtime.StaticScanner{Records: []model.RuntimeRecord{{
 			ID:         "runtime-mock",
@@ -239,7 +239,7 @@ func TestSeedOptimizerProjectCreatesInternalWorkdir(t *testing.T) {
 
 func TestSeedOptimizerProjectMigratesEmptyInternalWorkdir(t *testing.T) {
 	root := t.TempDir()
-	stateDir := filepath.Join(root, ".crewai")
+	stateDir := filepath.Join(root, ".crew44")
 	st, err := store.New(stateDir)
 	if err != nil {
 		t.Fatal(err)
@@ -288,7 +288,7 @@ func TestSeedOptimizerProjectMigratesEmptyInternalWorkdir(t *testing.T) {
 
 func TestSeedOptimizerProjectMigratesLegacyProjectsWorkdir(t *testing.T) {
 	root := t.TempDir()
-	stateDir := filepath.Join(root, ".crewai")
+	stateDir := filepath.Join(root, ".crew44")
 	st, err := store.New(stateDir)
 	if err != nil {
 		t.Fatal(err)

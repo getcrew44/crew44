@@ -1,15 +1,15 @@
 const fs = require('fs');
 const path = require('path');
 
-const productName = 'CrewAI Desktop';
+const productName = 'Crew44';
 const root = path.resolve(__dirname, '..', '..');
 const sourceApp = path.join(root, 'node_modules', 'electron', 'dist', 'Electron.app');
 const appRoot = path.join(root, '.electron-app');
 const targetApp = path.join(appRoot, `${productName}.app`);
 const executable = path.join(targetApp, 'Contents', 'MacOS', 'Electron');
 const plistPath = path.join(targetApp, 'Contents', 'Info.plist');
-const iconSource = path.join(root, 'electron', 'assets', 'crewai.icns');
-const iconTarget = path.join(targetApp, 'Contents', 'Resources', 'crewai.icns');
+const iconSource = path.join(root, 'electron', 'assets', 'crew44.icns');
+const iconTarget = path.join(targetApp, 'Contents', 'Resources', 'crew44.icns');
 const resourcesApp = path.join(targetApp, 'Contents', 'Resources', 'app');
 
 function getInstallElectronCommand() {
@@ -56,8 +56,8 @@ function ensureDevApp() {
   const replacements = {
     CFBundleDisplayName: productName,
     CFBundleName: productName,
-    CFBundleIdentifier: 'com.crewai.desktop',
-    CFBundleIconFile: 'crewai.icns',
+    CFBundleIdentifier: 'com.crew44.desktop',
+    CFBundleIconFile: 'crew44.icns',
   };
 
   for (const [key, value] of Object.entries(replacements)) {
@@ -80,7 +80,7 @@ function ensureDevApp() {
     fs.cpSync(source, target, { recursive: true, verbatimSymlinks: true });
   }
 
-  const daemonSource = path.join(root, 'bin', process.platform === 'win32' ? 'crewai-daemon.exe' : 'crewai-daemon');
+  const daemonSource = path.join(root, 'bin', process.platform === 'win32' ? 'crew44-daemon.exe' : 'crew44-daemon');
   if (fs.existsSync(daemonSource)) {
     const daemonTargetDir = path.join(resourcesApp, 'bin');
     fs.mkdirSync(daemonTargetDir, { recursive: true });

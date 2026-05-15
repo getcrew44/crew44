@@ -9,7 +9,7 @@ import (
 	"strings"
 
 	"github.com/flynn/noise"
-	"github.com/sqtech/crew-ai/crewai-repo/internal/id"
+	"github.com/getcrew44/crew44/daemon/internal/id"
 )
 
 var noiseCipherSuite = noise.NewCipherSuite(noise.DH25519, noise.CipherChaChaPoly, noise.HashBLAKE2s)

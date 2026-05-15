@@ -15,7 +15,7 @@ func TestExtractAgentHandoverMarkers(t *testing.T) {
 	}{
 		{
 			name:        "single marker",
-			content:     "handover now\n<CREWAI_AGENT_HANDOVER agent_id=\"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa\">Tell the story in Chinese.</CREWAI_AGENT_HANDOVER>",
+			content:     "handover now\n<CREW44_AGENT_HANDOVER agent_id=\"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa\">Tell the story in Chinese.</CREW44_AGENT_HANDOVER>",
 			wantCleaned: "handover now",
 			wantTargets: []AgentHandoverMarker{{AgentID: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", Note: "Tell the story in Chinese."}},
 		},
@@ -23,8 +23,8 @@ func TestExtractAgentHandoverMarkers(t *testing.T) {
 			name: "multiple markers",
 			content: strings.Join([]string{
 				"handover twice",
-				"<CREWAI_AGENT_HANDOVER agent_id=\"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa\">First try.</CREWAI_AGENT_HANDOVER>",
-				"<CREWAI_AGENT_HANDOVER agent_id=\"bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb\">Second try.</CREWAI_AGENT_HANDOVER>",
+				"<CREW44_AGENT_HANDOVER agent_id=\"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa\">First try.</CREW44_AGENT_HANDOVER>",
+				"<CREW44_AGENT_HANDOVER agent_id=\"bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb\">Second try.</CREW44_AGENT_HANDOVER>",
 			}, "\n"),
 			wantCleaned: "handover twice",
 			wantTargets: []AgentHandoverMarker{
@@ -34,31 +34,31 @@ func TestExtractAgentHandoverMarkers(t *testing.T) {
 		},
 		{
 			name:        "embedded marker is ignored",
-			content:     "inline <CREWAI_AGENT_HANDOVER agent_id=\"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa\">Tell it.</CREWAI_AGENT_HANDOVER> stays",
-			wantCleaned: "inline <CREWAI_AGENT_HANDOVER agent_id=\"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa\">Tell it.</CREWAI_AGENT_HANDOVER> stays",
+			content:     "inline <CREW44_AGENT_HANDOVER agent_id=\"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa\">Tell it.</CREW44_AGENT_HANDOVER> stays",
+			wantCleaned: "inline <CREW44_AGENT_HANDOVER agent_id=\"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa\">Tell it.</CREW44_AGENT_HANDOVER> stays",
 			wantTargets: nil,
 		},
 		{
 			name:        "old agent-id-only marker is not compatible",
-			content:     "<CREWAI_AGENT_HANDOVER>aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa</CREWAI_AGENT_HANDOVER>",
-			wantCleaned: "<CREWAI_AGENT_HANDOVER>aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa</CREWAI_AGENT_HANDOVER>",
+			content:     "<CREW44_AGENT_HANDOVER>aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa</CREW44_AGENT_HANDOVER>",
+			wantCleaned: "<CREW44_AGENT_HANDOVER>aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa</CREW44_AGENT_HANDOVER>",
 			wantTargets: nil,
 		},
 		{
 			name:        "literal regex anchors are not part of marker syntax",
-			content:     "^<CREWAI_AGENT_HANDOVER agent_id=\"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa\">Tell it.</CREWAI_AGENT_HANDOVER>$",
-			wantCleaned: "^<CREWAI_AGENT_HANDOVER agent_id=\"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa\">Tell it.</CREWAI_AGENT_HANDOVER>$",
+			content:     "^<CREW44_AGENT_HANDOVER agent_id=\"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa\">Tell it.</CREW44_AGENT_HANDOVER>$",
+			wantCleaned: "^<CREW44_AGENT_HANDOVER agent_id=\"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa\">Tell it.</CREW44_AGENT_HANDOVER>$",
 			wantTargets: nil,
 		},
 		{
 			name:        "old marker is not compatible",
-			content:     "legacy ^<CREWAI_HANDOFF>aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa</CREWAI_HANDOFF>",
-			wantCleaned: "legacy ^<CREWAI_HANDOFF>aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa</CREWAI_HANDOFF>",
+			content:     "legacy ^<CREW44_HANDOFF>aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa</CREW44_HANDOFF>",
+			wantCleaned: "legacy ^<CREW44_HANDOFF>aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa</CREW44_HANDOFF>",
 			wantTargets: nil,
 		},
 		{
 			name:        "marker-only content cleans to empty",
-			content:     "<CREWAI_AGENT_HANDOVER agent_id=\"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa\">Continue the task.</CREWAI_AGENT_HANDOVER>",
+			content:     "<CREW44_AGENT_HANDOVER agent_id=\"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa\">Continue the task.</CREW44_AGENT_HANDOVER>",
 			wantCleaned: "",
 			wantTargets: []AgentHandoverMarker{{AgentID: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", Note: "Continue the task."}},
 		},

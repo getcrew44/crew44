@@ -23,8 +23,8 @@ Build and run the relay from the repository root:
 
 ```bash
 cd daemon
-go build -o ../bin/crewai-relay ./cmd/crewai-relay
-HOST=0.0.0.0 PORT=8090 ../bin/crewai-relay
+go build -o ../bin/crew44-relay ./cmd/crew44-relay
+HOST=0.0.0.0 PORT=8090 ../bin/crew44-relay
 ```
 
 Use the development machine's LAN IP in the relay URL shown to the daemon and
@@ -83,7 +83,7 @@ For a temporary CLI-only pairing flow, start a local daemon without auth on a
 development port:
 
 ```bash
-CREWAI_DAEMON_HOST=127.0.0.1 CREWAI_DAEMON_PORT=18080 ./bin/crewai-daemon
+CREW44_DAEMON_HOST=127.0.0.1 CREW44_DAEMON_PORT=18080 ./bin/crew44-daemon
 ```
 
 Then call `remote.pairing.create` over the daemon WebSocket RPC:
@@ -94,7 +94,7 @@ const WebSocket = require('ws');
 const qrcode = require('qrcode-terminal');
 const relayUrl = process.env.RELAY_URL;
 if (!relayUrl) throw new Error('RELAY_URL is required');
-const ws = new WebSocket('ws://127.0.0.1:18080/rpc', 'crewai.rpc.v1');
+const ws = new WebSocket('ws://127.0.0.1:18080/rpc', 'crew44.rpc.v1');
 const id = 'pair-' + Date.now();
 ws.on('open', () => ws.send(JSON.stringify({
   jsonrpc: '2.0',
@@ -137,5 +137,5 @@ expired offer.
   ```
 
 - If the daemon has auth enabled, the CLI helper above will need the
-  `crewai.bearer.<token>` WebSocket subprotocol. The desktop UI already uses
+  `crew44.bearer.<token>` WebSocket subprotocol. The desktop UI already uses
   the authenticated renderer RPC client.

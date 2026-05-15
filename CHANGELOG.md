@@ -25,4 +25,4 @@ All notable changes to this project are documented here. The format is based on 
 - **Codex stdout buffer** — bumped the per-line read limit so larger tool outputs no longer crash the scanner; truncation is bounded at 256 KiB with a clear marker.
 - Pre-landing review safety hardening across the optimizer accept pipeline: stricter ID validation, atomic schedule writes, applied-markdown path-traversal guards, and memory-file size cap enforcement.
 
-[0.2.0]: https://gitlab.com/deepthinklabs/crewai/crewai-desktop/-/compare/v0.1.0...v0.2.0
+[0.2.0]: https://github.com/getcrew44/crew44/-/compare/v0.1.0...v0.2.0

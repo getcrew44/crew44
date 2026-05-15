@@ -32,7 +32,7 @@ describe('Onboarding — welcome step', () => {
   it('renders the multi-agent hero copy and start button', () => {
     render(<OnboardingRoute runtimes={[]} onComplete={() => {}} onSkip={() => {}} />);
     expect(screen.getByText(/Multi-agent teams/i)).toBeInTheDocument();
-    expect(screen.getByText(/Welcome to CrewAI/i)).toBeInTheDocument();
+    expect(screen.getByText(/Welcome to Crew44/i)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /start exploring/i })).toBeInTheDocument();
   });
 

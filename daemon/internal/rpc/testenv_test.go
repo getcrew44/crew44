@@ -12,9 +12,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sqtech/crew-ai/crewai-repo/internal/app"
-	"github.com/sqtech/crew-ai/crewai-repo/internal/model"
-	"github.com/sqtech/crew-ai/crewai-repo/internal/runtime"
+	"github.com/getcrew44/crew44/daemon/internal/app"
+	"github.com/getcrew44/crew44/daemon/internal/model"
+	"github.com/getcrew44/crew44/daemon/internal/runtime"
 )
 
 type testEnv struct {
@@ -40,7 +40,7 @@ func newTestEnvWithScannerAndEngine(t *testing.T, scanner *runtime.StaticScanner
 	t.Helper()
 
 	root := t.TempDir()
-	stateDir := filepath.Join(root, ".crewai")
+	stateDir := filepath.Join(root, ".crew44")
 	runtimeScanDir := filepath.Join(root, "runtime-manifests")
 	if err := os.MkdirAll(runtimeScanDir, 0o755); err != nil {
 		t.Fatalf("mkdir runtime scan dir: %v", err)
@@ -145,9 +145,9 @@ func (e *loopingHandoffEngine) Run(_ context.Context, request runtime.RunRequest
 	var content string
 	switch request.Agent.Name {
 	case "Aria":
-		content = "handoff to Bex\n<CREWAI_AGENT_HANDOVER agent_id=\"" + e.targetID + "\">Continue the loop guard test.</CREWAI_AGENT_HANDOVER>"
+		content = "handoff to Bex\n<CREW44_AGENT_HANDOVER agent_id=\"" + e.targetID + "\">Continue the loop guard test.</CREW44_AGENT_HANDOVER>"
 	default:
-		content = "repeat handoff\n<CREWAI_AGENT_HANDOVER agent_id=\"" + request.Agent.ID + "\">Continue the loop guard test.</CREWAI_AGENT_HANDOVER>"
+		content = "repeat handoff\n<CREW44_AGENT_HANDOVER agent_id=\"" + request.Agent.ID + "\">Continue the loop guard test.</CREW44_AGENT_HANDOVER>"
 	}
 	if err := emit(runtime.StreamEvent{
 		Type: model.EventTypeMessage,
@@ -167,7 +167,7 @@ func (e *multiHandoverEngine) Run(_ context.Context, request runtime.RunRequest,
 		var lines []string
 		lines = append(lines, "handover candidates")
 		for _, target := range e.targets {
-			lines = append(lines, "<CREWAI_AGENT_HANDOVER agent_id=\""+target+"\">Continue with this candidate.</CREWAI_AGENT_HANDOVER>")
+			lines = append(lines, "<CREW44_AGENT_HANDOVER agent_id=\""+target+"\">Continue with this candidate.</CREW44_AGENT_HANDOVER>")
 		}
 		content = strings.Join(lines, "\n")
 	}
@@ -186,7 +186,7 @@ func (e *multiHandoverEngine) Run(_ context.Context, request runtime.RunRequest,
 func (e *invalidHandoverEngine) Run(_ context.Context, request runtime.RunRequest, emit func(runtime.StreamEvent) error) (runtime.RunResult, error) {
 	lines := []string{"invalid handover candidates"}
 	for _, target := range e.targets {
-		lines = append(lines, "<CREWAI_AGENT_HANDOVER agent_id=\""+target+"\">Try this invalid candidate.</CREWAI_AGENT_HANDOVER>")
+		lines = append(lines, "<CREW44_AGENT_HANDOVER agent_id=\""+target+"\">Try this invalid candidate.</CREW44_AGENT_HANDOVER>")
 	}
 	if err := emit(runtime.StreamEvent{
 		Type: model.EventTypeMessage,
@@ -201,7 +201,7 @@ func (e *invalidHandoverEngine) Run(_ context.Context, request runtime.RunReques
 }
 
 func (e *markerOnlyHandoverEngine) Run(_ context.Context, request runtime.RunRequest, emit func(runtime.StreamEvent) error) (runtime.RunResult, error) {
-	content := "<CREWAI_AGENT_HANDOVER agent_id=\"" + e.target + "\">Tell the requested story.</CREWAI_AGENT_HANDOVER>"
+	content := "<CREW44_AGENT_HANDOVER agent_id=\"" + e.target + "\">Tell the requested story.</CREW44_AGENT_HANDOVER>"
 	if request.Agent.Name != "Aria" {
 		content = "target received: " + request.Prompt
 	}
@@ -218,7 +218,7 @@ func (e *markerOnlyHandoverEngine) Run(_ context.Context, request runtime.RunReq
 }
 
 func (e *noteHandoverEngine) Run(_ context.Context, request runtime.RunRequest, emit func(runtime.StreamEvent) error) (runtime.RunResult, error) {
-	content := "I will hand this to Bex.\n<CREWAI_AGENT_HANDOVER agent_id=\"" + e.target + "\">Write the requested file.</CREWAI_AGENT_HANDOVER>"
+	content := "I will hand this to Bex.\n<CREW44_AGENT_HANDOVER agent_id=\"" + e.target + "\">Write the requested file.</CREW44_AGENT_HANDOVER>"
 	if request.Agent.Name != "Aria" {
 		content = "target saw original prompt: " + request.Prompt + "\n\ntarget saw system prompt: " + request.Agent.Instruction
 	}

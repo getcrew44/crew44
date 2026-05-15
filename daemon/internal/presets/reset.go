@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/sqtech/crew-ai/crewai-repo/internal/id"
-	"github.com/sqtech/crew-ai/crewai-repo/internal/model"
+	"github.com/getcrew44/crew44/daemon/internal/id"
+	"github.com/getcrew44/crew44/daemon/internal/model"
 )
 
 // ResetResult describes what reset touched.

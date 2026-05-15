@@ -39,8 +39,8 @@ func TestRunServerLogsListeningAddress(t *testing.T) {
 	logger := log.New(&logs, "", 0)
 
 	err := runServer(serverConfig{
-		StateDir:       "/tmp/crewai-state",
-		RuntimeScanDir: "/tmp/crewai-state/runtime-manifests",
+		StateDir:       "/tmp/crew44-state",
+		RuntimeScanDir: "/tmp/crew44-state/runtime-manifests",
 		Host:           "127.0.0.1",
 		Port:           "0",
 	}, logger)
@@ -49,13 +49,13 @@ func TestRunServerLogsListeningAddress(t *testing.T) {
 	}
 
 	output := logs.String()
-	if !strings.Contains(output, "crewai-daemon listening") {
+	if !strings.Contains(output, "crew44-daemon listening") {
 		t.Fatalf("expected listening log, got %q", output)
 	}
-	if !strings.Contains(output, "state_dir=/tmp/crewai-state") {
+	if !strings.Contains(output, "state_dir=/tmp/crew44-state") {
 		t.Fatalf("expected state dir in log, got %q", output)
 	}
-	if !strings.Contains(output, "runtime_scan_dir=/tmp/crewai-state/runtime-manifests") {
+	if !strings.Contains(output, "runtime_scan_dir=/tmp/crew44-state/runtime-manifests") {
 		t.Fatalf("expected runtime scan dir in log, got %q", output)
 	}
 }

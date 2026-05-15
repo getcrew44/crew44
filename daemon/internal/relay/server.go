@@ -7,7 +7,7 @@ import (
 	"sync"
 
 	"github.com/gorilla/websocket"
-	"github.com/sqtech/crew-ai/crewai-repo/internal/id"
+	"github.com/getcrew44/crew44/daemon/internal/id"
 )
 
 type Server struct {

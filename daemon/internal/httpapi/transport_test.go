@@ -10,9 +10,9 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-	"github.com/sqtech/crew-ai/crewai-repo/internal/model"
-	"github.com/sqtech/crew-ai/crewai-repo/internal/rpc"
-	"github.com/sqtech/crew-ai/crewai-repo/internal/runtime"
+	"github.com/getcrew44/crew44/daemon/internal/model"
+	"github.com/getcrew44/crew44/daemon/internal/rpc"
+	"github.com/getcrew44/crew44/daemon/internal/runtime"
 )
 
 func TestTransportHealthDoesNotRequireToken(t *testing.T) {
@@ -44,7 +44,7 @@ func TestTransportRejectsRPCWithoutToken(t *testing.T) {
 func TestTransportAcceptsRPCBearerSubprotocol(t *testing.T) {
 	server := newAuthTransportServer(t, "secret")
 	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "/rpc"
-	dialer := websocket.Dialer{Subprotocols: []string{rpc.ProtocolV1, "crewai.bearer.secret"}}
+	dialer := websocket.Dialer{Subprotocols: []string{rpc.ProtocolV1, "crew44.bearer.secret"}}
 
 	conn, _, err := dialer.Dial(wsURL, nil)
 	if err != nil {

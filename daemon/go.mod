@@ -1,4 +1,4 @@
-module github.com/sqtech/crew-ai/crewai-repo
+module github.com/getcrew44/crew44/daemon
 
 go 1.26.1
 

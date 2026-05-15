@@ -19,7 +19,7 @@ function offer(overrides: Record<string, unknown> = {}) {
 }
 
 describe("parsePairingOffer", () => {
-  it("accepts a valid CrewAI pairing offer", () => {
+  it("accepts a valid Crew44 pairing offer", () => {
     expect(parsePairingOffer(offer(), now)).toMatchObject({
       type: PAIRING_TYPE,
       server_id: "srv_test"
@@ -31,7 +31,7 @@ describe("parsePairingOffer", () => {
   });
 
   it("rejects wrong QR types", () => {
-    expect(() => parsePairingOffer(offer({ type: "other" }), now)).toThrow("not a CrewAI");
+    expect(() => parsePairingOffer(offer({ type: "other" }), now)).toThrow("not a Crew44");
   });
 
   it("rejects expired offers", () => {

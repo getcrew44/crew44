@@ -12,13 +12,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/sqtech/crew-ai/crewai-repo/internal/app"
-	"github.com/sqtech/crew-ai/crewai-repo/internal/rpc"
+	"github.com/getcrew44/crew44/daemon/internal/app"
+	"github.com/getcrew44/crew44/daemon/internal/rpc"
 )
 
 const (
 	pairingTTL  = 5 * time.Minute
-	pairingType = "crewai-remote-pairing"
+	pairingType = "crew44-remote-pairing"
 )
 
 type Manager struct {
