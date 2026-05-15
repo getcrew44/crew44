@@ -1589,7 +1589,7 @@ export default function TaskView({ chatId, agentsMap, skills = [], projects = []
       <div
         ref={timelineRef}
         data-testid="conversation-scroll"
-        style={{ flex: 1, overflow: 'auto', padding: '8px 36px 0' }}
+        style={{ flex: 1, overflow: 'auto', padding: '8px 36px 24px' }}
       >
         <div data-testid="conversation-column" style={conversationColumn}>
           {renderEventsWithHandovers({ events, agentsMap })}
