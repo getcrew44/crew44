@@ -10,6 +10,7 @@ vi.mock('../api.js', () => ({
   postMessage: vi.fn(),
   cancelChat: vi.fn(),
   streamChatEvents: vi.fn(),
+  listProjectFiles: vi.fn(),
 }));
 
 const agentsMap = {
@@ -58,6 +59,7 @@ beforeEach(() => {
     onDone?.();
     return vi.fn();
   });
+  api.listProjectFiles.mockResolvedValue([]);
 });
 
 function emitEvent(stream, event) {
@@ -728,5 +730,89 @@ describe('TaskView', () => {
     // it caused the sidebar spinner to disappear even while the backend kept
     // working.
     expect(onStreamingChange).not.toHaveBeenCalledWith('chat-1', false);
+  });
+
+  describe('composer suggestions', () => {
+    it('suggests skills for the current agent after / and inserts the chosen one', async () => {
+      const skills = [
+        { id: 'skill-1', name: 'review' },
+        { id: 'skill-2', name: 'plan' },
+        { id: 'skill-3', name: 'qa' },
+      ];
+      const agentsWithSkills = {
+        ...agentsMap,
+        'agent-1': { ...agentsMap['agent-1'], skill_ids: ['skill-1', 'skill-2'] },
+      };
+
+      render(<TaskView chatId="chat-1" agentsMap={agentsWithSkills} skills={skills} />);
+
+      const input = await screen.findByTestId('composer-input');
+      fireEvent.change(input, { target: { value: '/', selectionStart: 1, selectionEnd: 1 } });
+
+      const reviewOption = await screen.findByRole('option', { name: /review/i });
+      expect(reviewOption).toBeInTheDocument();
+      // 'qa' is not in agent-1's skill_ids, so it must NOT appear
+      expect(screen.queryByRole('option', { name: /^qa$/i })).not.toBeInTheDocument();
+
+      fireEvent.click(reviewOption);
+      expect(input).toHaveValue('/review ');
+    });
+
+    it('does not show skill suggestions when the agent has none enabled', async () => {
+      const skills = [{ id: 'skill-1', name: 'review' }];
+      // agent-1 has no skill_ids field, so nothing is enabled
+      render(<TaskView chatId="chat-1" agentsMap={agentsMap} skills={skills} />);
+
+      const input = await screen.findByTestId('composer-input');
+      fireEvent.change(input, { target: { value: '/', selectionStart: 1, selectionEnd: 1 } });
+
+      expect(screen.queryByRole('listbox', { name: /skill suggestions/i })).not.toBeInTheDocument();
+    });
+
+    it('fetches and shows file suggestions after @path when the project has a workdir', async () => {
+      api.getChat.mockResolvedValue({ ...chat, project_id: 'proj-1' });
+      api.listProjectFiles.mockResolvedValue([
+        { path: 'src/main.go', is_dir: false },
+        { path: 'src/helpers', is_dir: true },
+      ]);
+      const projects = [{ id: 'proj-1', workdir: '/tmp/demo' }];
+
+      render(<TaskView chatId="chat-1" agentsMap={agentsMap} projects={projects} />);
+
+      // Wait until the chat has loaded — the draft-reset effect only fires once
+      // projectId is set, and it clears val. If we type before that effect runs,
+      // the suggestion never opens.
+      const input = await screen.findByTestId('composer-input');
+      await waitFor(() => expect(api.getChat).toHaveBeenCalled());
+      await act(async () => { await Promise.resolve(); });
+
+      fireEvent.change(input, { target: { value: '@src', selectionStart: 4, selectionEnd: 4 } });
+
+      const fileOption = await screen.findByRole('option', { name: /main\.go/i }, { timeout: 2000 });
+      fireEvent.click(fileOption);
+
+      expect(input).toHaveValue('@src/main.go ');
+      expect(api.listProjectFiles).toHaveBeenCalledWith('proj-1', 'src', expect.any(Number));
+    });
+
+    it('highlights both agent mentions and skill commands in the composer', async () => {
+      const skills = [{ id: 'skill-1', name: 'review' }];
+      const agentsWithSkills = {
+        ...agentsMap,
+        'agent-1': { ...agentsMap['agent-1'], skill_ids: ['skill-1'] },
+      };
+      render(<TaskView chatId="chat-1" agentsMap={agentsWithSkills} skills={skills} />);
+
+      const input = await screen.findByTestId('composer-input');
+      const text = '@Aria please /review the diff';
+      fireEvent.change(input, {
+        target: { value: text, selectionStart: text.length, selectionEnd: text.length },
+      });
+
+      const highlights = await screen.findAllByTestId('composer-mention-highlight');
+      const labels = highlights.map(h => h.textContent);
+      expect(labels).toContain('@Aria');
+      expect(labels).toContain('/review');
+    });
   });
 });

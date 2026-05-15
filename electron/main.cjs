@@ -283,6 +283,19 @@ ipcMain.handle('shell:show-in-folder', async (_event, folderPath) => {
   return true;
 });
 
+ipcMain.handle('system:computer-name', async () => {
+  if (process.platform === 'darwin') {
+    try {
+      const name = execFileSync('/usr/sbin/scutil', ['--get', 'ComputerName'], {
+        encoding: 'utf8',
+        timeout: 1000,
+      }).trim();
+      if (name) return name;
+    } catch {}
+  }
+  return os.hostname().replace(/\.local$/, '');
+});
+
 ipcMain.handle('paths:info', async (_event, paths) => {
   const list = Array.isArray(paths) ? paths : [];
   return Promise.all(list.map(async (filePath) => {

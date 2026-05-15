@@ -59,6 +59,68 @@ function LoadingScreen() {
   );
 }
 
+function FolderAccessWarningDialog({ folderName, onCancel, onConfirm }) {
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, zIndex: 9999,
+      background: 'rgba(28,26,23,0.28)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      padding: 24,
+    }}>
+      <div role="alertdialog" aria-modal="true" aria-labelledby="folder-warn-title" style={{
+        width: 'min(520px, 100%)',
+        background: '#FCFBF7',
+        border: '1px solid #E6DFCC',
+        borderRadius: 10,
+        boxShadow: '0 20px 60px rgba(28,26,23,0.22)',
+        padding: 22,
+      }}>
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, marginBottom: 10 }}>
+          <div aria-hidden="true" style={{
+            width: 32, height: 32, borderRadius: '50%',
+            background: '#FBEEE7', color: '#C4644A',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            flexShrink: 0,
+          }}>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+              <path d="M12 3l10 18H2L12 3z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round"/>
+              <path d="M12 10v5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/>
+              <circle cx="12" cy="18" r="0.9" fill="currentColor"/>
+            </svg>
+          </div>
+          <div id="folder-warn-title" style={{ fontSize: 17, fontWeight: 650, color: '#1C1A17', lineHeight: 1.3 }}>
+            Allow agents to change files in “{folderName}”?
+          </div>
+        </div>
+        <div style={{ fontSize: 13.5, lineHeight: 1.55, color: '#5C544B', marginBottom: 18 }}>
+          This includes all files and subfolders. Agents will be able to read, edit, and permanently delete — and may share file contents with third-party tools they connect to. Be careful about exposing sensitive information.
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+          <button onClick={onCancel} style={{
+            border: '1px solid #D8CFB8',
+            background: '#FCFBF7',
+            color: '#5C544B',
+            borderRadius: 6,
+            padding: '8px 14px',
+            fontSize: 13,
+            cursor: 'pointer',
+          }}>Cancel</button>
+          <button autoFocus onClick={onConfirm} style={{
+            border: '1px solid #1C1A17',
+            background: '#1C1A17',
+            color: '#FCFBF7',
+            borderRadius: 6,
+            padding: '8px 14px',
+            fontSize: 13,
+            fontWeight: 500,
+            cursor: 'pointer',
+          }}>Allow</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function BrowserFolderDialog({ onCancel, onSubmit }) {
   const [path, setPath] = React.useState('');
   const canSubmit = path.trim().length > 0;
@@ -152,6 +214,7 @@ export default function App() {
   const [backendOnline, setBackendOnline] = React.useState(false);
   const [toast, setToast] = React.useState(null);
   const [folderPathDialogOpen, setFolderPathDialogOpen] = React.useState(false);
+  const [pendingFolderPaths, setPendingFolderPaths] = React.useState([]);
   const [pairMobileOpen, setPairMobileOpen] = React.useState(false);
   const [onboardingRequired, setOnboardingRequired] = React.useState(false);
   const [forceOnboarding, setForceOnboarding] = React.useState(false);
@@ -185,8 +248,9 @@ export default function App() {
       setBackendOnline(true);
 
       // Build agents map with display properties
+      const runtimesById = Object.fromEntries(rntms.map(r => [r.id, r]));
       const map = { '__human__': HUMAN_USER };
-      agts.forEach(a => { map[a.id] = displayAgent(a); });
+      agts.forEach(a => { map[a.id] = displayAgent(a, runtimesById); });
       rememberAgents(map);
       setAgentsMap(map);
 
@@ -321,28 +385,43 @@ export default function App() {
     return createdProject;
   }, [agentsList, loadData, showToast]);
 
+  const queueFolderForApproval = React.useCallback((folderPath) => {
+    const trimmed = (folderPath || '').trim();
+    if (!trimmed) return;
+    setPendingFolderPaths(prev => [...prev, trimmed]);
+  }, []);
+
   const handleDroppedProjectFolders = React.useCallback(async (folderPaths) => {
-    let lastCreatedProject = null;
-    for (const folderPath of folderPaths) {
-      const createdProject = await createProjectFromFolderPath(folderPath);
-      if (createdProject?.id) lastCreatedProject = createdProject;
-    }
-    if (lastCreatedProject?.id && route === 'new') {
-      setNewTaskProjectId(lastCreatedProject.id);
-    }
-  }, [createProjectFromFolderPath, route]);
+    for (const folderPath of folderPaths) queueFolderForApproval(folderPath);
+  }, [queueFolderForApproval]);
 
   const handleExistingFolder = React.useCallback(() => {
     if (window.electronAPI?.openFolderDialog) {
-      window.electronAPI.openFolderDialog().then(async (result) => {
+      window.electronAPI.openFolderDialog().then((result) => {
         if (result.canceled || !result.filePaths?.[0]) return;
-        await createProjectFromFolderPath(result.filePaths[0]);
+        queueFolderForApproval(result.filePaths[0]);
       });
       return;
     }
 
     setFolderPathDialogOpen(true);
-  }, [createProjectFromFolderPath]);
+  }, [queueFolderForApproval]);
+
+  const pendingFolderPath = pendingFolderPaths[0] || null;
+  const pendingFolderName = React.useMemo(() => {
+    if (!pendingFolderPath) return '';
+    return pendingFolderPath.split(/[\\/]/).filter(Boolean).pop() || pendingFolderPath;
+  }, [pendingFolderPath]);
+
+  const confirmPendingFolder = React.useCallback(async () => {
+    if (!pendingFolderPath) return;
+    setPendingFolderPaths(prev => prev.slice(1));
+    await createProjectFromFolderPath(pendingFolderPath);
+  }, [pendingFolderPath, createProjectFromFolderPath]);
+
+  const cancelPendingFolders = React.useCallback(() => {
+    setPendingFolderPaths([]);
+  }, []);
 
   const handleCreateProject = React.useCallback(async (name) => {
     const mainAgentId = agentsList[0]?.id || '';
@@ -449,7 +528,15 @@ export default function App() {
     [projects, projectChats, chatStatusOverrides, nowTick]
   );
 
-  const deskName = runtimes[0]?.name || 'Crew44';
+  const [computerName, setComputerName] = React.useState('');
+  React.useEffect(() => {
+    if (window.electronAPI?.getComputerName) {
+      window.electronAPI.getComputerName().then(name => {
+        if (name) setComputerName(name);
+      }).catch(() => {});
+    }
+  }, []);
+  const deskName = computerName || 'Crew44';
 
   const shouldShowOnboarding =
     !loading && backendOnline && (
@@ -487,7 +574,15 @@ export default function App() {
   if (loading) {
     content = <LoadingScreen />;
   } else if (route === 'task' && currentChatId) {
-    content = <TaskView chatId={currentChatId} agentsMap={agentsMap} onStreamingChange={handleChatStreamingChange} />;
+    content = (
+      <TaskView
+        chatId={currentChatId}
+        agentsMap={agentsMap}
+        skills={skills}
+        projects={projects}
+        onStreamingChange={handleChatStreamingChange}
+      />
+    );
   } else if (route === 'new') {
     content = (
       <NewTaskRoute
@@ -528,10 +623,17 @@ export default function App() {
     {folderPathDialogOpen && (
       <BrowserFolderDialog
         onCancel={() => setFolderPathDialogOpen(false)}
-        onSubmit={async (folderPath) => {
+        onSubmit={(folderPath) => {
           setFolderPathDialogOpen(false);
-          await createProjectFromFolderPath(folderPath);
+          queueFolderForApproval(folderPath);
         }}
+      />
+    )}
+    {pendingFolderPath && (
+      <FolderAccessWarningDialog
+        folderName={pendingFolderName}
+        onCancel={cancelPendingFolders}
+        onConfirm={confirmPendingFolder}
       />
     )}
     {pairMobileOpen && <PairMobileDialog onClose={() => setPairMobileOpen(false)} />}

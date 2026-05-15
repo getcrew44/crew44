@@ -48,6 +48,7 @@ func (s *Server) registerMethods() {
 		"projects.update":           s.projectsUpdate,
 		"projects.delete":           s.projectsDelete,
 		"projects.chats.list":       s.projectsChatsList,
+		"projects.files.list":       s.projectsFilesList,
 		"chats.create":              s.chatsCreate,
 		"chats.list":                s.chatsList,
 		"chats.get":                 s.chatsGet,
@@ -391,6 +392,22 @@ func (s *Server) projectsDelete(_ context.Context, _ Peer, params json.RawMessag
 		return nil, err
 	}
 	return map[string]any{"ok": true}, nil
+}
+
+func (s *Server) projectsFilesList(_ context.Context, _ Peer, params json.RawMessage) (any, error) {
+	var body struct {
+		ID    string `json:"id"`
+		Query string `json:"query"`
+		Limit int    `json:"limit"`
+	}
+	if err := decodeParams(params, &body); err != nil {
+		return nil, err
+	}
+	items, err := s.app.ListProjectFiles(body.ID, body.Query, body.Limit)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{"items": items}, nil
 }
 
 func (s *Server) projectsChatsList(_ context.Context, _ Peer, params json.RawMessage) (any, error) {

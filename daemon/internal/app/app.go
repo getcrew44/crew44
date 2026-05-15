@@ -683,6 +683,94 @@ func (a *App) DeleteProject(id string) error {
 	return a.mapError(a.store.DeleteProject(id))
 }
 
+// ProjectFile is a relative entry inside a project's workdir.
+type ProjectFile struct {
+	Path  string `json:"path"`
+	IsDir bool   `json:"is_dir"`
+}
+
+// projectFileSkipDirs are folder names ListProjectFiles will never descend
+// into. They are typically large, generated, or vendored; the composer wants
+// to surface source files, not megabytes of build output.
+var projectFileSkipDirs = map[string]bool{
+	".git":          true,
+	"node_modules":  true,
+	"dist":          true,
+	"build":         true,
+	".next":         true,
+	".cache":        true,
+	".turbo":        true,
+	"target":        true,
+	"vendor":        true,
+	"__pycache__":   true,
+	".venv":         true,
+	"venv":          true,
+	".idea":         true,
+	".vscode":       true,
+	".DS_Store":     true,
+	".pytest_cache": true,
+}
+
+// ListProjectFiles walks the project's workdir and returns up to limit entries
+// whose relative path contains query (case-insensitive). Symlinks are not
+// followed. Hidden top-level entries (other than common dotfile configs) are
+// skipped to keep the suggestion list focused on user-relevant content.
+func (a *App) ListProjectFiles(projectID, query string, limit int) ([]ProjectFile, error) {
+	project, err := a.store.GetProject(projectID)
+	if err != nil {
+		return nil, a.mapError(err)
+	}
+	root := strings.TrimSpace(project.Workdir)
+	if root == "" {
+		return nil, ErrBadRequest
+	}
+	if limit <= 0 || limit > 200 {
+		limit = 50
+	}
+	q := strings.ToLower(strings.TrimSpace(query))
+
+	results := make([]ProjectFile, 0, limit)
+	walk := func() error {
+		return filepath.WalkDir(root, func(absPath string, d os.DirEntry, walkErr error) error {
+			if walkErr != nil {
+				if d != nil && d.IsDir() {
+					return filepath.SkipDir
+				}
+				return nil
+			}
+			if absPath == root {
+				return nil
+			}
+			name := d.Name()
+			if d.IsDir() && projectFileSkipDirs[name] {
+				return filepath.SkipDir
+			}
+			rel, err := filepath.Rel(root, absPath)
+			if err != nil || rel == "" || rel == "." {
+				return nil
+			}
+			rel = filepath.ToSlash(rel)
+			if q == "" || strings.Contains(strings.ToLower(rel), q) {
+				results = append(results, ProjectFile{Path: rel, IsDir: d.IsDir()})
+				if len(results) >= limit {
+					return filepath.SkipAll
+				}
+			}
+			return nil
+		})
+	}
+	if err := walk(); err != nil && !errors.Is(err, filepath.SkipAll) {
+		return nil, err
+	}
+	sort.SliceStable(results, func(i, j int) bool {
+		if results[i].IsDir != results[j].IsDir {
+			return results[i].IsDir
+		}
+		return results[i].Path < results[j].Path
+	})
+	return results, nil
+}
+
 func (a *App) ListProjectChats(projectID string) ([]model.ChatRecord, error) {
 	records, err := a.store.ListChats(projectID)
 	return records, a.mapError(err)

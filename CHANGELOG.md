@@ -2,6 +2,23 @@
 
 All notable changes to this project are documented here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-05-15
+
+### Added
+- **@file and @directory mentions in the composer** — typing `@` after whitespace now suggests files and folders from the project's working directory alongside agent names. Selecting a result inserts the relative path. Backed by a new `projects.files.list` RPC that walks the workdir, skips `.git`, `node_modules`, `dist`, `build`, `target`, `vendor`, and similar generated dirs, and caps results.
+- **`/skill` slash command** — typing `/` after whitespace suggests skills enabled for the agent you're currently directing the message to, so you can append a skill without opening the agent picker.
+- **Folder-access warning dialog** — adding a project from an existing folder (native picker, paste path, or drag-and-drop) now shows a confirmation dialog naming the folder and warning that the crew will be able to read, edit, and permanently delete its contents. Drag-and-drop of multiple folders queues one approval per folder so each can be approved or rejected individually.
+- **Per-agent runtime label in pickers** — both the composer `@` list and the target-agent dropdown now show the agent's runtime (e.g. "Claude Code") beneath the name instead of a generic "Agent" subtitle.
+- **Computer name in sidebar footer** — the app's footer label now shows the user's computer name (via `scutil --get ComputerName` on macOS, hostname fallback) instead of the first detected runtime's name.
+
+### Changed
+- **Sidebar chrome trimmed** — removed the non-functional sidebar toggle/back/forward buttons at the top of the rail and the placeholder Settings gear and Mobile phone buttons in the footer; only the restart-onboarding control remains.
+- **`CustomPicker` selected highlight removed** — list items inside any popover that has a search box no longer paint a beige selected background; the checkmark continues to convey selection, and hover state still highlights.
+- **`Plan ▾` button removed** from the composer toolbar — it was a placeholder with no behavior.
+
+### Fixed
+- **Elapsed timer keeps counting after runtime errors** — `TaskHeader` now freezes the elapsed counter at the timestamp of the most recent `error` event in the chat, so a stuck SSE stream after an agent failure no longer makes the conversation look like it's still running. Event payloads now preserve the original `tsISO` so the freeze point is exact.
+
 ## [0.2.0] - 2026-05-14
 
 ### Added
@@ -25,4 +42,5 @@ All notable changes to this project are documented here. The format is based on 
 - **Codex stdout buffer** — bumped the per-line read limit so larger tool outputs no longer crash the scanner; truncation is bounded at 256 KiB with a clear marker.
 - Pre-landing review safety hardening across the optimizer accept pipeline: stricter ID validation, atomic schedule writes, applied-markdown path-traversal guards, and memory-file size cap enforcement.
 
+[0.3.0]: https://github.com/getcrew44/crew44/-/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/getcrew44/crew44/-/compare/v0.1.0...v0.2.0

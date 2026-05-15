@@ -216,6 +216,84 @@ func TestCreateProjectRequiresRunnableMainAgent(t *testing.T) {
 	}, http.StatusBadRequest, nil)
 }
 
+func TestProjectsFilesListWalksWorkdir(t *testing.T) {
+	env := newTestEnv(t)
+	agentID := defaultAgentID(t, env)
+
+	workdir := t.TempDir()
+	mustMkdir := func(path string) {
+		if err := os.MkdirAll(filepath.Join(workdir, path), 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", path, err)
+		}
+	}
+	mustWrite := func(rel, body string) {
+		full := filepath.Join(workdir, rel)
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatalf("mkdir parent of %s: %v", rel, err)
+		}
+		if err := os.WriteFile(full, []byte(body), 0o644); err != nil {
+			t.Fatalf("write %s: %v", rel, err)
+		}
+	}
+	mustWrite("README.md", "hi")
+	mustWrite("src/main.go", "package main")
+	mustWrite("src/helpers/util.go", "package helpers")
+	mustMkdir("node_modules/skip-me")
+	mustWrite("node_modules/skip-me/index.js", "should be skipped")
+
+	var project map[string]any
+	callRPCStatus(t, env.server, "projects.create", map[string]any{
+		"name":          "Files Project",
+		"workdir":       workdir,
+		"main_agent_id": agentID,
+	}, http.StatusCreated, &project)
+
+	var listResp map[string]any
+	callRPCStatus(t, env.server, "projects.files.list", map[string]any{
+		"id":    project["id"],
+		"query": "",
+		"limit": 50,
+	}, http.StatusOK, &listResp)
+
+	items, _ := listResp["items"].([]any)
+	if len(items) == 0 {
+		t.Fatalf("expected files in listing, got 0")
+	}
+	gotPaths := map[string]bool{}
+	for _, raw := range items {
+		entry, _ := raw.(map[string]any)
+		path, _ := entry["path"].(string)
+		gotPaths[path] = true
+	}
+	for _, want := range []string{"README.md", "src", "src/main.go", "src/helpers/util.go"} {
+		if !gotPaths[want] {
+			t.Fatalf("expected %q in listing, got %v", want, gotPaths)
+		}
+	}
+	for unwanted := range gotPaths {
+		if strings.HasPrefix(unwanted, "node_modules") {
+			t.Fatalf("did not expect node_modules entries, got %q", unwanted)
+		}
+	}
+
+	var filterResp map[string]any
+	callRPCStatus(t, env.server, "projects.files.list", map[string]any{
+		"id":    project["id"],
+		"query": "helper",
+	}, http.StatusOK, &filterResp)
+	filtered, _ := filterResp["items"].([]any)
+	if len(filtered) == 0 {
+		t.Fatalf("expected filtered results for 'helper'")
+	}
+	for _, raw := range filtered {
+		entry, _ := raw.(map[string]any)
+		path, _ := entry["path"].(string)
+		if !strings.Contains(strings.ToLower(path), "helper") {
+			t.Fatalf("filtered result %q did not contain 'helper'", path)
+		}
+	}
+}
+
 func TestCreateAgentRequiresRuntimeID(t *testing.T) {
 	env := newTestEnv(t)
 
