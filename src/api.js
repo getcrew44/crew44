@@ -47,6 +47,11 @@ export async function listProjectChats(projectId) {
   return data.items || [];
 }
 
+export async function listProjectFiles(projectId, query, limit = 50) {
+  const data = await rpc.call('projects.files.list', { id: projectId, query: query || '', limit });
+  return data.items || [];
+}
+
 export async function listAgents() {
   const data = await rpc.call('agents.list');
   return data.items || [];

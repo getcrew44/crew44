@@ -574,7 +574,15 @@ export default function App() {
   if (loading) {
     content = <LoadingScreen />;
   } else if (route === 'task' && currentChatId) {
-    content = <TaskView chatId={currentChatId} agentsMap={agentsMap} onStreamingChange={handleChatStreamingChange} />;
+    content = (
+      <TaskView
+        chatId={currentChatId}
+        agentsMap={agentsMap}
+        skills={skills}
+        projects={projects}
+        onStreamingChange={handleChatStreamingChange}
+      />
+    );
   } else if (route === 'new') {
     content = (
       <NewTaskRoute

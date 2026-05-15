@@ -840,12 +840,19 @@ function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-function mentionBounds(value, cursor) {
+function suggestionBounds(value, cursor) {
   const before = value.slice(0, cursor);
-  const match = before.match(/(^|\s)@([^\s@]*)$/);
-  if (!match) return null;
-  const start = before.length - match[0].length + match[1].length;
-  return { start, end: cursor, query: match[2] || '' };
+  let match = before.match(/(^|\s)@(\S*)$/);
+  if (match) {
+    const start = before.length - match[0].length + match[1].length;
+    return { kind: 'mention', start, end: cursor, query: match[2] || '' };
+  }
+  match = before.match(/(^|\s)\/([^\s/]*)$/);
+  if (match) {
+    const start = before.length - match[0].length + match[1].length;
+    return { kind: 'slash', start, end: cursor, query: match[2] || '' };
+  }
+  return null;
 }
 
 function mentionDeleteBounds(value, cursor, agents) {
@@ -861,25 +868,57 @@ function mentionDeleteBounds(value, cursor, agents) {
   return { start, end: cursor };
 }
 
-function HighlightedComposerText({ text, agents }) {
+function HighlightedComposerText({ text, agents, skills }) {
   if (!text) return null;
+  const tokens = [];
   const names = agents.map(a => a.name).filter(Boolean).sort((a, b) => b.length - a.length);
-  if (names.length === 0) return text;
-
-  const mentionRe = new RegExp(`@(${names.map(escapeRegExp).join('|')})(?=$|\\s|[.,!?;:])`, 'g');
+  if (names.length > 0) {
+    const agentRe = new RegExp(`@(${names.map(escapeRegExp).join('|')})(?=$|\\s|[.,!?;:])`, 'g');
+    let m;
+    while ((m = agentRe.exec(text))) {
+      tokens.push({ start: m.index, end: m.index + m[0].length, value: m[0] });
+    }
+  }
+  // Path-style @-mention: anything starting with @ and containing a slash or
+  // dot is treated as a file reference.
+  const pathRe = /(^|\s)(@[\w./~-][\w./~-]*)/g;
+  let pm;
+  while ((pm = pathRe.exec(text))) {
+    const tokenStart = pm.index + pm[1].length;
+    const value = pm[2];
+    if (!value.includes('/') && !value.includes('.')) continue;
+    tokens.push({ start: tokenStart, end: tokenStart + value.length, value });
+  }
+  const skillNames = (skills || []).map(s => s.name).filter(Boolean).sort((a, b) => b.length - a.length);
+  if (skillNames.length > 0) {
+    const skillRe = new RegExp(`(^|\\s)/(${skillNames.map(escapeRegExp).join('|')})(?=$|\\s|[.,!?;:])`, 'g');
+    let sm;
+    while ((sm = skillRe.exec(text))) {
+      const tokenStart = sm.index + sm[1].length;
+      tokens.push({ start: tokenStart, end: tokenStart + 1 + sm[2].length, value: text.slice(tokenStart, tokenStart + 1 + sm[2].length) });
+    }
+  }
+  tokens.sort((a, b) => a.start - b.start);
+  // Drop overlapping tokens (keep the earlier/longer one).
+  const deduped = [];
+  for (const t of tokens) {
+    const last = deduped[deduped.length - 1];
+    if (last && t.start < last.end) continue;
+    deduped.push(t);
+  }
+  if (deduped.length === 0) return text;
   const parts = [];
   let last = 0;
-  let match;
-  while ((match = mentionRe.exec(text))) {
-    if (match.index > last) parts.push({ kind: 'text', value: text.slice(last, match.index) });
-    parts.push({ kind: 'mention', value: match[0] });
-    last = match.index + match[0].length;
+  for (const t of deduped) {
+    if (t.start > last) parts.push({ kind: 'text', value: text.slice(last, t.start) });
+    parts.push({ kind: 'token', value: t.value });
+    last = t.end;
   }
   if (last < text.length) parts.push({ kind: 'text', value: text.slice(last) });
 
   return (
     <>
-      {parts.map((part, index) => part.kind === 'mention' ? (
+      {parts.map((part, index) => part.kind === 'token' ? (
         <span
           key={index}
           data-testid="composer-mention-highlight"
@@ -972,16 +1011,112 @@ function AgentPicker({ value, onChange, agents }) {
   );
 }
 
-function Composer({ onSend, isStreaming, onCancel, agentsMap, chatId, projectId, defaultTargetAgentId, targetAgentId, onChangeTargetAgent }) {
+function FileGlyph({ isDir }) {
+  return isDir ? (
+    <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
+      <path d="M2.5 5.5a1 1 0 0 1 1-1h3.2l1.4 1.5h6.4a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1H3.5a1 1 0 0 1-1-1v-7.5z"
+        stroke="#807972" strokeWidth="1.1" strokeLinejoin="round" fill="#F4F0E8"/>
+    </svg>
+  ) : (
+    <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
+      <path d="M5 2.5h5.2L13.5 6v9a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V3.5a1 1 0 0 1 1-1z"
+        stroke="#807972" strokeWidth="1.1" strokeLinejoin="round" fill="#FCFBF7"/>
+      <path d="M10.2 2.5V6h3.3" stroke="#807972" strokeWidth="1.1" strokeLinejoin="round" fill="none"/>
+    </svg>
+  );
+}
+
+function SkillGlyph() {
+  return (
+    <div aria-hidden="true" style={{
+      width: 22, height: 22, borderRadius: 5,
+      background: '#EEE6D2', color: '#5C544B',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      fontFamily: MONO_FONT, fontSize: 13, fontWeight: 600,
+    }}>/</div>
+  );
+}
+
+function SuggestionRow({ option, active, onSelect }) {
+  const rowStyle = {
+    display: 'flex', alignItems: 'center', gap: 10,
+    padding: '7px 9px', borderRadius: 7,
+    cursor: 'pointer',
+    background: active ? '#EFE9DB' : 'transparent',
+    color: '#1C1A17', fontSize: 13,
+  };
+  if (option.kind === 'agent') {
+    return (
+      <div role="option" aria-selected={active} onMouseDown={(e) => e.preventDefault()} onClick={onSelect} style={rowStyle}>
+        <Avatar agent={option.agent} size={22} />
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontWeight: 500 }}>{option.agent.name}</div>
+          {option.agent.role && <div style={{ fontSize: 11.5, color: '#807972' }}>{option.agent.role}</div>}
+        </div>
+      </div>
+    );
+  }
+  if (option.kind === 'file') {
+    const segments = option.file.path.split('/');
+    const name = segments.pop();
+    const dir = segments.join('/');
+    return (
+      <div role="option" aria-selected={active} onMouseDown={(e) => e.preventDefault()} onClick={onSelect} style={rowStyle}>
+        <FileGlyph isDir={option.file.is_dir} />
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {name}{option.file.is_dir ? '/' : ''}
+          </div>
+          {dir && (
+            <div style={{ fontSize: 11.5, color: '#807972', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {dir}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+  if (option.kind === 'skill') {
+    return (
+      <div role="option" aria-selected={active} onMouseDown={(e) => e.preventDefault()} onClick={onSelect} style={rowStyle}>
+        <SkillGlyph />
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontWeight: 500 }}>{option.skill.name}</div>
+          <div style={{ fontSize: 11.5, color: '#807972' }}>Skill</div>
+        </div>
+      </div>
+    );
+  }
+  return null;
+}
+
+function Composer({ onSend, isStreaming, onCancel, agentsMap, skills = [], projects = [], chatId, projectId, defaultTargetAgentId, targetAgentId, onChangeTargetAgent }) {
   const [val, setVal] = React.useState(() => readComposerDraft(projectId, chatId).text || '');
   const [cursor, setCursor] = React.useState(0);
   const [activeSuggestion, setActiveSuggestion] = React.useState(0);
+  const [fileMatches, setFileMatches] = React.useState([]);
   const ta = React.useRef(null);
   const agents = React.useMemo(() => (
     Object.values(agentsMap || {})
       .filter(agent => agent?.id !== '__human__' && agent?.name)
       .sort((a, b) => a.name.localeCompare(b.name))
   ), [agentsMap]);
+
+  const currentAgent = React.useMemo(() => {
+    const id = targetAgentId || defaultTargetAgentId;
+    return id ? agentsMap?.[id] : null;
+  }, [agentsMap, targetAgentId, defaultTargetAgentId]);
+
+  const agentSkills = React.useMemo(() => {
+    if (!currentAgent?.skill_ids?.length) return [];
+    const allowed = new Set(currentAgent.skill_ids);
+    return (skills || []).filter(s => allowed.has(s.id));
+  }, [currentAgent, skills]);
+
+  const hasWorkdir = React.useMemo(() => {
+    if (!projectId) return false;
+    return Boolean((projects || []).find(p => p.id === projectId)?.workdir);
+  }, [projects, projectId]);
 
   React.useEffect(() => {
     if (!ta.current) return;
@@ -1004,25 +1139,64 @@ function Composer({ onSend, isStreaming, onCancel, agentsMap, chatId, projectId,
     });
   }, [chatId, projectId, defaultTargetAgentId, targetAgentId, val]);
 
-  const activeMention = React.useMemo(() => mentionBounds(val, cursor), [val, cursor]);
-  const mentionOptions = React.useMemo(() => {
-    if (!activeMention) return [];
-    const q = activeMention.query.toLowerCase();
-    return agents.filter(agent => agent.name.toLowerCase().includes(q)).slice(0, 6);
-  }, [activeMention, agents]);
+  const activeToken = React.useMemo(() => suggestionBounds(val, cursor), [val, cursor]);
+
+  // Fetch matching files (debounced) whenever the active @-token changes.
+  React.useEffect(() => {
+    if (!activeToken || activeToken.kind !== 'mention' || !hasWorkdir || !projectId) {
+      setFileMatches([]);
+      return undefined;
+    }
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      api.listProjectFiles(projectId, activeToken.query, 12)
+        .then(items => { if (!cancelled) setFileMatches(items || []); })
+        .catch(() => { if (!cancelled) setFileMatches([]); });
+    }, 120);
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [activeToken?.kind, activeToken?.query, projectId, hasWorkdir]);
+
+  const suggestionOptions = React.useMemo(() => {
+    if (!activeToken) return [];
+    const q = activeToken.query.toLowerCase();
+    if (activeToken.kind === 'mention') {
+      const agentItems = agents
+        .filter(agent => agent.name.toLowerCase().includes(q))
+        .slice(0, 6)
+        .map(agent => ({ kind: 'agent', key: `agent:${agent.id}`, agent }));
+      const fileItems = (fileMatches || []).map(file => ({
+        kind: 'file',
+        key: `file:${file.path}`,
+        file,
+      }));
+      return [...agentItems, ...fileItems].slice(0, 12);
+    }
+    if (activeToken.kind === 'slash') {
+      return agentSkills
+        .filter(skill => skill.name.toLowerCase().includes(q))
+        .slice(0, 8)
+        .map(skill => ({ kind: 'skill', key: `skill:${skill.id}`, skill }));
+    }
+    return [];
+  }, [activeToken, agents, fileMatches, agentSkills]);
 
   React.useEffect(() => {
     setActiveSuggestion(0);
-  }, [activeMention?.query]);
+  }, [activeToken?.kind, activeToken?.query, suggestionOptions.length]);
 
   const updateCursor = (node) => {
     setCursor(node?.selectionStart ?? val.length);
   };
 
-  const selectMention = (agent) => {
-    if (!activeMention) return;
-    const next = `${val.slice(0, activeMention.start)}@${agent.name} ${val.slice(activeMention.end)}`;
-    const nextCursor = activeMention.start + agent.name.length + 2;
+  const applySuggestion = (option) => {
+    if (!activeToken || !option) return;
+    let inserted;
+    if (option.kind === 'agent') inserted = `@${option.agent.name}`;
+    else if (option.kind === 'file') inserted = `@${option.file.path}`;
+    else if (option.kind === 'skill') inserted = `/${option.skill.name}`;
+    else return;
+    const next = `${val.slice(0, activeToken.start)}${inserted} ${val.slice(activeToken.end)}`;
+    const nextCursor = activeToken.start + inserted.length + 1;
     setVal(next);
     setCursor(nextCursor);
     window.requestAnimationFrame?.(() => {
@@ -1057,20 +1231,20 @@ function Composer({ onSend, isStreaming, onCancel, agentsMap, chatId, projectId,
       }
     }
 
-    if (mentionOptions.length > 0) {
+    if (suggestionOptions.length > 0) {
       if (e.key === 'ArrowDown') {
         e.preventDefault();
-        setActiveSuggestion(i => (i + 1) % mentionOptions.length);
+        setActiveSuggestion(i => (i + 1) % suggestionOptions.length);
         return;
       }
       if (e.key === 'ArrowUp') {
         e.preventDefault();
-        setActiveSuggestion(i => (i - 1 + mentionOptions.length) % mentionOptions.length);
+        setActiveSuggestion(i => (i - 1 + suggestionOptions.length) % suggestionOptions.length);
         return;
       }
       if (e.key === 'Enter' || e.key === 'Tab') {
         e.preventDefault();
-        selectMention(mentionOptions[activeSuggestion] || mentionOptions[0]);
+        applySuggestion(suggestionOptions[activeSuggestion] || suggestionOptions[0]);
         return;
       }
       if (e.key === 'Escape') {
@@ -1095,10 +1269,10 @@ function Composer({ onSend, isStreaming, onCancel, agentsMap, chatId, projectId,
         }}
       >
         <div style={{ position: 'relative' }}>
-          {mentionOptions.length > 0 && (
+          {suggestionOptions.length > 0 && (
             <div
               role="listbox"
-              aria-label="Agent suggestions"
+              aria-label={activeToken?.kind === 'slash' ? 'Skill suggestions' : 'Mention suggestions'}
               style={{
                 position: 'absolute',
                 left: 0,
@@ -1110,29 +1284,17 @@ function Composer({ onSend, isStreaming, onCancel, agentsMap, chatId, projectId,
                 borderRadius: 10,
                 boxShadow: '0 8px 24px rgba(28,26,23,0.14)',
                 padding: 4,
+                maxHeight: 280,
+                overflowY: 'auto',
               }}
             >
-              {mentionOptions.map((agent, index) => (
-                <div
-                  key={agent.id}
-                  role="option"
-                  aria-selected={index === activeSuggestion}
-                  onMouseDown={(e) => e.preventDefault()}
-                  onClick={() => selectMention(agent)}
-                  style={{
-                    display: 'flex', alignItems: 'center', gap: 10,
-                    padding: '7px 9px', borderRadius: 7,
-                    cursor: 'pointer',
-                    background: index === activeSuggestion ? '#EFE9DB' : 'transparent',
-                    color: '#1C1A17', fontSize: 13,
-                  }}
-                >
-                  <Avatar agent={agent} size={22} />
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontWeight: 500 }}>{agent.name}</div>
-                    {agent.role && <div style={{ fontSize: 11.5, color: '#807972' }}>{agent.role}</div>}
-                  </div>
-                </div>
+              {suggestionOptions.map((option, index) => (
+                <SuggestionRow
+                  key={option.key}
+                  option={option}
+                  active={index === activeSuggestion}
+                  onSelect={() => applySuggestion(option)}
+                />
               ))}
             </div>
           )}
@@ -1152,7 +1314,7 @@ function Composer({ onSend, isStreaming, onCancel, agentsMap, chatId, projectId,
                 color: '#1C1A17',
               }}
             >
-              <HighlightedComposerText text={val} agents={agents} />
+              <HighlightedComposerText text={val} agents={agents} skills={agentSkills} />
             </div>
           )}
           <textarea
@@ -1211,7 +1373,7 @@ function Composer({ onSend, isStreaming, onCancel, agentsMap, chatId, projectId,
 
 // ─── TaskView ─────────────────────────────────────────────────────────────────
 
-export default function TaskView({ chatId, agentsMap, onStreamingChange }) {
+export default function TaskView({ chatId, agentsMap, skills = [], projects = [], onStreamingChange }) {
   const [chat, setChat] = React.useState(null);
   const [events, setEvents] = React.useState([]);
   const [isStreaming, setIsStreaming] = React.useState(false);
@@ -1395,6 +1557,8 @@ export default function TaskView({ chatId, agentsMap, onStreamingChange }) {
         isStreaming={isStreaming}
         onCancel={handleCancel}
         agentsMap={agentsMap}
+        skills={skills}
+        projects={projects}
         chatId={chatId}
         projectId={chat?.project_id || ''}
         defaultTargetAgentId={chat?.current_agent_id || chat?.main_agent_id || null}
