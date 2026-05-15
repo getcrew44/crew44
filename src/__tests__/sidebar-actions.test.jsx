@@ -232,3 +232,95 @@ describe('Sidebar navigation', () => {
     expect(setRoute).toHaveBeenCalledWith('task');
   });
 });
+
+// ─── Archive chat flow ────────────────────────────────────────────────────────
+describe('Sidebar archive chat flow', () => {
+  it('hovering a non-running chat reveals the archive (X) button', () => {
+    render(<Sidebar {...baseProps} projects={sampleProjects} onArchiveChat={vi.fn()} />);
+    const session = screen.getByTestId('chat-c1');
+    // Default: shows the age, no archive button.
+    expect(screen.queryByTitle('Archive chat')).not.toBeInTheDocument();
+    expect(session).toHaveTextContent('1h');
+
+    fireEvent.mouseEnter(session);
+    expect(screen.getByTitle('Archive chat')).toBeInTheDocument();
+  });
+
+  it('clicking the X button enters a confirm step without selecting the chat', () => {
+    const onArchive = vi.fn();
+    const onPick = vi.fn();
+    render(
+      <Sidebar
+        {...baseProps}
+        projects={sampleProjects}
+        onPick={onPick}
+        onArchiveChat={onArchive}
+      />
+    );
+
+    const session = screen.getByTestId('chat-c1');
+    fireEvent.mouseEnter(session);
+    fireEvent.click(screen.getByTitle('Archive chat'));
+
+    // Confirm UI is visible.
+    expect(screen.getByText('Archive?')).toBeInTheDocument();
+    expect(screen.getByTitle('Confirm archive')).toBeInTheDocument();
+    // Clicking the row body in the confirm state must NOT pick the chat.
+    fireEvent.click(session);
+    expect(onPick).not.toHaveBeenCalled();
+    expect(onArchive).not.toHaveBeenCalled();
+  });
+
+  it('clicking the confirm checkmark fires onArchiveChat with the chat id', () => {
+    const onArchive = vi.fn();
+    render(
+      <Sidebar
+        {...baseProps}
+        projects={sampleProjects}
+        onArchiveChat={onArchive}
+      />
+    );
+
+    const session = screen.getByTestId('chat-c1');
+    fireEvent.mouseEnter(session);
+    fireEvent.click(screen.getByTitle('Archive chat'));
+    fireEvent.click(screen.getByTitle('Confirm archive'));
+
+    expect(onArchive).toHaveBeenCalledWith('c1');
+  });
+
+  it('mouse leave resets both the hover and confirm states', () => {
+    render(<Sidebar {...baseProps} projects={sampleProjects} onArchiveChat={vi.fn()} />);
+
+    const session = screen.getByTestId('chat-c1');
+    fireEvent.mouseEnter(session);
+    fireEvent.click(screen.getByTitle('Archive chat'));
+    expect(screen.getByText('Archive?')).toBeInTheDocument();
+
+    fireEvent.mouseLeave(session);
+    expect(screen.queryByText('Archive?')).not.toBeInTheDocument();
+    expect(screen.queryByTitle('Archive chat')).not.toBeInTheDocument();
+    // Age label is back.
+    expect(session).toHaveTextContent('1h');
+  });
+
+  it('does not show an archive control for a running session', () => {
+    render(
+      <Sidebar
+        {...baseProps}
+        projects={[{
+          id: 'p1', name: 'first-project', workdir: '/tmp/p1',
+          sessions: [{ id: 'c-run', title: 'streaming', status: 'running', age: '0m' }],
+        }]}
+        onArchiveChat={vi.fn()}
+      />
+    );
+
+    const session = screen.getByTestId('chat-c-run');
+    fireEvent.mouseEnter(session);
+    // Running session shows the progress spinner; the archive UI should not
+    // appear even on hover.
+    expect(screen.getByRole('progressbar', { name: /streaming is waiting/i })).toBeInTheDocument();
+    expect(screen.queryByTitle('Archive chat')).not.toBeInTheDocument();
+  });
+});

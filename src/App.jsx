@@ -218,7 +218,12 @@ export default function App() {
   const [pairMobileOpen, setPairMobileOpen] = React.useState(false);
   const [onboardingRequired, setOnboardingRequired] = React.useState(false);
   const [forceOnboarding, setForceOnboarding] = React.useState(false);
+  const archivedChatIdsRef = React.useRef(new Set());
   const showToast = React.useCallback((msg) => setToast(msg), []);
+
+  const filterArchivedChats = React.useCallback((chats = []) => (
+    chats.filter(chat => chat?.id && !chat.archived_at && !archivedChatIdsRef.current.has(chat.id))
+  ), []);
 
   const markOnboardingDone = React.useCallback(async () => {
     const status = await api.completeOnboarding();
@@ -257,7 +262,7 @@ export default function App() {
       // Fetch chats for each project
       const chatMap = {};
       await Promise.all(projs.map(async p => {
-        try { chatMap[p.id] = await api.listProjectChats(p.id); }
+        try { chatMap[p.id] = filterArchivedChats(await api.listProjectChats(p.id)); }
         catch { chatMap[p.id] = []; }
       }));
       setProjectChats(chatMap);
@@ -267,7 +272,7 @@ export default function App() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [filterArchivedChats]);
 
   React.useEffect(() => { loadData(); }, [loadData]);
 
@@ -299,6 +304,7 @@ export default function App() {
 
   const handleChatStreamingChange = React.useCallback((chatId, isStreaming) => {
     setChatStatusOverrides(prev => {
+      if (isStreaming && archivedChatIdsRef.current.has(chatId)) return prev;
       if (isStreaming) return { ...prev, [chatId]: 'running' };
       if (!prev[chatId]) return prev;
       const next = { ...prev };
@@ -311,6 +317,9 @@ export default function App() {
         setProjectChats(prev => {
           const list = prev[c.project_id];
           if (!list) return prev;
+          if (c.archived_at || archivedChatIdsRef.current.has(c.id)) {
+            return { ...prev, [c.project_id]: list.filter(x => x.id !== c.id) };
+          }
           const idx = list.findIndex(x => x.id === c.id);
           if (idx === -1) return prev;
           const updated = list.slice();
@@ -480,6 +489,13 @@ export default function App() {
     )?.[0];
     try {
       await api.archiveChat(chatId);
+      archivedChatIdsRef.current.add(chatId);
+      setChatStatusOverrides(prev => {
+        if (!prev[chatId]) return prev;
+        const next = { ...prev };
+        delete next[chatId];
+        return next;
+      });
       if (projectId) {
         setProjectChats(prev => ({
           ...prev,
@@ -545,7 +561,7 @@ export default function App() {
       id: p.id,
       name: p.name,
       workdir: p.workdir,
-      sessions: (projectChats[p.id] || []).map(c => ({
+      sessions: (projectChats[p.id] || []).slice().sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at)).map(c => ({
         id: c.id,
         title: c.title || 'Untitled',
         status: chatStatusOverrides[c.id] || c.status || 'active',
