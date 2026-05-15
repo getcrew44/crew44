@@ -22,6 +22,7 @@ func (a *App) PostMessage(chatID, content, targetAgentID string) (model.ChatReco
 	if err != nil {
 		return model.ChatRecord{}, a.mapError(err)
 	}
+	chat = a.reconcileStaleStreamLocked(chat)
 	if chat.Stream.Status == "streaming" {
 		return model.ChatRecord{}, ErrConflict
 	}

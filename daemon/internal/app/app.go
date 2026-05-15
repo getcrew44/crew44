@@ -65,9 +65,6 @@ func New(cfg Config) (*App, error) {
 	if err := app.bootstrapDefaultState(); err != nil {
 		return nil, err
 	}
-	if err := app.recoverInterruptedStreams(); err != nil {
-		return nil, err
-	}
 	if err := app.seedOptimizerProject(); err != nil {
 		return nil, err
 	}
@@ -77,67 +74,80 @@ func New(cfg Config) (*App, error) {
 	return app, nil
 }
 
-// recoverInterruptedStreams flips any chats whose stream is persisted as
-// "streaming" back to "idle" on startup. Such chats represent runs interrupted
-// by the previous daemon's exit (crash, quit, SIGTERM); the goroutine that
-// would have called finishChatSuccess never got the chance. Without this
-// sweep the UI shows them as "still working" forever and the TaskView keeps
-// isStreaming pinned to true while waiting for events that will never come.
-// Appends a terminal error event so the conversation shows what happened.
-func (a *App) recoverInterruptedStreams() error {
-	projects, err := a.store.ListProjects()
+// reconcileStaleStream detects and repairs a chat whose stream.status is
+// persisted as "streaming" but has no live runChat goroutine. Such chats
+// represent runs interrupted by the previous daemon exit (crash, quit,
+// SIGTERM); the goroutine that would have called finishChatSuccess never got
+// the chance. Returns the chat record (possibly updated to "idle"). Idempotent
+// and safe under concurrent callers: serialized on a.mu.
+//
+// Detection signal: PostMessage holds a.mu while it both writes
+// stream.status="streaming" and inserts into a.cancels, so the pair is atomic.
+// status=="streaming" AND no a.cancels entry therefore means a stale record.
+func (a *App) reconcileStaleStream(chat model.ChatRecord) model.ChatRecord {
+	if chat.Stream.Status != "streaming" {
+		return chat
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.reconcileStaleStreamLocked(chat)
+}
+
+func (a *App) reconcileStaleStreamLocked(chat model.ChatRecord) model.ChatRecord {
+	if chat.Stream.Status != "streaming" {
+		return chat
+	}
+	fresh, err := a.store.GetChat(chat.ID)
 	if err != nil {
-		return err
+		return chat
+	}
+	if fresh.Stream.Status != "streaming" {
+		return fresh
+	}
+	if _, active := a.cancels[chat.ID]; active {
+		return fresh
 	}
 	now := time.Now().UTC()
-	for _, project := range projects {
-		chats, err := a.store.ListChats(project.ID)
-		if err != nil {
-			// A single corrupted project must not block daemon startup.
-			log.Printf("recovery: list chats for project %s failed: %v", project.ID, err)
-			continue
-		}
-		for _, chat := range chats {
-			if chat.Stream.Status != "streaming" {
-				continue
-			}
-			actorAgentID := chat.Stream.AgentID
-			if actorAgentID == "" {
-				actorAgentID = chat.CurrentAgentID
-			}
-			payload := model.ErrorPayload{
-				Subtype: "interrupted",
-				Code:    "stream_interrupted",
-				Message: "Daemon restarted while the agent was running. The turn was interrupted.",
-				AgentID: actorAgentID,
-			}
-			if payload.AgentID != "" {
-				if agent, agentErr := a.store.GetAgent(payload.AgentID); agentErr == nil {
-					payload.AgentName = agent.Name
-				}
-			}
-			if _, err := a.store.AppendEvent(chat.ID, model.Event{
-				Type:         model.EventTypeError,
-				TS:           now,
-				TurnID:       chat.ActiveTurnID,
-				ActorAgentID: actorAgentID,
-				Error:        &payload,
-			}); err != nil {
-				// Better to leave the chat unannotated than to skip the status
-				// flip — the user still needs the spinner to stop.
-				log.Printf("recovery: append error event for chat %s failed: %v", chat.ID, err)
-			}
-			chat.Stream.Status = "idle"
-			chat.Stream.LastError = payload.Message
-			chat.Stream.CancelRequested = false
-			chat.PendingHandoverAgentID = ""
-			chat.UpdatedAt = now
-			if err := a.store.SaveChat(chat); err != nil {
-				log.Printf("recovery: save chat %s failed: %v", chat.ID, err)
-			}
+	actorAgentID := fresh.Stream.AgentID
+	if actorAgentID == "" {
+		actorAgentID = fresh.CurrentAgentID
+	}
+	payload := model.ErrorPayload{
+		Subtype: "interrupted",
+		Code:    "stream_interrupted",
+		Message: "Daemon restarted while the agent was running. The turn was interrupted.",
+		AgentID: actorAgentID,
+	}
+	if payload.AgentID != "" {
+		if agent, agentErr := a.store.GetAgent(payload.AgentID); agentErr == nil {
+			payload.AgentName = agent.Name
 		}
 	}
-	return nil
+	if _, err := a.store.AppendEvent(fresh.ID, model.Event{
+		Type:         model.EventTypeError,
+		TS:           now,
+		TurnID:       fresh.ActiveTurnID,
+		ActorAgentID: actorAgentID,
+		Error:        &payload,
+	}); err != nil {
+		log.Printf("reconcile: append error event for chat %s failed: %v", fresh.ID, err)
+	}
+	fresh.Stream.Status = "idle"
+	fresh.Stream.LastError = payload.Message
+	fresh.Stream.CancelRequested = false
+	fresh.PendingHandoverAgentID = ""
+	fresh.UpdatedAt = now
+	if err := a.store.SaveChat(fresh); err != nil {
+		log.Printf("reconcile: save chat %s failed: %v", fresh.ID, err)
+	}
+	return fresh
+}
+
+func (a *App) reconcileStaleStreams(records []model.ChatRecord) []model.ChatRecord {
+	for i := range records {
+		records[i] = a.reconcileStaleStream(records[i])
+	}
+	return records
 }
 
 // seedOptimizerProject ensures the hidden __optimizer__ project exists.
@@ -840,7 +850,10 @@ func (a *App) ListProjectFiles(projectID, query string, limit int) ([]ProjectFil
 
 func (a *App) ListProjectChats(projectID string) ([]model.ChatRecord, error) {
 	records, err := a.store.ListChats(projectID)
-	return records, a.mapError(err)
+	if err != nil {
+		return records, a.mapError(err)
+	}
+	return a.reconcileStaleStreams(records), nil
 }
 
 func (a *App) CreateChat(projectID, title, mainAgentID string) (model.ChatRecord, error) {
@@ -891,14 +904,21 @@ func (a *App) ListChats(projectID string) ([]model.ChatRecord, error) {
 			chats = append(chats, projectChats...)
 		}
 		sort.Slice(chats, func(i, j int) bool { return chats[i].CreatedAt.Before(chats[j].CreatedAt) })
-		return chats, nil
+		return a.reconcileStaleStreams(chats), nil
 	}
-	return a.store.ListChats(projectID)
+	chats, err := a.store.ListChats(projectID)
+	if err != nil {
+		return nil, a.mapError(err)
+	}
+	return a.reconcileStaleStreams(chats), nil
 }
 
 func (a *App) GetChat(id string) (model.ChatRecord, error) {
 	chat, err := a.store.GetChat(id)
-	return chat, a.mapError(err)
+	if err != nil {
+		return chat, a.mapError(err)
+	}
+	return a.reconcileStaleStream(chat), nil
 }
 
 func (a *App) UpdateChat(chat model.ChatRecord) (model.ChatRecord, error) {

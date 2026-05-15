@@ -80,6 +80,22 @@ beforeEach(() => {
 });
 
 describe('App archive chat handler', () => {
+  it('keeps chats whose archived_at is the backend zero time', async () => {
+    api.listProjectChats.mockResolvedValue([
+      {
+        id: 'c-zero',
+        title: 'zero archived chat',
+        status: 'active',
+        updated_at: '2026-05-12T10:00:00Z',
+        archived_at: '0001-01-01T00:00:00Z',
+      },
+    ]);
+
+    render(<App />);
+
+    expect(await screen.findByText('zero archived chat')).toBeInTheDocument();
+  });
+
   it('calls api.archiveChat and removes the chat from the sidebar list', async () => {
     render(<App />);
 

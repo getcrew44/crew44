@@ -479,8 +479,6 @@ function StreamingIndicator({ agentsMap, currentAgentId }) {
   const subject = agent ? `${agent.name} is` : 'Agent is';
   return (
     <div style={{ display: 'flex', gap: 14, padding: '10px 0' }}>
-      {agent && <Avatar agent={agent} size={28} />}
-      {!agent && <div style={{ width: 28, height: 28 }} />}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#A89F92', fontSize: 13 }}>
         <span
           aria-hidden="true"

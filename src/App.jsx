@@ -221,9 +221,14 @@ export default function App() {
   const archivedChatIdsRef = React.useRef(new Set());
   const showToast = React.useCallback((msg) => setToast(msg), []);
 
+  const isArchivedChat = React.useCallback((chat) => {
+    const archivedAt = String(chat?.archived_at || '');
+    return Boolean(archivedAt) && !archivedAt.startsWith('0001-01-01T00:00:00');
+  }, []);
+
   const filterArchivedChats = React.useCallback((chats = []) => (
-    chats.filter(chat => chat?.id && !chat.archived_at && !archivedChatIdsRef.current.has(chat.id))
-  ), []);
+    chats.filter(chat => chat?.id && !isArchivedChat(chat) && !archivedChatIdsRef.current.has(chat.id))
+  ), [isArchivedChat]);
 
   const markOnboardingDone = React.useCallback(async () => {
     const status = await api.completeOnboarding();
@@ -317,7 +322,7 @@ export default function App() {
         setProjectChats(prev => {
           const list = prev[c.project_id];
           if (!list) return prev;
-          if (c.archived_at || archivedChatIdsRef.current.has(c.id)) {
+          if (isArchivedChat(c) || archivedChatIdsRef.current.has(c.id)) {
             return { ...prev, [c.project_id]: list.filter(x => x.id !== c.id) };
           }
           const idx = list.findIndex(x => x.id === c.id);
@@ -328,7 +333,7 @@ export default function App() {
         });
       }).catch(() => {});
     }
-  }, []);
+  }, [isArchivedChat]);
 
   // Reconcile sidebar running indicators for chats the user is not currently
   // viewing. TaskView's stream subscription closes when the user switches
