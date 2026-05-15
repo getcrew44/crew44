@@ -129,7 +129,7 @@ function MenuRow({ icon, label, danger, onClick }) {
   );
 }
 
-function ProjectGroup({ project, openIds, currentChatId, onToggle, onPick, onNewChat, onRename, onShowInFinder, onRemove }) {
+function ProjectGroup({ project, openIds, currentChatId, onToggle, onPick, onNewChat, onRename, onShowInFinder, onRemove, onArchiveChat }) {
   const open = openIds.has(project.id);
   const [hover, setHover] = React.useState(false);
   const [newChatTooltipRect, setNewChatTooltipRect] = React.useState(null);
@@ -282,6 +282,7 @@ function ProjectGroup({ project, openIds, currentChatId, onToggle, onPick, onNew
               session={s}
               active={currentChatId === s.id}
               onPick={() => onPick(s.id)}
+              onArchive={() => onArchiveChat?.(s.id)}
             />
           ))}
           {project.sessions.length === 0 && (
@@ -320,19 +321,33 @@ function SessionProgress({ title }) {
   );
 }
 
-function SessionItem({ session, active, onPick }) {
+function SessionItem({ session, active, onPick, onArchive }) {
   const [hover, setHover] = React.useState(false);
+  const [confirming, setConfirming] = React.useState(false);
+  const isRunning = session.status === 'running';
+
+  const handleMouseLeave = () => {
+    setHover(false);
+    setConfirming(false);
+  };
+
+  const archiveBtn = {
+    border: 'none', background: 'transparent', borderRadius: 4,
+    cursor: 'pointer', display: 'flex', alignItems: 'center',
+    justifyContent: 'center', padding: 0, flexShrink: 0,
+  };
+
   return (
     <div
       data-testid={`chat-${session.id}`}
-      onClick={onPick}
+      onClick={confirming ? undefined : onPick}
       onMouseEnter={() => setHover(true)}
-      onMouseLeave={() => setHover(false)}
+      onMouseLeave={handleMouseLeave}
       style={{
         display: 'flex', alignItems: 'center', gap: 8,
         padding: '5px 10px 5px 32px', margin: '1px 8px',
-        borderRadius: 7, cursor: 'pointer', userSelect: 'none',
-        fontSize: 14,
+        borderRadius: 7, cursor: confirming ? 'default' : 'pointer',
+        userSelect: 'none', fontSize: 14,
         background: active ? '#EBE5D6' : hover ? '#EFE9DB' : 'transparent',
         color: active ? '#1C1A17' : '#3A352E',
         fontWeight: 400,
@@ -341,8 +356,31 @@ function SessionItem({ session, active, onPick }) {
       <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
         {session.title}
       </span>
-      {session.status === 'running' ? (
+      {isRunning ? (
         <SessionProgress title={session.title} />
+      ) : confirming ? (
+        <span style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
+          <span style={{ fontSize: 11.5, color: '#A89F92', whiteSpace: 'nowrap' }}>Archive?</span>
+          <button
+            title="Confirm archive"
+            onClick={(e) => { e.stopPropagation(); onArchive?.(); }}
+            style={{ ...archiveBtn, width: 18, height: 18, color: '#C4644A' }}
+          >
+            <svg width="11" height="11" viewBox="0 0 11 11" fill="none">
+              <path d="M1.5 5.5l3 3 5-5.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
+          </button>
+        </span>
+      ) : hover ? (
+        <button
+          title="Archive chat"
+          onClick={(e) => { e.stopPropagation(); setConfirming(true); }}
+          style={{ ...archiveBtn, width: 18, height: 18, color: '#A89F92' }}
+        >
+          <svg width="11" height="11" viewBox="0 0 11 11" fill="none">
+            <path d="M1.5 1.5l8 8M9.5 1.5l-8 8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+          </svg>
+        </button>
       ) : session.age ? (
         <span style={{ color: '#A89F92', fontSize: 12.5, flexShrink: 0 }}>{session.age}</span>
       ) : null}
@@ -521,7 +559,7 @@ function DropItem({ icon, label, onClick }) {
   );
 }
 
-export default function Sidebar({ projects, currentChatId, route, setRoute, onPick, deskName, backendOnline, onNewProject, onNewChat, onRenameProject, onShowInFinder, onCreateProject, onRemoveProject, onResetOnboarding, onPairMobile, onDroppedProjectFolders }) {
+export default function Sidebar({ projects, currentChatId, route, setRoute, onPick, deskName, backendOnline, onNewProject, onNewChat, onRenameProject, onShowInFinder, onCreateProject, onRemoveProject, onArchiveChat, onResetOnboarding, onPairMobile, onDroppedProjectFolders }) {
   const [openIds, setOpenIds] = React.useState(() => new Set(projects.map(p => p.id)));
   const [creatingProject, setCreatingProject] = React.useState(false);
   const [newProjectName, setNewProjectName] = React.useState('');
@@ -670,6 +708,7 @@ export default function Sidebar({ projects, currentChatId, route, setRoute, onPi
               onRename={onRenameProject}
               onShowInFinder={onShowInFinder}
               onRemove={onRemoveProject}
+              onArchiveChat={onArchiveChat}
             />
           ))
         )}

@@ -484,6 +484,9 @@ func (s *Store) ListChats(projectID string) ([]model.ChatRecord, error) {
 	}
 	chats := make([]model.ChatRecord, 0, len(entries))
 	for _, entry := range entries {
+		if !entry.ArchivedAt.IsZero() {
+			continue
+		}
 		var chat model.ChatRecord
 		if err := readJSON(filepath.Join(s.root, "chats", "chat-"+entry.ChatID, "chat.json"), &chat); err != nil {
 			return nil, err

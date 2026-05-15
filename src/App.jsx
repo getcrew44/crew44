@@ -474,6 +474,27 @@ export default function App() {
     }
   }, [currentChatId, projectChats, loadData, showToast]);
 
+  const handleArchiveChat = React.useCallback(async (chatId) => {
+    const projectId = Object.entries(projectChats).find(([, chats]) =>
+      chats.some(c => c.id === chatId)
+    )?.[0];
+    try {
+      await api.archiveChat(chatId);
+      if (projectId) {
+        setProjectChats(prev => ({
+          ...prev,
+          [projectId]: (prev[projectId] || []).filter(c => c.id !== chatId),
+        }));
+      }
+      if (currentChatId === chatId) {
+        setCurrentChatId(null);
+        setRoute('new');
+      }
+    } catch (err) {
+      showToast(`Failed to archive chat: ${err.message}`);
+    }
+  }, [currentChatId, projectChats, showToast]);
+
   const handleShowInFinder = React.useCallback(async (workdir) => {
     if (!workdir) {
       showToast('No folder path set for this project');
@@ -658,6 +679,7 @@ export default function App() {
         onShowInFinder={handleShowInFinder}
         onCreateProject={handleCreateProject}
         onRemoveProject={handleRemoveProject}
+        onArchiveChat={handleArchiveChat}
         onResetOnboarding={resetOnboarding}
         onPairMobile={() => setPairMobileOpen(true)}
         onDroppedProjectFolders={handleDroppedProjectFolders}
