@@ -216,6 +216,10 @@ func (a *App) runChat(ctx context.Context, chatID, agentID, turnID, prompt strin
 			if errors.Is(err, errChatStoppedAfterError) {
 				return
 			}
+			if errors.Is(err, context.Canceled) || ctx.Err() != nil {
+				a.finishChatCanceled(chatID)
+				return
+			}
 			a.finishChatWithRuntimeError(chatID, currentTurnID, currentAgentID, err.Error())
 			return
 		}
@@ -282,6 +286,20 @@ func (a *App) runChat(ctx context.Context, chatID, agentID, turnID, prompt strin
 }
 
 func (a *App) finishChatSuccess(chatID string) {
+	chat, err := a.store.GetChat(chatID)
+	if err != nil {
+		return
+	}
+	chat.Stream.Status = "idle"
+	chat.Stream.LastError = ""
+	chat.Stream.CancelRequested = false
+	chat.PendingHandoverAgentID = ""
+	chat.UpdatedAt = time.Now().UTC()
+	_ = a.store.SaveChat(chat)
+	a.broker.Publish(chatID, broker.Notification[model.Event]{Kind: broker.KindDone})
+}
+
+func (a *App) finishChatCanceled(chatID string) {
 	chat, err := a.store.GetChat(chatID)
 	if err != nil {
 		return

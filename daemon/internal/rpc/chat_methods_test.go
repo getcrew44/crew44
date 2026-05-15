@@ -1,6 +1,7 @@
 package rpc
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -13,6 +14,24 @@ import (
 	"github.com/getcrew44/crew44/daemon/internal/model"
 	"github.com/getcrew44/crew44/daemon/internal/runtime"
 )
+
+type cancelAwareEngine struct {
+	started chan struct{}
+}
+
+func (e *cancelAwareEngine) Run(ctx context.Context, _ runtime.RunRequest, emit func(runtime.StreamEvent) error) (runtime.RunResult, error) {
+	close(e.started)
+	if err := emit(runtime.StreamEvent{
+		Type: model.EventTypeThinking,
+		Thinking: &model.ThinkingPayload{
+			Content: "working",
+		},
+	}); err != nil {
+		return runtime.RunResult{}, err
+	}
+	<-ctx.Done()
+	return runtime.RunResult{}, ctx.Err()
+}
 
 func TestChatMessageReplayAndEventList(t *testing.T) {
 	env := newTestEnv(t)
@@ -439,6 +458,50 @@ func TestRuntimeErrorEmitsErrorEventAndStops(t *testing.T) {
 	replayText := string(replayBytes)
 	if !strings.Contains(replayText, `"type":"error"`) || !strings.Contains(replayText, `"code":"runtime_error"`) || !strings.Contains(replayText, "runtime exploded") {
 		t.Fatalf("expected runtime error event, got %#v", replay)
+	}
+}
+
+func TestCancelChatDoesNotPersistRuntimeErrorEvent(t *testing.T) {
+	engine := &cancelAwareEngine{started: make(chan struct{})}
+	env := newTestEnvWithEngine(t, engine)
+	callRPCStatus(t, env.server, "runtimes.rescan", nil, http.StatusOK, nil)
+
+	agentID := createAgent(t, env, "Aria")
+	projectID := createProject(t, env, agentID)
+	chatID := createChat(t, env, projectID, agentID)
+
+	callRPCStatus(t, env.server, "chats.messages.post", withRPCParam(t, map[string]any{
+		"content":         "start work",
+		"target_agent_id": agentID,
+	}, "id", chatID), http.StatusAccepted, nil)
+
+	select {
+	case <-engine.started:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for runtime start")
+	}
+
+	callRPCStatus(t, env.server, "chats.cancel", rpcParams("id", chatID), http.StatusOK, nil)
+	waitForChatIdle(t, env.server, chatID)
+
+	var chat map[string]any
+	callRPCStatus(t, env.server, "chats.get", rpcParams("id", chatID), http.StatusOK, &chat)
+	stream := chat["stream"].(map[string]any)
+	if stream["status"] != "idle" || stream["last_error"] != nil {
+		t.Fatalf("expected canceled chat to be idle without last_error, got %#v", chat)
+	}
+
+	var replay map[string]any
+	callRPCStatus(t, env.server, "chats.events.list", rpcParams("chat_id", chatID, "after", int64(0)), http.StatusOK, &replay)
+	replayBytes, _ := json.Marshal(replay)
+	replayText := string(replayBytes)
+	if strings.Contains(replayText, `"type":"error"`) ||
+		strings.Contains(replayText, `"runtime_error"`) ||
+		strings.Contains(replayText, "context canceled") {
+		t.Fatalf("cancel should not persist runtime error event, got %#v", replay)
+	}
+	if !strings.Contains(replayText, `"type":"message"`) || !strings.Contains(replayText, `"type":"thinking"`) {
+		t.Fatalf("cancel should preserve events emitted before cancellation, got %#v", replay)
 	}
 }
 
