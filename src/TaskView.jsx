@@ -6,6 +6,13 @@ import { clearComposerDraft, readComposerDraft, writeComposerDraft } from './dra
 import { AttachmentTray } from './AttachmentChips.jsx';
 import { attachmentsSupported, dedupeAttachments, droppedAttachments, pickAttachments } from './attachments.js';
 import { dataTransferHasFiles } from './dragDrop.js';
+import { primeAudioContext, playDoneSound } from './audio.js';
+
+function isAgentActivityEvent(event) {
+  if (!event) return false;
+  if (event.type === 'message' && event.message?.role === 'user') return false;
+  return Boolean(event.actor_agent_id || event.error?.agent_id);
+}
 
 // ─── Event renderers ──────────────────────────────────────────────────────────
 
@@ -87,7 +94,7 @@ function ThoughtChip({ thought }) {
   );
 }
 
-function MessageEvent({ event, agentsMap, thought }) {
+function MessageEvent({ event, agentsMap, thought, showHeader = true }) {
   const agent = resolveAuthor(event.author, agentsMap) || HUMAN_USER;
   const isUser = agent.kind === 'human';
 
@@ -111,14 +118,18 @@ function MessageEvent({ event, agentsMap, thought }) {
   }
 
   return (
-    <div style={{ display: 'flex', gap: 14, padding: '14px 0' }}>
-      <Avatar agent={agent} size={28} />
+    <div style={{ display: 'flex', gap: 14, padding: showHeader ? '14px 0 2px' : '2px 0' }}>
+      {showHeader
+        ? <Avatar agent={agent} size={28} />
+        : <div style={{ width: 28, flexShrink: 0 }} aria-hidden="true" />}
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontSize: 13.5, marginBottom: 4, display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ fontWeight: 600, color: '#1C1A17' }}>{agent.name}</span>
-          {agent.archived && <DeletedTag />}
-          <span style={{ color: '#A89F92' }}>· {event.time}</span>
-        </div>
+        {showHeader && (
+          <div style={{ fontSize: 13.5, marginBottom: 4, display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ fontWeight: 600, color: '#1C1A17' }}>{agent.name}</span>
+            {agent.archived && <DeletedTag />}
+            <span style={{ color: '#A89F92' }}>· {event.time}</span>
+          </div>
+        )}
         {thought && (
           <div style={{ marginBottom: 8 }}>
             <ThoughtChip thought={thought} />
@@ -132,18 +143,22 @@ function MessageEvent({ event, agentsMap, thought }) {
   );
 }
 
-function ThinkingEvent({ event, agentsMap }) {
+function ThinkingEvent({ event, agentsMap, showHeader = true }) {
   const agent = resolveAuthor(event.author, agentsMap);
   if (!agent || agent.kind !== 'agent') return null;
   return (
-    <div style={{ display: 'flex', gap: 14, padding: '10px 0' }}>
-      <Avatar agent={agent} size={28} />
+    <div style={{ display: 'flex', gap: 14, padding: showHeader ? '10px 0 2px' : '2px 0' }}>
+      {showHeader
+        ? <Avatar agent={agent} size={28} />
+        : <div style={{ width: 28, flexShrink: 0 }} aria-hidden="true" />}
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontSize: 13.5, marginBottom: 4, display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ fontWeight: 600, color: '#1C1A17' }}>{agent.name}</span>
-          {agent.archived && <DeletedTag />}
-          <span style={{ color: '#A89F92' }}>· {event.time}</span>
-        </div>
+        {showHeader && (
+          <div style={{ fontSize: 13.5, marginBottom: 4, display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ fontWeight: 600, color: '#1C1A17' }}>{agent.name}</span>
+            {agent.archived && <DeletedTag />}
+            <span style={{ color: '#A89F92' }}>· {event.time}</span>
+          </div>
+        )}
         <ThoughtChip thought={event} />
       </div>
     </div>
@@ -272,7 +287,7 @@ function ToolEventGutter({ author, time, showHeader, agentsMap, children, testid
   return (
     <div
       data-testid={testid}
-      style={{ display: 'flex', gap: 14, padding: showHeader ? '10px 0' : '2px 0' }}
+      style={{ display: 'flex', gap: 14, padding: showHeader ? '10px 0 2px' : '2px 0' }}
     >
       {showHeader
         ? <Avatar agent={agent} size={28} />
@@ -309,6 +324,7 @@ function ToolEvent({ event, agentsMap, showHeader = true }) {
 // own compact body.
 function ToolGroupEvent({ events, agentsMap, showHeader = true }) {
   const [open, setOpen] = React.useState(false);
+  const mountedLengthRef = React.useRef(events.length);
   const anyError = events.some(e => e.result === 'error');
   const anyPending = events.some(e => e.result === 'pending');
   const status = anyPending ? 'pending' : anyError ? 'error' : 'ok';
@@ -352,7 +368,34 @@ function ToolGroupEvent({ events, agentsMap, showHeader = true }) {
               fontFamily: MONO_FONT, fontSize: 12, color: '#A89F92',
               whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
               flex: 1, minWidth: 0,
-            }}>{events.map(e => e.tool).join(' · ')}</span>
+            }}>{(() => {
+              const groups = [];
+              const indexByName = new Map();
+              for (const { tool } of events) {
+                if (indexByName.has(tool)) {
+                  groups[indexByName.get(tool)].count++;
+                } else {
+                  indexByName.set(tool, groups.length);
+                  groups.push({ name: tool, count: 1 });
+                }
+              }
+              const isLive = events.length > mountedLengthRef.current;
+              return groups.map((g, i) => (
+                <React.Fragment key={g.name}>
+                  {i > 0 && ' · '}
+                  {g.name}
+                  {g.count > 1 && (
+                    <>
+                      {' '}
+                      <span
+                        key={g.count}
+                        style={{ display: 'inline-block', animation: isLive ? 'cw-count-pop .28s ease-out' : undefined }}
+                      >x{g.count}</span>
+                    </>
+                  )}
+                </React.Fragment>
+              ));
+            })()}</span>
           )}
           {open && <span style={{ flex: 1 }} />}
           <ToolStatusChip result={status} />
@@ -413,7 +456,7 @@ function pickRandomGerund(previous) {
   return next;
 }
 
-function StreamingIndicator({ agentsMap, currentAgentId }) {
+function StreamingIndicator({ agentsMap, currentAgentId, showHeader = true }) {
   const agent = currentAgentId ? resolveAuthor(currentAgentId, agentsMap) : null;
   const [word, setWord] = React.useState(() => pickRandomGerund(null));
   React.useEffect(() => {
@@ -425,8 +468,9 @@ function StreamingIndicator({ agentsMap, currentAgentId }) {
   const subject = agent ? `${agent.name} is` : 'Agent is';
   return (
     <div style={{ display: 'flex', gap: 14, padding: '10px 0' }}>
-      {agent && <Avatar agent={agent} size={28} />}
-      {!agent && <div style={{ width: 28, height: 28 }} />}
+      {showHeader && agent
+        ? <Avatar agent={agent} size={28} />
+        : <div style={{ width: 28, flexShrink: 0 }} aria-hidden="true" />}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#A89F92', fontSize: 13 }}>
         <span
           aria-hidden="true"
@@ -458,8 +502,8 @@ function StreamingIndicator({ agentsMap, currentAgentId }) {
 }
 
 function EventRouter({ event, agentsMap, showHeader = true, thought }) {
-  if (event.kind === 'message') return <MessageEvent event={event} agentsMap={agentsMap} thought={thought} />;
-  if (event.kind === 'thinking') return <ThinkingEvent event={event} agentsMap={agentsMap} />;
+  if (event.kind === 'message') return <MessageEvent event={event} agentsMap={agentsMap} thought={thought} showHeader={showHeader} />;
+  if (event.kind === 'thinking') return <ThinkingEvent event={event} agentsMap={agentsMap} showHeader={showHeader} />;
   if (event.kind === 'tool') return <ToolEvent event={event} agentsMap={agentsMap} showHeader={showHeader} />;
   if (event.kind === 'tool_group') return <ToolGroupEvent events={event.events} agentsMap={agentsMap} showHeader={showHeader} />;
   if (event.kind === 'tool_result') return <ToolResultEvent event={event} agentsMap={agentsMap} />;
@@ -488,14 +532,14 @@ function elapsedText(start, end) {
   if (Number.isNaN(startMs)) return '';
   const endMs = end ? new Date(end).getTime() : Date.now();
   let secs = Math.max(0, Math.floor((endMs - startMs) / 1000));
-  if (secs < 60) return `${secs}s`;
   const days = Math.floor(secs / 86400); secs -= days * 86400;
   const hours = Math.floor(secs / 3600); secs -= hours * 3600;
-  const mins = Math.floor(secs / 60);
+  const mins = Math.floor(secs / 60); secs -= mins * 60;
   const parts = [];
   if (days) parts.push(`${days}d`);
   if (hours) parts.push(`${hours}h`);
-  if (mins || (!days && !hours)) parts.push(`${mins}m`);
+  if (mins) parts.push(`${mins}m`);
+  parts.push(`${secs}s`);
   return parts.join(' ');
 }
 
@@ -761,9 +805,10 @@ function renderEventsWithHandovers({ events, agentsMap }) {
   // between two agents (e.g. "@Designer take it from here") should still let
   // us recognize the agent-to-agent handover that follows it.
   let prevAgentActor = null;
-  // Track the previous event's tool author so consecutive tool calls from
-  // the same agent share one header (avatar+name+time) instead of repeating.
-  let prevToolAuthor = null;
+  // Track the last agent whose header (avatar+name+time) was rendered, so
+  // consecutive events from the same agent share one header. Reset on
+  // handovers and user messages (anything that visually breaks the run).
+  let prevDisplayedActor = null;
   const isAgentActor = (id) => id && id !== '__human__';
 
   prepared.forEach((e, i) => {
@@ -791,7 +836,7 @@ function renderEventsWithHandovers({ events, agentsMap }) {
           />
         );
         prevAgentActor = to;
-        prevToolAuthor = null;
+        prevDisplayedActor = null;
       } else if (from && to && from === to) {
         // Still update the actor tracker so subsequent events don't
         // synthesize a fallback divider for the same identity.
@@ -812,10 +857,14 @@ function renderEventsWithHandovers({ events, agentsMap }) {
           agentsMap={agentsMap}
         />
       );
+      prevDisplayedActor = null;
     }
 
-    const isTool = e.kind === 'tool' || e.kind === 'tool_group';
-    const showHeader = !(isTool && prevToolAuthor === actor && actor);
+    // Events that don't display a header (user messages, tool_result) break
+    // the run for visual purposes. Agent events with the same actor as the
+    // previously displayed one suppress their header.
+    const isHeaderless = !isAgentActor(actor) || e.kind === 'tool_result';
+    const showHeader = isHeaderless ? true : prevDisplayedActor !== actor;
     out.push(
       <EventRouter
         key={e._seq ?? i}
@@ -827,9 +876,15 @@ function renderEventsWithHandovers({ events, agentsMap }) {
     );
 
     if (isAgentActor(actor)) prevAgentActor = actor;
-    prevToolAuthor = isTool ? actor : null;
+    if (isHeaderless) {
+      // tool_result keeps the prior header context (it's a continuation of
+      // the same agent's run). User messages break the run.
+      if (!isAgentActor(actor)) prevDisplayedActor = null;
+    } else if (showHeader) {
+      prevDisplayedActor = actor;
+    }
   });
-  return out;
+  return { nodes: out, lastDisplayedActor: prevDisplayedActor };
 }
 
 // ─── Composer ─────────────────────────────────────────────────────────────────
@@ -1100,6 +1155,7 @@ function Composer({ onSend, isStreaming, onCancel, agentsMap, skills = [], proje
   const [cursor, setCursor] = React.useState(0);
   const [activeSuggestion, setActiveSuggestion] = React.useState(0);
   const [fileMatches, setFileMatches] = React.useState([]);
+  const [scrollTop, setScrollTop] = React.useState(0);
   const ta = React.useRef(null);
   const canAttach = attachmentsSupported();
   const agents = React.useMemo(() => (
@@ -1126,8 +1182,11 @@ function Composer({ onSend, isStreaming, onCancel, agentsMap, skills = [], proje
 
   React.useEffect(() => {
     if (!ta.current) return;
+    const prevScrollTop = ta.current.scrollTop;
     ta.current.style.height = 'auto';
     ta.current.style.height = Math.min(160, ta.current.scrollHeight) + 'px';
+    ta.current.scrollTop = prevScrollTop;
+    setScrollTop(ta.current.scrollTop);
   }, [val]);
 
   React.useEffect(() => {
@@ -1335,6 +1394,7 @@ function Composer({ onSend, isStreaming, onCancel, agentsMap, skills = [], proje
               ))}
             </div>
           )}
+          <div style={{ position: 'relative', overflow: 'hidden' }}>
           {val && (
             <div
               aria-hidden="true"
@@ -1349,6 +1409,7 @@ function Composer({ onSend, isStreaming, onCancel, agentsMap, skills = [], proje
                 lineHeight: 1.5,
                 padding: 4,
                 color: '#1C1A17',
+                transform: `translateY(${-scrollTop}px)`,
               }}
             >
               <HighlightedComposerText text={val} agents={agents} skills={agentSkills} />
@@ -1362,6 +1423,7 @@ function Composer({ onSend, isStreaming, onCancel, agentsMap, skills = [], proje
             onSelect={(e) => updateCursor(e.target)}
             onClick={(e) => updateCursor(e.target)}
             onKeyUp={(e) => updateCursor(e.target)}
+            onScroll={(e) => setScrollTop(e.target.scrollTop)}
             onKeyDown={onKeyDown}
             onDragOver={(e) => {
               e.preventDefault();
@@ -1380,6 +1442,7 @@ function Composer({ onSend, isStreaming, onCancel, agentsMap, skills = [], proje
               opacity: isStreaming ? 0.5 : 1,
             }}
           />
+          </div>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6 }}>
           {canAttach && (
@@ -1434,6 +1497,9 @@ export default function TaskView({ chatId, agentsMap, skills = [], projects = []
   const timelineRef = React.useRef(null);
   const lastSeqRef = React.useRef(0);
   const streamCleanupRef = React.useRef(() => {});
+  const waitingForAgentRef = React.useRef(false);
+  const waitingAfterSeqRef = React.useRef(0);
+  const agentActivitySinceSendRef = React.useRef(false);
 
   // Auto-scroll when events change
   React.useLayoutEffect(() => {
@@ -1458,6 +1524,13 @@ export default function TaskView({ chatId, agentsMap, skills = [], projects = []
       id,
       after,
       (event) => {
+        if (
+          waitingForAgentRef.current &&
+          event.seq > waitingAfterSeqRef.current &&
+          isAgentActivityEvent(event)
+        ) {
+          agentActivitySinceSendRef.current = true;
+        }
         setEvents(prev => {
           if (prev.some(e => e._seq === event.seq)) return prev;
           lastSeqRef.current = Math.max(lastSeqRef.current, event.seq);
@@ -1499,7 +1572,19 @@ export default function TaskView({ chatId, agentsMap, skills = [], projects = []
         });
       },
       () => {
+        if (waitingForAgentRef.current && !agentActivitySinceSendRef.current) {
+          api.getChat(id).then(c => {
+            setChat(c);
+            setIsStreaming(c.stream?.status === 'streaming');
+          }).catch(() => {});
+          return;
+        }
         setIsStreaming(false);
+        if (waitingForAgentRef.current) {
+          waitingForAgentRef.current = false;
+          agentActivitySinceSendRef.current = false;
+          playDoneSound();
+        }
         // Refresh chat metadata
         api.getChat(id).then(setChat).catch(() => {});
       },
@@ -1519,10 +1604,16 @@ export default function TaskView({ chatId, agentsMap, skills = [], projects = []
     setEvents([]);
     setError(null);
     lastSeqRef.current = 0;
+    waitingForAgentRef.current = false;
+    waitingAfterSeqRef.current = 0;
+    agentActivitySinceSendRef.current = false;
 
     api.getChat(chatId)
       .then(c => {
         setChat(c);
+        if (c.stream?.status === 'streaming') {
+          waitingForAgentRef.current = true;
+        }
         setIsStreaming(c.stream?.status === 'streaming');
         const defaultTarget = c.current_agent_id || c.main_agent_id || null;
         const draft = readComposerDraft(c.project_id, c.id);
@@ -1541,6 +1632,12 @@ export default function TaskView({ chatId, agentsMap, skills = [], projects = []
   const handleSend = React.useCallback(async (text, attachments = []) => {
     if (!chatId) return;
 
+    // Prime the AudioContext while we still have a user gesture. The
+    // done-sound that fires when the agent finishes is created from a
+    // network event, which Chromium does not count as activation; without
+    // priming here the context stays suspended and produces silence.
+    primeAudioContext();
+
     // Optimistic user message
     const now = new Date();
     const ts = now.getHours() + ':' + String(now.getMinutes()).padStart(2, '0');
@@ -1558,6 +1655,9 @@ export default function TaskView({ chatId, agentsMap, skills = [], projects = []
       // target_agent_id is required by the backend — prefer user-selected, fall back to current/lead
       const effectiveTarget = targetAgentId || chat?.current_agent_id || chat?.main_agent_id;
       await api.postMessage(chatId, text, effectiveTarget, attachments);
+      waitingForAgentRef.current = true;
+      waitingAfterSeqRef.current = lastSeqRef.current;
+      agentActivitySinceSendRef.current = false;
       // Reconnect after the last known seq to get agent response
       connectEventStream(chatId, lastSeqRef.current);
     } catch (err) {
@@ -1570,6 +1670,8 @@ export default function TaskView({ chatId, agentsMap, skills = [], projects = []
     if (!chatId) return;
     try {
       await api.cancelChat(chatId);
+      waitingForAgentRef.current = false;
+      agentActivitySinceSendRef.current = false;
       streamCleanupRef.current();
       setIsStreaming(false);
     } catch (err) {
@@ -1591,13 +1693,22 @@ export default function TaskView({ chatId, agentsMap, skills = [], projects = []
       <div
         ref={timelineRef}
         data-testid="conversation-scroll"
-        style={{ flex: 1, overflow: 'auto', padding: '8px 36px 0' }}
+        style={{ flex: 1, overflow: 'auto', padding: '8px 36px 24px' }}
       >
         <div data-testid="conversation-column" style={conversationColumn}>
-          {renderEventsWithHandovers({ events, agentsMap })}
-          {isStreaming && events.length > 0 && (
-            <StreamingIndicator agentsMap={agentsMap} currentAgentId={chat?.current_agent_id} />
-          )}
+          {(() => {
+            const { nodes, lastDisplayedActor } = renderEventsWithHandovers({ events, agentsMap });
+            const streamingAgentId = chat?.current_agent_id;
+            const showStreamingHeader = lastDisplayedActor !== streamingAgentId;
+            return (
+              <>
+                {nodes}
+                {isStreaming && (
+                  <StreamingIndicator agentsMap={agentsMap} currentAgentId={streamingAgentId} showHeader={showStreamingHeader} />
+                )}
+              </>
+            );
+          })()}
           {events.length === 0 && !isStreaming && (
             <div style={{ paddingTop: 40, color: '#A89F92', fontSize: 13.5, fontStyle: 'italic' }}>
               No events yet.
@@ -1618,7 +1729,7 @@ export default function TaskView({ chatId, agentsMap, skills = [], projects = []
         targetAgentId={targetAgentId}
         onChangeTargetAgent={setTargetAgentId}
       />
-      <style>{`@keyframes pulse { 0%,100%{opacity:.3} 50%{opacity:1} } @keyframes cw-spin { to { transform: rotate(360deg) } } @keyframes wordFadeIn { from { opacity: 0; transform: translateY(2px) } to { opacity: 1; transform: translateY(0) } } @keyframes cw-fade-in { from { opacity: 0 } to { opacity: 1 } } @keyframes cw-expand-in { from { opacity: 0; transform: translateY(-3px) } to { opacity: 1; transform: translateY(0) } } @keyframes cw-type-jump { from { opacity: 0 } to { opacity: 1 } }`}</style>
+      <style>{`@keyframes pulse { 0%,100%{opacity:.3} 50%{opacity:1} } @keyframes cw-spin { to { transform: rotate(360deg) } } @keyframes wordFadeIn { from { opacity: 0; transform: translateY(2px) } to { opacity: 1; transform: translateY(0) } } @keyframes cw-fade-in { from { opacity: 0 } to { opacity: 1 } } @keyframes cw-expand-in { from { opacity: 0; transform: translateY(-3px) } to { opacity: 1; transform: translateY(0) } } @keyframes cw-type-jump { from { opacity: 0 } to { opacity: 1 } } @keyframes cw-count-pop { 0% { transform: scale(1.35); color: #5C544B } 60% { transform: scale(.96); color: #807972 } 100% { transform: scale(1); color: #A89F92 } }`}</style>
     </div>
   );
 }

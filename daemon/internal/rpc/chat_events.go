@@ -21,6 +21,13 @@ func (s *Server) chatsEventsSubscribe(ctx context.Context, conn Peer, params jso
 		return nil, err
 	}
 
+	// Trigger lazy stale-stream recovery before snapshotting events: if the
+	// previous daemon crashed mid-stream, GetChat appends a terminal error
+	// event and flips status to idle, which must land in the replay below.
+	if _, err := s.app.GetChat(body.ChatID); err != nil {
+		return nil, err
+	}
+
 	events, err := s.app.ListEvents(body.ChatID, body.After)
 	if err != nil {
 		return nil, err

@@ -47,11 +47,15 @@ func prepareSkillEnvironment(request RunRequest) (preparedSkillEnvironment, erro
 		if err := writeSkillFiles(filepath.Join(claudeConfigDir, "skills"), request.AgentSkills); err != nil {
 			return preparedSkillEnvironment{}, fmt.Errorf("write claude skills: %w", err)
 		}
+		env := map[string]string{
+			"CLAUDE_CONFIG_DIR": claudeConfigDir,
+			"HOME":              homeDir,
+		}
+		if token := readClaudeOAuthToken(); token != "" {
+			env["CLAUDE_CODE_OAUTH_TOKEN"] = token
+		}
 		return preparedSkillEnvironment{
-			Env: map[string]string{
-				"CLAUDE_CONFIG_DIR": claudeConfigDir,
-				"HOME":              homeDir,
-			},
+			Env:       env,
 			ExtraArgs: []string{"--setting-sources", "user"},
 		}, nil
 	case "codex":

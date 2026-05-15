@@ -162,6 +162,10 @@ export async function deleteChat(id) {
   return rpc.call('chats.delete', { id });
 }
 
+export async function archiveChat(id) {
+  return updateChat(id, { archived_at: new Date().toISOString() });
+}
+
 export async function getChatEvents(id) {
   const data = await rpc.call('chats.events.list', { chat_id: id, after: 0 });
   return data.events || [];

@@ -218,7 +218,17 @@ export default function App() {
   const [pairMobileOpen, setPairMobileOpen] = React.useState(false);
   const [onboardingRequired, setOnboardingRequired] = React.useState(false);
   const [forceOnboarding, setForceOnboarding] = React.useState(false);
+  const archivedChatIdsRef = React.useRef(new Set());
   const showToast = React.useCallback((msg) => setToast(msg), []);
+
+  const isArchivedChat = React.useCallback((chat) => {
+    const archivedAt = String(chat?.archived_at || '');
+    return Boolean(archivedAt) && !archivedAt.startsWith('0001-01-01T00:00:00');
+  }, []);
+
+  const filterArchivedChats = React.useCallback((chats = []) => (
+    chats.filter(chat => chat?.id && !isArchivedChat(chat) && !archivedChatIdsRef.current.has(chat.id))
+  ), [isArchivedChat]);
 
   const markOnboardingDone = React.useCallback(async () => {
     const status = await api.completeOnboarding();
@@ -257,7 +267,7 @@ export default function App() {
       // Fetch chats for each project
       const chatMap = {};
       await Promise.all(projs.map(async p => {
-        try { chatMap[p.id] = await api.listProjectChats(p.id); }
+        try { chatMap[p.id] = filterArchivedChats(await api.listProjectChats(p.id)); }
         catch { chatMap[p.id] = []; }
       }));
       setProjectChats(chatMap);
@@ -267,7 +277,7 @@ export default function App() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [filterArchivedChats]);
 
   React.useEffect(() => { loadData(); }, [loadData]);
 
@@ -299,6 +309,7 @@ export default function App() {
 
   const handleChatStreamingChange = React.useCallback((chatId, isStreaming) => {
     setChatStatusOverrides(prev => {
+      if (isStreaming && archivedChatIdsRef.current.has(chatId)) return prev;
       if (isStreaming) return { ...prev, [chatId]: 'running' };
       if (!prev[chatId]) return prev;
       const next = { ...prev };
@@ -311,6 +322,9 @@ export default function App() {
         setProjectChats(prev => {
           const list = prev[c.project_id];
           if (!list) return prev;
+          if (isArchivedChat(c) || archivedChatIdsRef.current.has(c.id)) {
+            return { ...prev, [c.project_id]: list.filter(x => x.id !== c.id) };
+          }
           const idx = list.findIndex(x => x.id === c.id);
           if (idx === -1) return prev;
           const updated = list.slice();
@@ -319,7 +333,7 @@ export default function App() {
         });
       }).catch(() => {});
     }
-  }, []);
+  }, [isArchivedChat]);
 
   // Reconcile sidebar running indicators for chats the user is not currently
   // viewing. TaskView's stream subscription closes when the user switches
@@ -381,7 +395,10 @@ export default function App() {
       refreshProjects: loadData,
       showToast,
     });
-    if (createdProject?.id) setNewTaskProjectId(createdProject.id);
+    if (createdProject?.id) {
+      setNewTaskProjectId(createdProject.id);
+      setRoute('new');
+    }
     return createdProject;
   }, [agentsList, loadData, showToast]);
 
@@ -436,7 +453,10 @@ export default function App() {
     try {
       const folder = await window.electronAPI.createBlankProjectFolder(name);
       const project = await api.createProject(name, folder.path, mainAgentId);
-      if (project?.id) setNewTaskProjectId(project.id);
+      if (project?.id) {
+        setNewTaskProjectId(project.id);
+        setRoute('new');
+      }
       loadData();
     } catch (err) {
       showToast(`Failed to create project: ${err.message}`);
@@ -467,6 +487,34 @@ export default function App() {
       showToast(`Failed to remove project: ${err.message}`);
     }
   }, [currentChatId, projectChats, loadData, showToast]);
+
+  const handleArchiveChat = React.useCallback(async (chatId) => {
+    const projectId = Object.entries(projectChats).find(([, chats]) =>
+      chats.some(c => c.id === chatId)
+    )?.[0];
+    try {
+      await api.archiveChat(chatId);
+      archivedChatIdsRef.current.add(chatId);
+      setChatStatusOverrides(prev => {
+        if (!prev[chatId]) return prev;
+        const next = { ...prev };
+        delete next[chatId];
+        return next;
+      });
+      if (projectId) {
+        setProjectChats(prev => ({
+          ...prev,
+          [projectId]: (prev[projectId] || []).filter(c => c.id !== chatId),
+        }));
+      }
+      if (currentChatId === chatId) {
+        setCurrentChatId(null);
+        setRoute('new');
+      }
+    } catch (err) {
+      showToast(`Failed to archive chat: ${err.message}`);
+    }
+  }, [currentChatId, projectChats, showToast]);
 
   const handleShowInFinder = React.useCallback(async (workdir) => {
     if (!workdir) {
@@ -518,7 +566,7 @@ export default function App() {
       id: p.id,
       name: p.name,
       workdir: p.workdir,
-      sessions: (projectChats[p.id] || []).map(c => ({
+      sessions: (projectChats[p.id] || []).slice().sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at)).map(c => ({
         id: c.id,
         title: c.title || 'Untitled',
         status: chatStatusOverrides[c.id] || c.status || 'active',
@@ -652,6 +700,7 @@ export default function App() {
         onShowInFinder={handleShowInFinder}
         onCreateProject={handleCreateProject}
         onRemoveProject={handleRemoveProject}
+        onArchiveChat={handleArchiveChat}
         onResetOnboarding={resetOnboarding}
         onPairMobile={() => setPairMobileOpen(true)}
         onDroppedProjectFolders={handleDroppedProjectFolders}

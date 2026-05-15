@@ -121,6 +121,38 @@ describe('TaskView', () => {
     expect(screen.getByTestId('composer-mention-highlight').style.fontWeight).toBe('inherit');
   });
 
+  it('preserves overlay scroll position when auto-resize resets textarea scrollTop', async () => {
+    render(<TaskView chatId="chat-1" agentsMap={agentsMap} />);
+    const input = await screen.findByTestId('composer-input');
+
+    // Simulate content that overflows max height (>160px)
+    Object.defineProperty(input, 'scrollHeight', { configurable: true, get: () => 300 });
+
+    // Track scrollTop — initial value simulates cursor scrolled mid-content
+    let scrollTopValue = 80;
+    Object.defineProperty(input, 'scrollTop', {
+      configurable: true,
+      get: () => scrollTopValue,
+      set: (v) => { scrollTopValue = Math.max(0, v); },
+    });
+
+    // Intercept style.height to simulate browser resetting scrollTop when height='auto'
+    Object.defineProperty(input.style, 'height', {
+      configurable: true,
+      get: () => '',
+      set: (v) => { if (v === 'auto') scrollTopValue = 0; },
+    });
+
+    await act(async () => {
+      fireEvent.change(input, { target: { value: 'a'.repeat(200), selectionStart: 200, selectionEnd: 200 } });
+    });
+
+    // The overlay must translate by the restored scrollTop (80), not the reset 0
+    const overlay = input.previousElementSibling;
+    expect(overlay).not.toBeNull();
+    expect(overlay.style.transform).toBe('translateY(-80px)');
+  });
+
   it('deletes a whole mention when backspacing immediately after it', async () => {
     render(<TaskView chatId="chat-1" agentsMap={agentsMap} />);
 
@@ -343,6 +375,86 @@ describe('TaskView', () => {
     expect(screen.getAllByText('请修复这个问题')).toHaveLength(1);
   });
 
+  it('plays the done sound only after agent activity finishes', async () => {
+    api.streamChatEvents.mockImplementation(() => vi.fn());
+    const originalAudioContext = globalThis.AudioContext;
+    const originalWindowAudioContext = window.AudioContext;
+    const close = vi.fn();
+    const oscillator = {
+      connect: vi.fn(),
+      frequency: { setValueAtTime: vi.fn() },
+      start: vi.fn(),
+      stop: vi.fn(),
+      set onended(fn) {
+        this._onended = fn;
+      },
+    };
+    const audioContext = vi.fn();
+    class FakeAudioContext {
+      constructor() {
+        audioContext();
+        this.currentTime = 0;
+        this.destination = {};
+        this.state = 'running';
+      }
+      resume() {
+        this.state = 'running';
+        return Promise.resolve();
+      }
+      createOscillator() {
+        return oscillator;
+      }
+      createGain() {
+        return {
+          connect: vi.fn(),
+          gain: {
+            setValueAtTime: vi.fn(),
+            exponentialRampToValueAtTime: vi.fn(),
+          },
+        };
+      }
+      close() {
+        close();
+      }
+    }
+    globalThis.AudioContext = FakeAudioContext;
+    window.AudioContext = FakeAudioContext;
+
+    try {
+      render(<TaskView chatId="chat-1" agentsMap={agentsMap} />);
+
+      const input = await screen.findByTestId('composer-input');
+      fireEvent.change(input, { target: { value: '请修复这个问题' } });
+      fireEvent.click(screen.getByTestId('composer-send'));
+
+      await waitFor(() => expect(api.postMessage).toHaveBeenCalledOnce());
+      const runStream = api.streamChatEvents.mock.calls[1];
+
+      await act(async () => {
+        runStream[3]();
+      });
+      // Send-click primes the AudioContext, so construction itself is not the
+      // signal we care about — the oscillator.start call is what plays sound.
+      expect(oscillator.start).not.toHaveBeenCalled();
+
+      await emitEvent(runStream, {
+        seq: 8,
+        type: 'message',
+        ts: '2026-05-12T10:02:00Z',
+        actor_agent_id: 'agent-1',
+        message: { role: 'assistant', content: '修好了' },
+      });
+      await act(async () => {
+        runStream[3]();
+      });
+
+      expect(oscillator.start).toHaveBeenCalledOnce();
+    } finally {
+      globalThis.AudioContext = originalAudioContext;
+      window.AudioContext = originalWindowAudioContext;
+    }
+  });
+
   it('renders a simplified header with id and opened time', async () => {
     render(<TaskView chatId="chat-1" agentsMap={agentsMap} />);
 
@@ -545,7 +657,7 @@ describe('TaskView', () => {
       render(<TaskView chatId="chat-1" agentsMap={agentsMap} />);
 
       // Initial render: 1m elapsed (chat created at 10:00:00, "now" = 10:01:00).
-      await screen.findByText(/elapsed 1m/);
+      await screen.findByText(/elapsed 1m 0s/);
       expect(tickCallbacks.length).toBeGreaterThan(0);
 
       // Advance "now" and fire the captured tick → header should re-render.
@@ -553,7 +665,7 @@ describe('TaskView', () => {
       await act(async () => {
         tickCallbacks.forEach(cb => cb());
       });
-      expect(screen.getByText(/elapsed 2m/)).toBeInTheDocument();
+      expect(screen.getByText(/elapsed 2m 0s/)).toBeInTheDocument();
     } finally {
       intervalSpy.mockRestore();
       dateNowSpy.mockRestore();
@@ -661,7 +773,58 @@ describe('TaskView', () => {
     expect(screen.queryAllByTestId('tool-event-row')).toHaveLength(3);
   });
 
-  it('re-shows the agent header when a non-tool event sits between two tool calls from the same agent', async () => {
+  it('aggregates the tool-group summary by tool name with an x{n} count', async () => {
+    api.streamChatEvents.mockImplementation(() => vi.fn());
+
+    render(<TaskView chatId="chat-1" agentsMap={agentsMap} />);
+    await screen.findByTestId('composer-input');
+
+    const stream = api.streamChatEvents.mock.calls[0];
+    // Bash, Bash, Read, Bash → must collapse to "Bash x3 · Read", not
+    // "Bash · Bash · Read · Bash".
+    const tools = ['Bash', 'Bash', 'Read', 'Bash'];
+    for (let i = 0; i < tools.length; i++) {
+      await emitEvent(stream, {
+        seq: i + 1, type: 'tool_call',
+        ts: `2026-05-12T10:00:0${i}Z`,
+        actor_agent_id: 'agent-1',
+        tool_call: { name: tools[i], input: { command: String(i) } },
+      });
+    }
+
+    const groupRow = await screen.findByTestId('tool-group-row');
+    // Aggregated by name, original first-seen order preserved (Bash before Read).
+    expect(groupRow).toHaveTextContent(/Bash\s*x3\s*·\s*Read/);
+    expect(groupRow).not.toHaveTextContent(/Bash\s*·\s*Bash/);
+  });
+
+  it('restarts the agent header when a user message interrupts a same-agent run', async () => {
+    api.streamChatEvents.mockImplementation(() => vi.fn());
+
+    render(<TaskView chatId="chat-1" agentsMap={agentsMap} />);
+    await screen.findByTestId('composer-input');
+
+    const stream = api.streamChatEvents.mock.calls[0];
+    // Aria → user → Aria. The user turn breaks the run, so Aria's header
+    // must reappear on the second message.
+    await emitEvent(stream, {
+      seq: 1, type: 'message', ts: '2026-05-12T10:00:00Z',
+      actor_agent_id: 'agent-1', message: { role: 'assistant', content: 'first agent reply' },
+    });
+    await emitEvent(stream, {
+      seq: 2, type: 'message', ts: '2026-05-12T10:00:05Z',
+      actor_agent_id: '__human__', message: { role: 'user', content: 'a follow up from me' },
+    });
+    await emitEvent(stream, {
+      seq: 3, type: 'message', ts: '2026-05-12T10:00:10Z',
+      actor_agent_id: 'agent-1', message: { role: 'assistant', content: 'second agent reply' },
+    });
+
+    const column = screen.getByTestId('conversation-column');
+    expect(within(column).getAllByText('Aria')).toHaveLength(2);
+  });
+
+  it('shares a single header across consecutive same-agent events (tool, message, tool)', async () => {
     api.streamChatEvents.mockImplementation(() => vi.fn());
 
     render(<TaskView chatId="chat-1" agentsMap={agentsMap} />);
@@ -684,9 +847,9 @@ describe('TaskView', () => {
     });
 
     await screen.findAllByTestId('tool-event-row');
-    // Aria appears for: first tool row, the message, and the second tool row → 3 headers.
+    // Same agent throughout → only the first event displays Aria's header.
     const column = screen.getByTestId('conversation-column');
-    expect(within(column).getAllByText('Aria')).toHaveLength(3);
+    expect(within(column).getAllByText('Aria')).toHaveLength(1);
   });
 
   it('renders an explicit backend handover event with the right verb and target', async () => {

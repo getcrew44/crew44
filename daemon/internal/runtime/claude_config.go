@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 )
 
 type claudeSettings struct {
@@ -46,6 +48,67 @@ func readSharedClaudeSettings() (claudeSettings, bool, error) {
 		return claudeSettings{}, false, fmt.Errorf("parse claude settings: %w", err)
 	}
 	return settings, true, nil
+}
+
+// readClaudeOAuthToken returns the user's Claude Code access token from the
+// platform-appropriate credential store so the spawned (isolated) claude CLI
+// can authenticate without prompting `/login` again. Returns "" if no
+// credential is found — claude will surface its own "Not logged in" message
+// and the user can run `/login` once. The override CLAUDE_CODE_OAUTH_TOKEN in
+// the daemon process is honored first, mainly for tests.
+func readClaudeOAuthToken() string {
+	if v := os.Getenv("CLAUDE_CODE_OAUTH_TOKEN"); v != "" {
+		return v
+	}
+	switch runtime.GOOS {
+	case "darwin":
+		return readClaudeOAuthTokenFromKeychain()
+	default:
+		return readClaudeOAuthTokenFromFile()
+	}
+}
+
+// readClaudeOAuthTokenFromKeychain reads the OAuth blob claude stored in the
+// macOS login keychain under the "Claude Code-credentials" service and
+// extracts the active access token. Failures (no entry, locked keychain,
+// malformed payload) are treated as "no token" — the caller falls back to
+// letting claude print its own login prompt.
+func readClaudeOAuthTokenFromKeychain() string {
+	cmd := exec.Command("security", "find-generic-password", "-s", "Claude Code-credentials", "-w")
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	var payload struct {
+		ClaudeAiOauth struct {
+			AccessToken string `json:"accessToken"`
+		} `json:"claudeAiOauth"`
+	}
+	if err := json.Unmarshal(out, &payload); err != nil {
+		return ""
+	}
+	return payload.ClaudeAiOauth.AccessToken
+}
+
+// readClaudeOAuthTokenFromFile reads the access token from the file-based
+// credential store that claude uses on Linux/Windows. The file lives at
+// <CLAUDE_CONFIG_DIR>/.credentials.json with the same JSON shape as the macOS
+// keychain blob.
+func readClaudeOAuthTokenFromFile() string {
+	path := filepath.Join(resolveSharedClaudeConfigDir(), ".credentials.json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	var payload struct {
+		ClaudeAiOauth struct {
+			AccessToken string `json:"accessToken"`
+		} `json:"claudeAiOauth"`
+	}
+	if err := json.Unmarshal(data, &payload); err != nil {
+		return ""
+	}
+	return payload.ClaudeAiOauth.AccessToken
 }
 
 func resolveSharedClaudeConfigDir() string {

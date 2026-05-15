@@ -2,6 +2,28 @@
 
 All notable changes to this project are documented here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-05-15
+
+### Added
+- **Archive conversations from the sidebar** — hovering a chat reveals an archive button with inline confirmation; archived chats disappear immediately and are persisted via a new `chats.update` RPC path. Archived state survives reload, and an optimistic-archive cache keeps freshly archived chats from reappearing while subscriptions are still in flight.
+- **Drop a folder onto the sidebar to add a project** — drag-and-drop multiple folders queues one folder-access confirmation per drop, matching the existing folder-pick flow.
+
+### Changed
+- **One agent header per run** — consecutive events from the same agent (message → tool calls → message) now share a single avatar+name+timestamp header instead of repeating it for every event. The header still renders on handovers, user messages, and the first event of each agent's turn.
+- **Tool-call summary aggregates by name** — multiple calls to the same tool collapse to a single `Bash x3` entry in the "Used N tools" row rather than listing `Bash · Bash · Bash`. The count pop-animates on live increments and stays static on replay.
+- **Tighter spacing between agent header and first sub-event** — top-heavy padding (`14px 0 2px` / `10px 0 2px`) so the gap between an agent message and its first tool matches the gap between subsequent tools (~4px instead of ~16px).
+- **Auto-route icon refreshed** and new task auto-opens when a project is added.
+
+### Fixed
+- **Stuck "still working" spinner after daemon restart** — chats whose stream was persisted as `streaming` when the daemon last exited are now lazily flipped back to `idle` on first access (via `GetChat`, `ListChats`, `ListProjectChats`, `PostMessage`, and the `chats.events.subscribe` pre-replay), with a terminal `stream_interrupted` error event appended to the conversation so the UI shows why the run stopped. Detection signal: `stream.status=="streaming"` AND no entry in `a.cancels` under the same `a.mu`. Recovery is idempotent and serialized.
+- **Tool-output reads no longer crash on >64KB lines** — `readJSONL` now bumps `bufio.Scanner`'s buffer to 64MB so chats with large tool results (one observed at 78KB) open instead of erroring on the scanner's default 64KiB cap. Previously this surfaced as the daemon failing to start any time a chat with a large tool output was loaded.
+- **Audio chime actually plays when an agent finishes** — `playDoneSound` used to create a fresh `AudioContext` per call, which Chromium starts in `suspended` state without a recent user gesture. The fix uses a module-level shared context primed synchronously inside `handleSend` (the Send-button click is real activation) and resumes defensively on each play. Errors now log instead of being silently swallowed.
+- **Done sound no longer fires for empty runs** — the chime now gates on actual agent activity since the last Send, so a `chat.done` with no new agent events (canceled run, reconnect-only) stays silent.
+- **`archived_at` zero-time filtering** — `App.jsx` now treats Go's `0001-01-01T00:00:00Z` zero-time as "not archived" instead of as a truthy archived timestamp, so non-archived chats no longer disappear from the sidebar after a fresh `listProjectChats`.
+- **Composer overlay scroll-position preserved** during textarea auto-resize — the height-recalc no longer resets `scrollTop` to 0, so the syntax-highlight overlay stays aligned with the cursor when content overflows the max height.
+- **Streaming indicator shown for empty chats too** — dropped the `events.length > 0` gate so an actually-streaming chat shows the working state instead of a blank pane while replay catches up.
+- **Claude Code login reused in isolated agent runs** — runtime path now reuses the Claude Code session instead of re-authenticating per agent.
+
 ## [0.3.0] - 2026-05-15
 
 ### Added
@@ -42,5 +64,6 @@ All notable changes to this project are documented here. The format is based on 
 - **Codex stdout buffer** — bumped the per-line read limit so larger tool outputs no longer crash the scanner; truncation is bounded at 256 KiB with a clear marker.
 - Pre-landing review safety hardening across the optimizer accept pipeline: stricter ID validation, atomic schedule writes, applied-markdown path-traversal guards, and memory-file size cap enforcement.
 
+[0.4.0]: https://github.com/getcrew44/crew44/-/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/getcrew44/crew44/-/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/getcrew44/crew44/-/compare/v0.1.0...v0.2.0

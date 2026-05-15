@@ -484,6 +484,9 @@ func (s *Store) ListChats(projectID string) ([]model.ChatRecord, error) {
 	}
 	chats := make([]model.ChatRecord, 0, len(entries))
 	for _, entry := range entries {
+		if !entry.ArchivedAt.IsZero() {
+			continue
+		}
 		var chat model.ChatRecord
 		if err := readJSON(filepath.Join(s.root, "chats", "chat-"+entry.ChatID, "chat.json"), &chat); err != nil {
 			return nil, err
@@ -672,7 +675,11 @@ func readJSONL[T any](path string, out *[]T) error {
 	}
 	defer file.Close()
 
+	// Tool-call results in events.jsonl can be much larger than bufio.Scanner's
+	// 64KiB default token size (one observed line was 78KiB). Raise the cap so
+	// large tool outputs don't crash startup-time event reads.
 	scanner := bufio.NewScanner(file)
+	scanner.Buffer(make([]byte, 0, 64*1024), 64*1024*1024)
 	items := make([]T, 0)
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
