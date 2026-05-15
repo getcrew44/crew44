@@ -58,7 +58,7 @@ func (d *appDispatcher) CreateChat(_ context.Context, projectID, title, agentID 
 }
 
 func (d *appDispatcher) PostMessage(_ context.Context, chatID, agentID, content string) error {
-	_, err := d.app.PostMessage(chatID, content, agentID)
+	_, err := d.app.PostMessage(chatID, content, agentID, nil)
 	return err
 }
 

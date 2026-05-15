@@ -14,7 +14,7 @@ import (
 
 var errChatStoppedAfterError = errors.New("chat stopped after error event")
 
-func (a *App) PostMessage(chatID, content, targetAgentID string) (model.ChatRecord, error) {
+func (a *App) PostMessage(chatID, content, targetAgentID string, attachments []model.MessageAttachment) (model.ChatRecord, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
@@ -65,8 +65,9 @@ func (a *App) PostMessage(chatID, content, targetAgentID string) (model.ChatReco
 		TurnID:       turnID,
 		ActorAgentID: targetAgentID,
 		Message: &model.MessagePayload{
-			Role:    model.MessageRoleUser,
-			Content: content,
+			Role:        model.MessageRoleUser,
+			Content:     content,
+			Attachments: attachments,
 		},
 	})
 	if err != nil {
@@ -76,7 +77,7 @@ func (a *App) PostMessage(chatID, content, targetAgentID string) (model.ChatReco
 
 	ctx, cancel := context.WithCancel(context.Background())
 	a.cancels[chatID] = cancel
-	go a.runChat(ctx, chatID, targetAgentID, turnID, content)
+	go a.runChat(ctx, chatID, targetAgentID, turnID, model.AppendAttachmentLinks(content, attachments))
 	return chat, nil
 }
 

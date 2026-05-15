@@ -100,6 +100,58 @@ func TestChatResolvesAgentSkillsIntoRuntimeRequest(t *testing.T) {
 	}
 }
 
+func TestChatMessageAttachmentsPersistAndAppendToRuntimePrompt(t *testing.T) {
+	engine := &captureRunRequestEngine{requests: make(chan runtime.RunRequest, 1)}
+	env := newTestEnvWithEngine(t, engine)
+	callRPCStatus(t, env.server, "runtimes.rescan", nil, http.StatusOK, nil)
+
+	agentID := createAgent(t, env, "Aria")
+	projectID := createProject(t, env, agentID)
+	chatID := createChat(t, env, projectID, agentID)
+	callRPCStatus(t, env.server, "chats.messages.post", withRPCParam(t, map[string]any{
+		"content":         "please inspect",
+		"target_agent_id": agentID,
+		"attachments": []map[string]any{
+			{
+				"display_name": "proxy.txt",
+				"path":         "/Users/mindivelabs/proxy.txt",
+				"kind":         "file",
+			},
+			{
+				"display_name":          "screen.png",
+				"path":                  "/Users/mindivelabs/screen.png",
+				"kind":                  "image",
+				"thumbnail_jpeg_base64": "base64-thumbnail",
+			},
+		},
+	}, "id", chatID), http.StatusAccepted, nil)
+	waitForChatIdle(t, env.server, chatID)
+
+	select {
+	case req := <-engine.requests:
+		if !strings.Contains(req.Prompt, "please inspect\n\nAttachments:") ||
+			!strings.Contains(req.Prompt, "- [proxy.txt](/Users/mindivelabs/proxy.txt)") ||
+			!strings.Contains(req.Prompt, "- [screen.png](/Users/mindivelabs/screen.png)") {
+			t.Fatalf("expected runtime prompt to include markdown attachment links, got %q", req.Prompt)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for runtime request")
+	}
+
+	var replay map[string]any
+	callRPCStatus(t, env.server, "chats.events.list", rpcParams("chat_id", chatID, "after", int64(0)), http.StatusOK, &replay)
+	items := replay["events"].([]any)
+	userEvent := items[0].(map[string]any)
+	message := userEvent["message"].(map[string]any)
+	if message["content"] != "please inspect" {
+		t.Fatalf("expected persisted content to stay clean, got %#v", message["content"])
+	}
+	attachments := message["attachments"].([]any)
+	if len(attachments) != 2 || !strings.Contains(fmt.Sprint(attachments), "base64-thumbnail") {
+		t.Fatalf("expected persisted attachments with thumbnail metadata, got %#v", attachments)
+	}
+}
+
 func TestChatRuntimeCanAnswerFromAttachedSkillOnly(t *testing.T) {
 	engine := skillOnlyAnswerEngine{}
 	env := newTestEnvWithEngine(t, engine)

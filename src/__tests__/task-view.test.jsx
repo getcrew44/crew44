@@ -4,6 +4,7 @@ import TaskView from '../TaskView.jsx';
 import * as api from '../api.js';
 import { writeComposerDraft } from '../draftStore.js';
 import { rememberAgents, __resetSeenAgentsCacheForTests } from '../utils.js';
+import { generateImageThumbnail } from '../thumbnail.js';
 
 vi.mock('../api.js', () => ({
   getChat: vi.fn(),
@@ -11,6 +12,10 @@ vi.mock('../api.js', () => ({
   cancelChat: vi.fn(),
   streamChatEvents: vi.fn(),
   listProjectFiles: vi.fn(),
+}));
+
+vi.mock('../thumbnail.js', () => ({
+  generateImageThumbnail: vi.fn(),
 }));
 
 const agentsMap = {
@@ -52,6 +57,17 @@ beforeEach(() => {
   __resetSeenAgentsCacheForTests();
   window.localStorage.clear();
   vi.clearAllMocks();
+  window.electronAPI = {
+    openFileDialog: vi.fn().mockResolvedValue({ canceled: true, filePaths: [] }),
+    getPathForFile: vi.fn(file => file?.name ? `/Users/me/${file.name}` : ''),
+    getPathInfo: vi.fn().mockImplementation(async (paths) => paths.map(path => ({
+      path,
+      name: path.split('/').pop(),
+      isDirectory: false,
+    }))),
+    readFileDataURL: vi.fn().mockResolvedValue('data:image/png;base64,input-image'),
+  };
+  generateImageThumbnail.mockResolvedValue('thumb-base64');
   api.getChat.mockResolvedValue(chat);
   api.postMessage.mockResolvedValue({ ...chat, stream: { status: 'streaming' } });
   api.cancelChat.mockResolvedValue({});
@@ -117,6 +133,125 @@ describe('TaskView', () => {
     fireEvent.keyDown(input, { key: 'Backspace' });
 
     expect(input).toHaveValue('hhiif dsa321');
+  });
+
+  it('selects an attachment, shows a chip, and sends attachment metadata', async () => {
+    window.electronAPI.openFileDialog.mockResolvedValue({
+      canceled: false,
+      filePaths: ['/Users/me/proxy.txt'],
+    });
+
+    render(<TaskView chatId="chat-1" agentsMap={agentsMap} />);
+
+    const input = await screen.findByTestId('composer-input');
+    fireEvent.change(input, { target: { value: 'please inspect' } });
+    fireEvent.click(screen.getByTestId('composer-attach'));
+
+    expect(await screen.findByTestId('attachment-chip')).toHaveTextContent('proxy.txt');
+    fireEvent.click(screen.getByTestId('composer-send'));
+
+    await waitFor(() => expect(api.postMessage).toHaveBeenCalledOnce());
+    expect(api.postMessage).toHaveBeenCalledWith('chat-1', 'please inspect', 'agent-1', [
+      { display_name: 'proxy.txt', path: '/Users/me/proxy.txt', kind: 'file' },
+    ]);
+  });
+
+  it('accepts dropped file attachments in the composer', async () => {
+    render(<TaskView chatId="chat-1" agentsMap={agentsMap} />);
+
+    const composer = await screen.findByTestId('composer-column');
+    const file = new File(['hello'], 'notes.txt', { type: 'text/plain' });
+    fireEvent.drop(composer, {
+      dataTransfer: {
+        types: ['Files'],
+        items: [{ kind: 'file', getAsFile: () => file }],
+        files: [file],
+      },
+    });
+
+    expect(await screen.findByTestId('attachment-chip')).toHaveTextContent('notes.txt');
+    fireEvent.change(screen.getByTestId('composer-input'), { target: { value: 'from drop' } });
+    fireEvent.click(screen.getByTestId('composer-send'));
+
+    await waitFor(() => expect(api.postMessage).toHaveBeenCalledOnce());
+    expect(api.postMessage).toHaveBeenCalledWith('chat-1', 'from drop', 'agent-1', [
+      { display_name: 'notes.txt', path: '/Users/me/notes.txt', kind: 'file' },
+    ]);
+  });
+
+  it('removes an attachment before sending', async () => {
+    window.electronAPI.openFileDialog.mockResolvedValue({
+      canceled: false,
+      filePaths: ['/Users/me/proxy.txt'],
+    });
+
+    render(<TaskView chatId="chat-1" agentsMap={agentsMap} />);
+
+    await screen.findByTestId('composer-input');
+    fireEvent.click(screen.getByTestId('composer-attach'));
+    expect(await screen.findByTestId('attachment-chip')).toHaveTextContent('proxy.txt');
+
+    fireEvent.click(screen.getByLabelText('Remove proxy.txt'));
+    expect(screen.queryByTestId('attachment-chip')).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByTestId('composer-input'), { target: { value: 'no file' } });
+    fireEvent.click(screen.getByTestId('composer-send'));
+
+    await waitFor(() => expect(api.postMessage).toHaveBeenCalledOnce());
+    expect(api.postMessage).toHaveBeenCalledWith('chat-1', 'no file', 'agent-1', []);
+  });
+
+  it('generates image thumbnails for selected image attachments', async () => {
+    window.electronAPI.openFileDialog.mockResolvedValue({
+      canceled: false,
+      filePaths: ['/Users/me/screen.png'],
+    });
+
+    render(<TaskView chatId="chat-1" agentsMap={agentsMap} />);
+
+    await screen.findByTestId('composer-input');
+    fireEvent.click(screen.getByTestId('composer-attach'));
+
+    await waitFor(() => expect(generateImageThumbnail).toHaveBeenCalledOnce());
+    expect(await screen.findByTestId('attachment-thumbnail')).toHaveAttribute('src', 'data:image/jpeg;base64,thumb-base64');
+
+    fireEvent.click(screen.getByTestId('composer-send'));
+
+    await waitFor(() => expect(api.postMessage).toHaveBeenCalledOnce());
+    expect(api.postMessage).toHaveBeenCalledWith('chat-1', '', 'agent-1', [
+      {
+        display_name: 'screen.png',
+        path: '/Users/me/screen.png',
+        kind: 'image',
+        thumbnail_jpeg_base64: 'thumb-base64',
+      },
+    ]);
+  });
+
+  it('marks image attachments when thumbnail generation fails', async () => {
+    generateImageThumbnail.mockRejectedValueOnce(new Error('bad image'));
+    window.electronAPI.openFileDialog.mockResolvedValue({
+      canceled: false,
+      filePaths: ['/Users/me/screen.png'],
+    });
+
+    render(<TaskView chatId="chat-1" agentsMap={agentsMap} />);
+
+    await screen.findByTestId('composer-input');
+    fireEvent.click(screen.getByTestId('composer-attach'));
+    expect(await screen.findByTestId('attachment-chip')).toHaveTextContent('screen.png');
+
+    fireEvent.click(screen.getByTestId('composer-send'));
+
+    await waitFor(() => expect(api.postMessage).toHaveBeenCalledOnce());
+    expect(api.postMessage).toHaveBeenCalledWith('chat-1', '', 'agent-1', [
+      {
+        display_name: 'screen.png',
+        path: '/Users/me/screen.png',
+        kind: 'image',
+        thumbnail_failed: true,
+      },
+    ]);
   });
 
   it('scrolls the conversation to the bottom when a new message arrives', async () => {
@@ -292,7 +427,7 @@ describe('TaskView', () => {
     fireEvent.click(screen.getByTestId('composer-send'));
 
     await waitFor(() => expect(api.postMessage).toHaveBeenCalledOnce());
-    expect(api.postMessage).toHaveBeenCalledWith('chat-1', 'route this to default', 'agent-2');
+    expect(api.postMessage).toHaveBeenCalledWith('chat-1', 'route this to default', 'agent-2', []);
   });
 
   it('restores unsent chat text and target-agent drafts', async () => {

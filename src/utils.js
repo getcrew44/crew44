@@ -118,12 +118,14 @@ export function mapBackendEvent(event) {
   const tsISO = event.ts || '';
 
   if (event.type === 'message') {
+    const attachments = event.message?.attachments || [];
     return {
       kind: 'message',
       author: event.message?.role === 'user' ? '__human__' : event.actor_agent_id,
       time: ts,
       tsISO,
       body: event.message?.content || '',
+      ...(attachments.length > 0 ? { attachments } : {}),
       _seq: event.seq,
     };
   }

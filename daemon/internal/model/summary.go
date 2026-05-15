@@ -28,7 +28,8 @@ func BuildChatSummary(events []Event) string {
 			state.lastToolIdx = len(state.events)
 		}
 		if event.Type == EventTypeMessage && event.Message != nil && event.Message.Role == MessageRoleUser {
-			state.userMessages = append(state.userMessages, StripAgentHandoverMarkers(event.Message.Content))
+			content := StripAgentHandoverMarkers(event.Message.Content)
+			state.userMessages = append(state.userMessages, AppendAttachmentLinks(content, event.Message.Attachments))
 		}
 		state.events = append(state.events, event)
 	}

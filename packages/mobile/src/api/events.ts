@@ -1,7 +1,7 @@
-import { BackendEvent } from "./types";
+import { BackendEvent, MessageAttachment } from "./types";
 
 export type TimelineItem =
-  | { kind: "message"; seq: number; author: string; role: "user" | "assistant"; content: string; time: string }
+  | { kind: "message"; seq: number; author: string; role: "user" | "assistant"; content: string; attachments?: MessageAttachment[]; time: string }
   | { kind: "thinking"; seq: number; author: string; content: string; time: string }
   | { kind: "tool"; seq: number; author: string; name: string; detail: string; time: string }
   | { kind: "tool_result"; seq: number; author: string; name: string; output: string; time: string }
@@ -23,6 +23,7 @@ export function mapBackendEvent(event: BackendEvent): TimelineItem | null {
       author: event.actor_agent_id,
       role: event.message?.role || "assistant",
       content: event.message?.content || "",
+      attachments: event.message?.attachments || [],
       time
     };
   }

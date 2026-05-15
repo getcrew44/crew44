@@ -84,3 +84,43 @@ func TestBuildChatSummaryKeepsUserAndFinalAssistantMessages(t *testing.T) {
 		t.Fatalf("summary should strip handoff marker, got %q", summary)
 	}
 }
+
+func TestBuildChatSummaryIncludesAttachmentLinksWithoutThumbnailData(t *testing.T) {
+	events := []Event{
+		{
+			Seq:          1,
+			Type:         EventTypeMessage,
+			TurnID:       "turn-1",
+			ActorAgentID: "agent-a",
+			Message: &MessagePayload{
+				Role:    MessageRoleUser,
+				Content: "please inspect",
+				Attachments: []MessageAttachment{
+					{
+						DisplayName: "proxy.txt",
+						Path:        "/Users/mindivelabs/proxy.txt",
+						Kind:        "file",
+					},
+					{
+						DisplayName:      "screen.png",
+						Path:             "/Users/mindivelabs/screen.png",
+						Kind:             "image",
+						ThumbnailJPEGB64: "base64-thumbnail",
+					},
+				},
+			},
+		},
+	}
+
+	summary := BuildChatSummary(events)
+	if !strings.Contains(summary, "User: please inspect\n\nAttachments:") {
+		t.Fatalf("summary should include attachment section after user text, got %q", summary)
+	}
+	if !strings.Contains(summary, "- [proxy.txt](/Users/mindivelabs/proxy.txt)") ||
+		!strings.Contains(summary, "- [screen.png](/Users/mindivelabs/screen.png)") {
+		t.Fatalf("summary should include attachment links, got %q", summary)
+	}
+	if strings.Contains(summary, "base64-thumbnail") {
+		t.Fatalf("summary should not include thumbnail base64, got %q", summary)
+	}
+}

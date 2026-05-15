@@ -167,11 +167,12 @@ export async function getChatEvents(id) {
   return data.events || [];
 }
 
-export async function postMessage(chatId, content, targetAgentId) {
+export async function postMessage(chatId, content, targetAgentId, attachments = []) {
   return rpc.call('chats.messages.post', {
     id: chatId,
     content,
     target_agent_id: targetAgentId || '',
+    attachments,
   });
 }
 
