@@ -4,6 +4,30 @@ import { mapBackendEvent, mergeToolResults, relativeTime, formatTime, HUMAN_USER
 import * as api from './api.js';
 import { clearComposerDraft, readComposerDraft, writeComposerDraft } from './draftStore.js';
 
+function playDoneSound() {
+  try {
+    const ctx = new AudioContext();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(660, ctx.currentTime);
+    osc.frequency.setValueAtTime(880, ctx.currentTime + 0.12);
+    gain.gain.setValueAtTime(0.25, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.5);
+    osc.start(ctx.currentTime);
+    osc.stop(ctx.currentTime + 0.5);
+    osc.onended = () => ctx.close();
+  } catch { /* audio not available */ }
+}
+
+function isAgentActivityEvent(event) {
+  if (!event) return false;
+  if (event.type === 'message' && event.message?.role === 'user') return false;
+  return Boolean(event.actor_agent_id || event.error?.agent_id);
+}
+
 // ─── Event renderers ──────────────────────────────────────────────────────────
 
 function DeletedTag() {
@@ -518,14 +542,14 @@ function elapsedText(start, end) {
   if (Number.isNaN(startMs)) return '';
   const endMs = end ? new Date(end).getTime() : Date.now();
   let secs = Math.max(0, Math.floor((endMs - startMs) / 1000));
-  if (secs < 60) return `${secs}s`;
   const days = Math.floor(secs / 86400); secs -= days * 86400;
   const hours = Math.floor(secs / 3600); secs -= hours * 3600;
-  const mins = Math.floor(secs / 60);
+  const mins = Math.floor(secs / 60); secs -= mins * 60;
   const parts = [];
   if (days) parts.push(`${days}d`);
   if (hours) parts.push(`${hours}h`);
-  if (mins || (!days && !hours)) parts.push(`${mins}m`);
+  if (mins) parts.push(`${mins}m`);
+  parts.push(`${secs}s`);
   return parts.join(' ');
 }
 
@@ -1433,6 +1457,9 @@ export default function TaskView({ chatId, agentsMap, skills = [], projects = []
   const timelineRef = React.useRef(null);
   const lastSeqRef = React.useRef(0);
   const streamCleanupRef = React.useRef(() => {});
+  const waitingForAgentRef = React.useRef(false);
+  const waitingAfterSeqRef = React.useRef(0);
+  const agentActivitySinceSendRef = React.useRef(false);
 
   // Auto-scroll when events change
   React.useLayoutEffect(() => {
@@ -1457,6 +1484,13 @@ export default function TaskView({ chatId, agentsMap, skills = [], projects = []
       id,
       after,
       (event) => {
+        if (
+          waitingForAgentRef.current &&
+          event.seq > waitingAfterSeqRef.current &&
+          isAgentActivityEvent(event)
+        ) {
+          agentActivitySinceSendRef.current = true;
+        }
         setEvents(prev => {
           if (prev.some(e => e._seq === event.seq)) return prev;
           lastSeqRef.current = Math.max(lastSeqRef.current, event.seq);
@@ -1498,7 +1532,19 @@ export default function TaskView({ chatId, agentsMap, skills = [], projects = []
         });
       },
       () => {
+        if (waitingForAgentRef.current && !agentActivitySinceSendRef.current) {
+          api.getChat(id).then(c => {
+            setChat(c);
+            setIsStreaming(c.stream?.status === 'streaming');
+          }).catch(() => {});
+          return;
+        }
         setIsStreaming(false);
+        if (waitingForAgentRef.current) {
+          waitingForAgentRef.current = false;
+          agentActivitySinceSendRef.current = false;
+          playDoneSound();
+        }
         // Refresh chat metadata
         api.getChat(id).then(setChat).catch(() => {});
       },
@@ -1518,6 +1564,9 @@ export default function TaskView({ chatId, agentsMap, skills = [], projects = []
     setEvents([]);
     setError(null);
     lastSeqRef.current = 0;
+    waitingForAgentRef.current = false;
+    waitingAfterSeqRef.current = 0;
+    agentActivitySinceSendRef.current = false;
 
     api.getChat(chatId)
       .then(c => {
@@ -1556,6 +1605,9 @@ export default function TaskView({ chatId, agentsMap, skills = [], projects = []
       // target_agent_id is required by the backend — prefer user-selected, fall back to current/lead
       const effectiveTarget = targetAgentId || chat?.current_agent_id || chat?.main_agent_id;
       await api.postMessage(chatId, text, effectiveTarget);
+      waitingForAgentRef.current = true;
+      waitingAfterSeqRef.current = lastSeqRef.current;
+      agentActivitySinceSendRef.current = false;
       // Reconnect after the last known seq to get agent response
       connectEventStream(chatId, lastSeqRef.current);
     } catch (err) {
@@ -1568,6 +1620,8 @@ export default function TaskView({ chatId, agentsMap, skills = [], projects = []
     if (!chatId) return;
     try {
       await api.cancelChat(chatId);
+      waitingForAgentRef.current = false;
+      agentActivitySinceSendRef.current = false;
       streamCleanupRef.current();
       setIsStreaming(false);
     } catch (err) {
@@ -1593,7 +1647,7 @@ export default function TaskView({ chatId, agentsMap, skills = [], projects = []
       >
         <div data-testid="conversation-column" style={conversationColumn}>
           {renderEventsWithHandovers({ events, agentsMap })}
-          {isStreaming && events.length > 0 && (
+          {isStreaming && (
             <StreamingIndicator agentsMap={agentsMap} currentAgentId={chat?.current_agent_id} />
           )}
           {events.length === 0 && !isStreaming && (
