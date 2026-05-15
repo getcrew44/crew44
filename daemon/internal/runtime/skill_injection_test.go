@@ -143,6 +143,36 @@ func TestPrepareSkillEnvironmentClaudeIsolatesEvenWithoutSkills(t *testing.T) {
 	}
 }
 
+func TestPrepareSkillEnvironmentClaudeInjectsOAuthToken(t *testing.T) {
+	// The spawned claude runs in a fully isolated HOME + CLAUDE_CONFIG_DIR, so
+	// it cannot see the user's keychain entry or .credentials.json file on its
+	// own. The daemon reads the host's token up front and hands it to claude
+	// via CLAUDE_CODE_OAUTH_TOKEN so login is reused without exposing any
+	// shared state directory.
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "host-token-xyz")
+
+	workDir := t.TempDir()
+	envDir := filepath.Join(t.TempDir(), "runtime-env")
+	preparedEnv, err := prepareSkillEnvironment(RunRequest{
+		Runtime:       model.RuntimeRecord{Provider: "claude"},
+		WorkDir:       workDir,
+		RuntimeEnvDir: envDir,
+	})
+	if err != nil {
+		t.Fatalf("prepareSkillEnvironment failed: %v", err)
+	}
+	if got := preparedEnv.Env["CLAUDE_CODE_OAUTH_TOKEN"]; got != "host-token-xyz" {
+		t.Fatalf("expected CLAUDE_CODE_OAUTH_TOKEN to be injected, got %q", got)
+	}
+	if preparedEnv.Env["HOME"] != filepath.Join(envDir, "home") {
+		t.Fatalf("expected isolated HOME, got %#v", preparedEnv.Env)
+	}
+	if preparedEnv.Env["CLAUDE_CONFIG_DIR"] != filepath.Join(envDir, "claude-config") {
+		t.Fatalf("expected isolated CLAUDE_CONFIG_DIR, got %#v", preparedEnv.Env)
+	}
+}
+
+
 func TestPrepareSkillEnvironmentCodexUsesIsolatedHome(t *testing.T) {
 	sharedHome := t.TempDir()
 	t.Setenv("CODEX_HOME", sharedHome)
