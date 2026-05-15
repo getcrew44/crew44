@@ -45,6 +45,7 @@ export interface BackendEvent {
   message?: {
     role: "user" | "assistant";
     content: string;
+    attachments?: MessageAttachment[];
   };
   thinking?: {
     content: string;
@@ -67,4 +68,12 @@ export interface BackendEvent {
     code: string;
     message: string;
   };
+}
+
+export interface MessageAttachment {
+  display_name: string;
+  path: string;
+  kind: "file" | "image" | "folder";
+  thumbnail_jpeg_base64?: string;
+  thumbnail_failed?: boolean;
 }

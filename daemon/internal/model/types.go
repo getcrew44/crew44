@@ -153,8 +153,17 @@ type Event struct {
 }
 
 type MessagePayload struct {
-	Role    MessageRole `json:"role"`
-	Content string      `json:"content"`
+	Role        MessageRole         `json:"role"`
+	Content     string              `json:"content"`
+	Attachments []MessageAttachment `json:"attachments,omitempty"`
+}
+
+type MessageAttachment struct {
+	DisplayName      string `json:"display_name"`
+	Path             string `json:"path"`
+	Kind             string `json:"kind"`
+	ThumbnailJPEGB64 string `json:"thumbnail_jpeg_base64,omitempty"`
+	ThumbnailFailed  bool   `json:"thumbnail_failed,omitempty"`
 }
 
 type ThinkingPayload struct {

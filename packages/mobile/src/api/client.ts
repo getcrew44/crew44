@@ -1,5 +1,5 @@
 import { JsonRpcPeer } from "@/remote/rpc";
-import { Agent, BackendEvent, Chat, ChatIndexEntry, Project } from "./types";
+import { Agent, BackendEvent, Chat, ChatIndexEntry, MessageAttachment, Project } from "./types";
 
 export class CrewApi {
   constructor(private readonly rpc: JsonRpcPeer) {}
@@ -39,11 +39,12 @@ export class CrewApi {
     return data.events || [];
   }
 
-  async postMessage(chatId: string, content: string, targetAgentId: string): Promise<unknown> {
+  async postMessage(chatId: string, content: string, targetAgentId: string, attachments: MessageAttachment[] = []): Promise<unknown> {
     return this.rpc.call("chats.messages.post", {
       id: chatId,
       content,
-      target_agent_id: targetAgentId
+      target_agent_id: targetAgentId,
+      attachments
     });
   }
 

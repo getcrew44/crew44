@@ -32,6 +32,35 @@ function collectDroppedPaths(dataTransfer) {
   return paths;
 }
 
+export function getDroppedFileEntries(dataTransfer) {
+  const entries = [];
+  const seen = new Set();
+
+  const addFile = (file) => {
+    if (!file) return;
+    let filePath = file.path || '';
+    try {
+      filePath ||= window.electronAPI?.getPathForFile?.(file) || '';
+    } catch {
+      filePath = '';
+    }
+    if (!filePath || seen.has(filePath)) return;
+    seen.add(filePath);
+    entries.push({ path: filePath, file });
+  };
+
+  for (const item of Array.from(dataTransfer?.items || [])) {
+    if (item.kind !== 'file') continue;
+    addFile(item.getAsFile?.());
+  }
+
+  for (const file of Array.from(dataTransfer?.files || [])) {
+    addFile(file);
+  }
+
+  return entries;
+}
+
 export async function getDroppedDirectoryPaths(dataTransfer) {
   const paths = collectDroppedPaths(dataTransfer);
   if (paths.length === 0) return [];

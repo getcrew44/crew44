@@ -268,6 +268,16 @@ ipcMain.handle('dialog:open-folder', async () => {
   };
 });
 
+ipcMain.handle('dialog:open-files', async () => {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    properties: ['openFile', 'multiSelections'],
+  });
+  return {
+    canceled: result.canceled,
+    filePaths: result.filePaths,
+  };
+});
+
 ipcMain.handle('project:create-blank-folder', async (_event, name) => {
   const documentsDir = app.getPath('documents');
   const crew44Dir = path.join(documentsDir, 'Crew44');
@@ -294,6 +304,23 @@ ipcMain.handle('system:computer-name', async () => {
     } catch {}
   }
   return os.hostname().replace(/\.local$/, '');
+});
+
+ipcMain.handle('files:read-data-url', async (_event, filePath) => {
+  if (!filePath || typeof filePath !== 'string') return '';
+  const data = await fs.promises.readFile(filePath);
+  const ext = path.extname(filePath).slice(1).toLowerCase();
+  const mimeByExt = {
+    jpg: 'image/jpeg',
+    jpeg: 'image/jpeg',
+    png: 'image/png',
+    gif: 'image/gif',
+    webp: 'image/webp',
+    bmp: 'image/bmp',
+    svg: 'image/svg+xml',
+  };
+  const mime = mimeByExt[ext] || 'application/octet-stream';
+  return `data:${mime};base64,${data.toString('base64')}`;
 });
 
 ipcMain.handle('paths:info', async (_event, paths) => {
