@@ -495,8 +495,21 @@ function elapsedText(start, end) {
   return parts.join(' ');
 }
 
-function TaskHeader({ chat }) {
-  const isStreaming = chat?.stream?.status === 'streaming';
+function TaskHeader({ chat, events }) {
+  // Find the most recent error event — when an agent runtime errors out, the
+  // SSE stream stays open but no useful work is happening, so freeze the
+  // elapsed counter at the error's timestamp.
+  const lastErrorTs = React.useMemo(() => {
+    if (!events?.length) return null;
+    for (let i = events.length - 1; i >= 0; i--) {
+      if (events[i].kind === 'error' && events[i].tsISO) return events[i].tsISO;
+    }
+    return null;
+  }, [events]);
+
+  const streamingFromChat = chat?.stream?.status === 'streaming';
+  const isStreaming = streamingFromChat && !lastErrorTs;
+
   // Tick once per second while running so the elapsed string advances live.
   const [, forceTick] = React.useReducer(x => x + 1, 0);
   React.useEffect(() => {
@@ -507,7 +520,8 @@ function TaskHeader({ chat }) {
   if (!chat) return null;
   const age = relativeTime(chat.created_at);
   const participantCount = chat.participant_agent_ids?.length || 0;
-  const elapsed = elapsedText(chat.created_at, isStreaming ? null : chat.updated_at);
+  const elapsedEnd = isStreaming ? null : (lastErrorTs || chat.updated_at);
+  const elapsed = elapsedText(chat.created_at, elapsedEnd);
 
   const metaItems = [];
   if (participantCount > 1) metaItems.push(`${participantCount} agents`);
@@ -1106,15 +1120,18 @@ function Composer({ onSend, isStreaming, onCancel, agentsMap, chatId, projectId,
                   onMouseDown={(e) => e.preventDefault()}
                   onClick={() => selectMention(agent)}
                   style={{
-                    display: 'flex', alignItems: 'center', gap: 8,
+                    display: 'flex', alignItems: 'center', gap: 10,
                     padding: '7px 9px', borderRadius: 7,
                     cursor: 'pointer',
                     background: index === activeSuggestion ? '#EFE9DB' : 'transparent',
                     color: '#1C1A17', fontSize: 13,
                   }}
                 >
-                  <Avatar agent={agent} size={18} />
-                  <span style={{ fontWeight: 500 }}>{agent.name}</span>
+                  <Avatar agent={agent} size={22} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontWeight: 500 }}>{agent.name}</div>
+                    {agent.role && <div style={{ fontSize: 11.5, color: '#807972' }}>{agent.role}</div>}
+                  </div>
                 </div>
               ))}
             </div>
@@ -1172,7 +1189,6 @@ function Composer({ onSend, isStreaming, onCancel, agentsMap, chatId, projectId,
           {agents.length > 0 && onChangeTargetAgent && (
             <AgentPicker value={targetAgentId} onChange={onChangeTargetAgent} agents={agents} />
           )}
-          <button style={chip}>Plan ▾</button>
           <div style={{ flex: 1 }} />
           <span style={{ fontSize: 11.5, color: '#A89F92' }}>⌘↵ send</span>
           <button
@@ -1356,7 +1372,7 @@ export default function TaskView({ chatId, agentsMap, onStreamingChange }) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: '#FAF5E8' }}>
-      <TaskHeader chat={chat} isStreaming={isStreaming} onCancel={handleCancel} />
+      <TaskHeader chat={chat} events={events} />
       <div
         ref={timelineRef}
         data-testid="conversation-scroll"

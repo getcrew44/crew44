@@ -185,8 +185,9 @@ export default function App() {
       setBackendOnline(true);
 
       // Build agents map with display properties
+      const runtimesById = Object.fromEntries(rntms.map(r => [r.id, r]));
       const map = { '__human__': HUMAN_USER };
-      agts.forEach(a => { map[a.id] = displayAgent(a); });
+      agts.forEach(a => { map[a.id] = displayAgent(a, runtimesById); });
       rememberAgents(map);
       setAgentsMap(map);
 
@@ -449,7 +450,15 @@ export default function App() {
     [projects, projectChats, chatStatusOverrides, nowTick]
   );
 
-  const deskName = runtimes[0]?.name || 'Crew44';
+  const [computerName, setComputerName] = React.useState('');
+  React.useEffect(() => {
+    if (window.electronAPI?.getComputerName) {
+      window.electronAPI.getComputerName().then(name => {
+        if (name) setComputerName(name);
+      }).catch(() => {});
+    }
+  }, []);
+  const deskName = computerName || 'Crew44';
 
   const shouldShowOnboarding =
     !loading && backendOnline && (

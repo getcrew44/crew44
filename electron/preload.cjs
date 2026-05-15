@@ -7,4 +7,5 @@ contextBridge.exposeInMainWorld('electronAPI', {
   showInFinder: (folderPath) => ipcRenderer.invoke('shell:show-in-folder', folderPath),
   getPathForFile: (file) => webUtils.getPathForFile(file),
   getPathInfo: (paths) => ipcRenderer.invoke('paths:info', paths),
+  getComputerName: () => ipcRenderer.invoke('system:computer-name'),
 });

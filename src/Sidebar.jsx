@@ -12,31 +12,6 @@ function TrafficLights() {
   );
 }
 
-function WindowChromeButtons() {
-  const btn = {
-    width: 22, height: 22,
-    display: 'flex', alignItems: 'center', justifyContent: 'center',
-    borderRadius: 5, color: '#807972', cursor: 'pointer',
-    WebkitAppRegion: 'no-drag',
-  };
-  return (
-    <div style={{ display: 'flex', gap: 4, alignItems: 'center', marginLeft: 'auto', WebkitAppRegion: 'no-drag' }}>
-      <div style={btn} title="Toggle sidebar">
-        <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-          <rect x="1.5" y="2.5" width="11" height="9" rx="1.5" stroke="currentColor" strokeWidth="1"/>
-          <line x1="5.5" y1="2.5" x2="5.5" y2="11.5" stroke="currentColor" strokeWidth="1"/>
-        </svg>
-      </div>
-      <div style={btn} title="Back">
-        <svg width="14" height="14" viewBox="0 0 14 14"><path d="M8.5 3L4.5 7l4 4" stroke="currentColor" strokeWidth="1.2" fill="none" strokeLinecap="round" strokeLinejoin="round"/></svg>
-      </div>
-      <div style={btn} title="Forward">
-        <svg width="14" height="14" viewBox="0 0 14 14"><path d="M5.5 3l4 4-4 4" stroke="currentColor" strokeWidth="1.2" fill="none" strokeLinecap="round" strokeLinejoin="round"/></svg>
-      </div>
-    </div>
-  );
-}
-
 function NavItem({ icon, label, active, onClick, testId }) {
   const [hover, setHover] = React.useState(false);
   return (
@@ -629,7 +604,6 @@ export default function Sidebar({ projects, currentChatId, route, setRoute, onPi
         WebkitAppRegion: 'drag',
       }}>
         <TrafficLights />
-        <WindowChromeButtons />
       </div>
 
       {/* Function nav */}
@@ -707,12 +681,10 @@ export default function Sidebar({ projects, currentChatId, route, setRoute, onPi
         display: 'flex', alignItems: 'center', padding: '0 14px',
         gap: 4, flexShrink: 0, background: '#F0EAD8',
       }}>
-        <button style={iconBtnStyle} title="Settings"><Icon name="gear" /></button>
         <span style={{
           flex: 1, fontSize: 14, color: '#5C544B', fontWeight: 400,
           textAlign: 'center', letterSpacing: 0.1,
         }}>{deskName || 'Crew44'}</span>
-        <button style={iconBtnStyle} title="Mobile app"><Icon name="phone" /></button>
         <button
           style={iconBtnStyle}
           title="Restart onboarding"

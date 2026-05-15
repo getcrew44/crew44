@@ -81,13 +81,15 @@ export function resolveAuthor(authorId, agentsMap) {
   };
 }
 
-export function displayAgent(cfg) {
+export function displayAgent(cfg, runtimesById) {
   if (!cfg) return null;
+  const runtime = runtimesById?.[cfg.runtime_id];
+  const role = runtime?.name || cfg.model || 'Agent';
   return {
     id: cfg.id,
     name: cfg.name,
     kind: 'agent',
-    role: cfg.model || 'Agent',
+    role,
     color: agentColor(cfg.id),
     initial: agentInitial(cfg.name),
     // keep all original fields
@@ -113,12 +115,14 @@ function summarizeToolInput(input) {
 
 export function mapBackendEvent(event) {
   const ts = formatTime(event.ts);
+  const tsISO = event.ts || '';
 
   if (event.type === 'message') {
     return {
       kind: 'message',
       author: event.message?.role === 'user' ? '__human__' : event.actor_agent_id,
       time: ts,
+      tsISO,
       body: event.message?.content || '',
       _seq: event.seq,
     };
@@ -128,6 +132,7 @@ export function mapBackendEvent(event) {
       kind: 'thinking',
       author: event.actor_agent_id,
       time: ts,
+      tsISO,
       seconds: 0,
       reasoning: event.thinking?.content || '',
       _seq: event.seq,
@@ -138,6 +143,7 @@ export function mapBackendEvent(event) {
       kind: 'tool',
       author: event.actor_agent_id,
       time: ts,
+      tsISO,
       tool: event.tool_call?.name || 'tool',
       path: summarizeToolInput(event.tool_call?.input),
       result: 'pending',
@@ -149,6 +155,7 @@ export function mapBackendEvent(event) {
       kind: 'tool_result',
       author: event.actor_agent_id,
       time: ts,
+      tsISO,
       name: event.tool_call_result?.name || '',
       output: event.tool_call_result?.output || '',
       _seq: event.seq,
@@ -157,7 +164,7 @@ export function mapBackendEvent(event) {
   if (event.type === 'runtime_session') {
     // Mapped so renderers can skip it explicitly rather than silently
     // dropping at the SSE boundary.
-    return { kind: 'runtime_session', author: event.actor_agent_id, time: ts, _seq: event.seq };
+    return { kind: 'runtime_session', author: event.actor_agent_id, time: ts, tsISO, _seq: event.seq };
   }
   if (event.type === 'handover') {
     // Backend convention: Event.actor_agent_id is the source agent (the one
@@ -166,6 +173,7 @@ export function mapBackendEvent(event) {
       kind: 'handover',
       author: event.actor_agent_id,
       time: ts,
+      tsISO,
       subtype: event.handover?.subtype || 'delegate',
       agent_id: event.actor_agent_id,
       target_agent_id: event.handover?.agent_id || '',
@@ -179,6 +187,7 @@ export function mapBackendEvent(event) {
       kind: 'error',
       author: event.actor_agent_id,
       time: ts,
+      tsISO,
       subtype: event.error?.subtype || 'error',
       code: event.error?.code || '',
       message: event.error?.message || '',
