@@ -3,6 +3,9 @@ import { Avatar, RichText, UI_FONT, MONO_FONT } from './components.jsx';
 import { mapBackendEvent, mergeToolResults, relativeTime, formatTime, HUMAN_USER, resolveAuthor } from './utils.js';
 import * as api from './api.js';
 import { clearComposerDraft, readComposerDraft, writeComposerDraft } from './draftStore.js';
+import { AttachmentTray } from './AttachmentChips.jsx';
+import { attachmentsSupported, dedupeAttachments, droppedAttachments, pickAttachments } from './attachments.js';
+import { dataTransferHasFiles } from './dragDrop.js';
 
 // Shared AudioContext — must be primed during a user gesture (Send click)
 // because Chromium autoplay policy starts contexts in "suspended" state
@@ -161,6 +164,7 @@ function MessageEvent({ event, agentsMap, thought, showHeader = true }) {
           fontFamily: UI_FONT,
         }}>
           <RichText text={event.body} />
+          <AttachmentTray attachments={event.attachments} />
         </div>
       </div>
     );
@@ -1198,11 +1202,13 @@ function SuggestionRow({ option, active, onSelect }) {
 
 function Composer({ onSend, isStreaming, onCancel, agentsMap, skills = [], projects = [], chatId, projectId, defaultTargetAgentId, targetAgentId, onChangeTargetAgent }) {
   const [val, setVal] = React.useState(() => readComposerDraft(projectId, chatId).text || '');
+  const [attachments, setAttachments] = React.useState([]);
   const [cursor, setCursor] = React.useState(0);
   const [activeSuggestion, setActiveSuggestion] = React.useState(0);
   const [fileMatches, setFileMatches] = React.useState([]);
   const [scrollTop, setScrollTop] = React.useState(0);
   const ta = React.useRef(null);
+  const canAttach = attachmentsSupported();
   const agents = React.useMemo(() => (
     Object.values(agentsMap || {})
       .filter(agent => agent?.id !== '__human__' && agent?.name)
@@ -1238,6 +1244,7 @@ function Composer({ onSend, isStreaming, onCancel, agentsMap, skills = [], proje
     if (!chatId || !projectId) return;
     const draft = readComposerDraft(projectId, chatId);
     setVal(draft.text || '');
+    setAttachments([]);
     if (draft.targetAgentId) onChangeTargetAgent?.(draft.targetAgentId);
   }, [chatId, projectId, onChangeTargetAgent]);
 
@@ -1315,12 +1322,35 @@ function Composer({ onSend, isStreaming, onCancel, agentsMap, skills = [], proje
     });
   };
 
+  const addAttachments = React.useCallback((nextAttachments) => {
+    if (!nextAttachments?.length) return;
+    setAttachments(current => dedupeAttachments(current, nextAttachments));
+  }, []);
+
+  const chooseAttachments = React.useCallback(async () => {
+    if (!canAttach || isStreaming) return;
+    addAttachments(await pickAttachments());
+  }, [addAttachments, canAttach, isStreaming]);
+
+  const removeAttachment = React.useCallback((path) => {
+    setAttachments(current => current.filter(attachment => attachment.path !== path));
+  }, []);
+
+  const handleDrop = React.useCallback(async (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!canAttach || isStreaming || !dataTransferHasFiles(e.dataTransfer)) return;
+    addAttachments(await droppedAttachments(e.dataTransfer));
+  }, [addAttachments, canAttach, isStreaming]);
+
   const send = () => {
     const text = val.trim();
-    if (!text || isStreaming) return;
+    if ((!text && attachments.length === 0) || isStreaming) return;
+    const outgoingAttachments = attachments;
     setVal('');
+    setAttachments([]);
     if (chatId && projectId) clearComposerDraft(projectId, chatId);
-    onSend(text);
+    onSend(text, outgoingAttachments);
   };
 
   const onKeyDown = (e) => {
@@ -1366,18 +1396,25 @@ function Composer({ onSend, isStreaming, onCancel, agentsMap, skills = [], proje
     if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); send(); }
   };
 
-  const canSend = Boolean(val.trim()) && !isStreaming;
+  const canSend = (Boolean(val.trim()) || attachments.length > 0) && !isStreaming;
 
   return (
     <div style={{ background: '#FAF5E8', padding: '0 36px 16px' }}>
       <div
         data-testid="composer-column"
+        onDragOver={(e) => {
+          if (!dataTransferHasFiles(e.dataTransfer)) return;
+          e.preventDefault();
+          e.stopPropagation();
+        }}
+        onDrop={handleDrop}
         style={{
           ...conversationColumn,
           border: '1px solid #DCD3BC', borderRadius: 12, background: '#FFFEF8',
           padding: '10px 12px 8px', boxShadow: '0 1px 0 rgba(0,0,0,0.02)',
         }}
       >
+        <AttachmentTray attachments={attachments} onRemove={removeAttachment} />
         <div style={{ position: 'relative' }}>
           {suggestionOptions.length > 0 && (
             <div
@@ -1443,10 +1480,7 @@ function Composer({ onSend, isStreaming, onCancel, agentsMap, skills = [], proje
               e.preventDefault();
               e.stopPropagation();
             }}
-            onDrop={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-            }}
+            onDrop={handleDrop}
             disabled={isStreaming}
             placeholder={isStreaming ? 'Crew is working…' : 'Steer the crew — @agent to direct, ⌘↵ to send'}
             rows={1}
@@ -1462,6 +1496,24 @@ function Composer({ onSend, isStreaming, onCancel, agentsMap, skills = [], proje
           </div>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6 }}>
+          {canAttach && (
+            <button
+              type="button"
+              data-testid="composer-attach"
+              onClick={chooseAttachments}
+              disabled={isStreaming}
+              title="Attach files"
+              style={{
+                width: 28, height: 28, borderRadius: 999, border: 'none',
+                background: 'transparent', color: '#A89F92', cursor: isStreaming ? 'default' : 'pointer',
+                fontFamily: UI_FONT, fontSize: 20, lineHeight: '24px',
+                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                opacity: isStreaming ? 0.45 : 1,
+              }}
+            >
+              +
+            </button>
+          )}
           {agents.length > 0 && onChangeTargetAgent && (
             <AgentPicker value={targetAgentId} onChange={onChangeTargetAgent} agents={agents} />
           )}
@@ -1470,7 +1522,7 @@ function Composer({ onSend, isStreaming, onCancel, agentsMap, skills = [], proje
           <button
             data-testid="composer-send"
             onClick={isStreaming ? onCancel : send}
-            disabled={!isStreaming && !val.trim()}
+            disabled={!isStreaming && !canSend}
             style={{
               ...chip,
               background: isStreaming || canSend ? '#1C1A17' : '#F0EAD8',
@@ -1625,7 +1677,7 @@ export default function TaskView({ chatId, agentsMap, skills = [], projects = []
     };
   }, [chatId, connectEventStream]);
 
-  const handleSend = React.useCallback(async (text) => {
+  const handleSend = React.useCallback(async (text, attachments = []) => {
     if (!chatId) return;
 
     // Prime the AudioContext while we still have a user gesture. The
@@ -1642,6 +1694,7 @@ export default function TaskView({ chatId, agentsMap, skills = [], projects = []
       author: '__human__',
       time: ts,
       body: text,
+      attachments,
       _seq: -Date.now(),
       _optimistic: true,
     }]);
@@ -1649,7 +1702,7 @@ export default function TaskView({ chatId, agentsMap, skills = [], projects = []
     try {
       // target_agent_id is required by the backend — prefer user-selected, fall back to current/lead
       const effectiveTarget = targetAgentId || chat?.current_agent_id || chat?.main_agent_id;
-      await api.postMessage(chatId, text, effectiveTarget);
+      await api.postMessage(chatId, text, effectiveTarget, attachments);
       waitingForAgentRef.current = true;
       waitingAfterSeqRef.current = lastSeqRef.current;
       agentActivitySinceSendRef.current = false;

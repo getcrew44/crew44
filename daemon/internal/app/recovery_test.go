@@ -136,7 +136,7 @@ func TestPostMessageRecoversStaleStreamBeforeConflictCheck(t *testing.T) {
 	}
 
 	content := "/slow continue after restart"
-	if _, err := a.PostMessage(chat.ID, content, agentID); err != nil {
+	if _, err := a.PostMessage(chat.ID, content, agentID, nil); err != nil {
 		t.Fatalf("PostMessage should recover stale stream instead of returning conflict: %v", err)
 	}
 	t.Cleanup(func() {

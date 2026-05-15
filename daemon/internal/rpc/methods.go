@@ -477,14 +477,15 @@ func (s *Server) chatsDelete(_ context.Context, _ Peer, params json.RawMessage) 
 
 func (s *Server) chatsMessagesPost(_ context.Context, _ Peer, params json.RawMessage) (any, error) {
 	var body struct {
-		ID            string `json:"id"`
-		Content       string `json:"content"`
-		TargetAgentID string `json:"target_agent_id"`
+		ID            string                    `json:"id"`
+		Content       string                    `json:"content"`
+		TargetAgentID string                    `json:"target_agent_id"`
+		Attachments   []model.MessageAttachment `json:"attachments"`
 	}
 	if err := decodeParams(params, &body); err != nil {
 		return nil, err
 	}
-	return s.app.PostMessage(body.ID, body.Content, body.TargetAgentID)
+	return s.app.PostMessage(body.ID, body.Content, body.TargetAgentID, body.Attachments)
 }
 
 func (s *Server) chatsEventsList(_ context.Context, _ Peer, params json.RawMessage) (any, error) {

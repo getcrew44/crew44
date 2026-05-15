@@ -1,6 +1,7 @@
 package rpc
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -13,6 +14,24 @@ import (
 	"github.com/getcrew44/crew44/daemon/internal/model"
 	"github.com/getcrew44/crew44/daemon/internal/runtime"
 )
+
+type cancelAwareEngine struct {
+	started chan struct{}
+}
+
+func (e *cancelAwareEngine) Run(ctx context.Context, _ runtime.RunRequest, emit func(runtime.StreamEvent) error) (runtime.RunResult, error) {
+	close(e.started)
+	if err := emit(runtime.StreamEvent{
+		Type: model.EventTypeThinking,
+		Thinking: &model.ThinkingPayload{
+			Content: "working",
+		},
+	}); err != nil {
+		return runtime.RunResult{}, err
+	}
+	<-ctx.Done()
+	return runtime.RunResult{}, ctx.Err()
+}
 
 func TestChatMessageReplayAndEventList(t *testing.T) {
 	env := newTestEnv(t)
@@ -97,6 +116,65 @@ func TestChatResolvesAgentSkillsIntoRuntimeRequest(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for runtime request")
+	}
+}
+
+func TestChatMessageAttachmentsPersistAndAppendToRuntimePrompt(t *testing.T) {
+	engine := &captureRunRequestEngine{requests: make(chan runtime.RunRequest, 1)}
+	env := newTestEnvWithEngine(t, engine)
+	callRPCStatus(t, env.server, "runtimes.rescan", nil, http.StatusOK, nil)
+
+	agentID := createAgent(t, env, "Aria")
+	projectID := createProject(t, env, agentID)
+	chatID := createChat(t, env, projectID, agentID)
+	callRPCStatus(t, env.server, "chats.messages.post", withRPCParam(t, map[string]any{
+		"content":         "please inspect",
+		"target_agent_id": agentID,
+		"attachments": []map[string]any{
+			{
+				"display_name": "proxy.txt",
+				"path":         "/Users/mindivelabs/proxy.txt",
+				"kind":         "file",
+			},
+			{
+				"display_name":          "screen.png",
+				"path":                  "/Users/mindivelabs/screen.png",
+				"kind":                  "image",
+				"thumbnail_jpeg_base64": "base64-thumbnail",
+			},
+			{
+				"display_name": "Design Kit",
+				"path":         "/Users/mindivelabs/Design Kit",
+				"kind":         "folder",
+			},
+		},
+	}, "id", chatID), http.StatusAccepted, nil)
+	waitForChatIdle(t, env.server, chatID)
+
+	select {
+	case req := <-engine.requests:
+		if !strings.Contains(req.Prompt, "please inspect\n\nAttachments:") ||
+			!strings.Contains(req.Prompt, "- [proxy.txt](/Users/mindivelabs/proxy.txt)") ||
+			!strings.Contains(req.Prompt, "- [screen.png](/Users/mindivelabs/screen.png)") ||
+			!strings.Contains(req.Prompt, "- [Design Kit](/Users/mindivelabs/Design Kit)") {
+			t.Fatalf("expected runtime prompt to include markdown attachment links, got %q", req.Prompt)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for runtime request")
+	}
+
+	var replay map[string]any
+	callRPCStatus(t, env.server, "chats.events.list", rpcParams("chat_id", chatID, "after", int64(0)), http.StatusOK, &replay)
+	items := replay["events"].([]any)
+	userEvent := items[0].(map[string]any)
+	message := userEvent["message"].(map[string]any)
+	if message["content"] != "please inspect" {
+		t.Fatalf("expected persisted content to stay clean, got %#v", message["content"])
+	}
+	attachments := message["attachments"].([]any)
+	if len(attachments) != 3 || !strings.Contains(fmt.Sprint(attachments), "base64-thumbnail") ||
+		!strings.Contains(fmt.Sprint(attachments), "folder") {
+		t.Fatalf("expected persisted attachments with thumbnail metadata, got %#v", attachments)
 	}
 }
 
@@ -380,6 +458,50 @@ func TestRuntimeErrorEmitsErrorEventAndStops(t *testing.T) {
 	replayText := string(replayBytes)
 	if !strings.Contains(replayText, `"type":"error"`) || !strings.Contains(replayText, `"code":"runtime_error"`) || !strings.Contains(replayText, "runtime exploded") {
 		t.Fatalf("expected runtime error event, got %#v", replay)
+	}
+}
+
+func TestCancelChatDoesNotPersistRuntimeErrorEvent(t *testing.T) {
+	engine := &cancelAwareEngine{started: make(chan struct{})}
+	env := newTestEnvWithEngine(t, engine)
+	callRPCStatus(t, env.server, "runtimes.rescan", nil, http.StatusOK, nil)
+
+	agentID := createAgent(t, env, "Aria")
+	projectID := createProject(t, env, agentID)
+	chatID := createChat(t, env, projectID, agentID)
+
+	callRPCStatus(t, env.server, "chats.messages.post", withRPCParam(t, map[string]any{
+		"content":         "start work",
+		"target_agent_id": agentID,
+	}, "id", chatID), http.StatusAccepted, nil)
+
+	select {
+	case <-engine.started:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for runtime start")
+	}
+
+	callRPCStatus(t, env.server, "chats.cancel", rpcParams("id", chatID), http.StatusOK, nil)
+	waitForChatIdle(t, env.server, chatID)
+
+	var chat map[string]any
+	callRPCStatus(t, env.server, "chats.get", rpcParams("id", chatID), http.StatusOK, &chat)
+	stream := chat["stream"].(map[string]any)
+	if stream["status"] != "idle" || stream["last_error"] != nil {
+		t.Fatalf("expected canceled chat to be idle without last_error, got %#v", chat)
+	}
+
+	var replay map[string]any
+	callRPCStatus(t, env.server, "chats.events.list", rpcParams("chat_id", chatID, "after", int64(0)), http.StatusOK, &replay)
+	replayBytes, _ := json.Marshal(replay)
+	replayText := string(replayBytes)
+	if strings.Contains(replayText, `"type":"error"`) ||
+		strings.Contains(replayText, `"runtime_error"`) ||
+		strings.Contains(replayText, "context canceled") {
+		t.Fatalf("cancel should not persist runtime error event, got %#v", replay)
+	}
+	if !strings.Contains(replayText, `"type":"message"`) || !strings.Contains(replayText, `"type":"thinking"`) {
+		t.Fatalf("cancel should preserve events emitted before cancellation, got %#v", replay)
 	}
 }
 

@@ -131,6 +131,13 @@ describe('App archive chat handler', () => {
     await waitFor(() => expect(api.archiveChat).toHaveBeenCalledWith('c1'));
     await waitFor(() => expect(screen.queryByText('chat one')).not.toBeInTheDocument());
 
+    // NewTaskRoute requires an explicit project selection before the Start
+    // button enables; the merged-in attachments work removed the implicit
+    // "first project wins" fallback.
+    fireEvent.click(screen.getByText('Pick a project'));
+    const options = await screen.findAllByText('first-project');
+    // First match is the sidebar label; the picker dropdown option is the second.
+    fireEvent.click(options[options.length - 1]);
     fireEvent.change(screen.getByTestId('new-task-input'), {
       target: { value: 'start another task' },
     });

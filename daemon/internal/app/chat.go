@@ -14,7 +14,7 @@ import (
 
 var errChatStoppedAfterError = errors.New("chat stopped after error event")
 
-func (a *App) PostMessage(chatID, content, targetAgentID string) (model.ChatRecord, error) {
+func (a *App) PostMessage(chatID, content, targetAgentID string, attachments []model.MessageAttachment) (model.ChatRecord, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
@@ -66,8 +66,9 @@ func (a *App) PostMessage(chatID, content, targetAgentID string) (model.ChatReco
 		TurnID:       turnID,
 		ActorAgentID: targetAgentID,
 		Message: &model.MessagePayload{
-			Role:    model.MessageRoleUser,
-			Content: content,
+			Role:        model.MessageRoleUser,
+			Content:     content,
+			Attachments: attachments,
 		},
 	})
 	if err != nil {
@@ -77,7 +78,7 @@ func (a *App) PostMessage(chatID, content, targetAgentID string) (model.ChatReco
 
 	ctx, cancel := context.WithCancel(context.Background())
 	a.cancels[chatID] = cancel
-	go a.runChat(ctx, chatID, targetAgentID, turnID, content)
+	go a.runChat(ctx, chatID, targetAgentID, turnID, model.AppendAttachmentLinks(content, attachments))
 	return chat, nil
 }
 
@@ -216,6 +217,10 @@ func (a *App) runChat(ctx context.Context, chatID, agentID, turnID, prompt strin
 			if errors.Is(err, errChatStoppedAfterError) {
 				return
 			}
+			if errors.Is(err, context.Canceled) || ctx.Err() != nil {
+				a.finishChatCanceled(chatID)
+				return
+			}
 			a.finishChatWithRuntimeError(chatID, currentTurnID, currentAgentID, err.Error())
 			return
 		}
@@ -282,6 +287,20 @@ func (a *App) runChat(ctx context.Context, chatID, agentID, turnID, prompt strin
 }
 
 func (a *App) finishChatSuccess(chatID string) {
+	chat, err := a.store.GetChat(chatID)
+	if err != nil {
+		return
+	}
+	chat.Stream.Status = "idle"
+	chat.Stream.LastError = ""
+	chat.Stream.CancelRequested = false
+	chat.PendingHandoverAgentID = ""
+	chat.UpdatedAt = time.Now().UTC()
+	_ = a.store.SaveChat(chat)
+	a.broker.Publish(chatID, broker.Notification[model.Event]{Kind: broker.KindDone})
+}
+
+func (a *App) finishChatCanceled(chatID string) {
 	chat, err := a.store.GetChat(chatID)
 	if err != nil {
 		return
