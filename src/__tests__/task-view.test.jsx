@@ -232,6 +232,11 @@ describe('TaskView', () => {
         audioContext();
         this.currentTime = 0;
         this.destination = {};
+        this.state = 'running';
+      }
+      resume() {
+        this.state = 'running';
+        return Promise.resolve();
       }
       createOscillator() {
         return oscillator;
@@ -265,7 +270,9 @@ describe('TaskView', () => {
       await act(async () => {
         runStream[3]();
       });
-      expect(audioContext).not.toHaveBeenCalled();
+      // Send-click primes the AudioContext, so construction itself is not the
+      // signal we care about — the oscillator.start call is what plays sound.
+      expect(oscillator.start).not.toHaveBeenCalled();
 
       await emitEvent(runStream, {
         seq: 8,
@@ -278,7 +285,6 @@ describe('TaskView', () => {
         runStream[3]();
       });
 
-      expect(audioContext).toHaveBeenCalledOnce();
       expect(oscillator.start).toHaveBeenCalledOnce();
     } finally {
       globalThis.AudioContext = originalAudioContext;
