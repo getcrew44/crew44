@@ -2,7 +2,7 @@
 
 **A local-first desktop app for running a crew of AI coding agents on your own machine.**
 
-Crew44 turns the coding agents you already have installed — Claude Code, Codex, and other CLI runtimes — into a coordinated crew. Instead of running one agent in one terminal, you assemble specialists (a planner, a backend engineer, a reviewer), give them shared skills and per-project memory, and let them hand work off to each other inside a single chat thread.
+Crew44 turns the coding agents you already have installed — Claude Code, Codex, and other CLI runtimes — into a coordinated crew. Instead of running one agent in one terminal, you assemble specialists (named personas), give them specialized skills and per-project memory, and let them hand work off to each other inside a single chat thread.
 
 Everything runs on your machine. State is plain files under `~/.crew44/`. No cloud account, no remote inference, no telemetry — the only network traffic is whatever your underlying coding agent already makes.
 
@@ -19,7 +19,7 @@ Everything runs on your machine. State is plain files under `~/.crew44/`. No clo
 
 Crew44 detects and routes to any of these on disk:
 
-Claude Code · Codex · GitHub Copilot CLI · OpenClaw · OpenCode · Hermes · Gemini · Pi · Cursor Agent · Kimi · Kiro
+Claude Code · Codex
 
 Have another CLI? The runtime layer is a small Go interface — add an adapter under `daemon/internal/backendagent/` and it appears in the picker.
 
