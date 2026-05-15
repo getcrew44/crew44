@@ -22,6 +22,16 @@ const agents = [
 beforeEach(() => {
   window.localStorage.clear();
   vi.clearAllMocks();
+  window.electronAPI = {
+    openFileDialog: vi.fn().mockResolvedValue({ canceled: true, filePaths: [] }),
+    getPathForFile: vi.fn(file => file?.name ? `/Users/me/${file.name}` : ''),
+    getPathInfo: vi.fn().mockImplementation(async (paths) => paths.map(path => ({
+      path,
+      name: path.split('/').pop(),
+      isDirectory: false,
+    }))),
+    readFileDataURL: vi.fn().mockResolvedValue('data:image/png;base64,input-image'),
+  };
   api.createChat.mockResolvedValue({ id: 'chat-1', main_agent_id: 'a1' });
   api.postMessage.mockResolvedValue({});
 });
@@ -96,6 +106,26 @@ describe('NewTaskRoute', () => {
 
     expect(input).toHaveValue('@Bryn ');
     expect(screen.getByTestId('composer-mention-highlight')).toHaveTextContent('@Bryn');
+  });
+
+  it('anchors new task mention suggestions to the @ caret line', async () => {
+    render(
+      <NewTaskRoute
+        projects={projects}
+        agents={agents}
+        onNewTask={() => {}}
+        initialProjectId="p1"
+      />
+    );
+
+    const input = screen.getByTestId('new-task-input');
+    fireEvent.change(input, { target: { value: '@a', selectionStart: 2, selectionEnd: 2 } });
+
+    const listbox = await screen.findByRole('listbox', { name: /agent suggestions/i });
+    expect(listbox.style.top).not.toBe('');
+    expect(listbox.style.top).not.toBe('calc(100% + 8px)');
+    expect(listbox.style.bottom).toBe('');
+    expect(listbox.style.width).toBe('260px');
   });
 
   it('requires an explicit project selection before starting', async () => {
@@ -174,7 +204,93 @@ describe('NewTaskRoute', () => {
 
     await waitFor(() => expect(api.createChat).toHaveBeenCalledOnce());
     expect(api.createChat).toHaveBeenCalledWith('p2', 'ship this task', 'a1');
-    expect(api.postMessage).toHaveBeenCalledWith('chat-1', 'ship this task', 'a1');
+    expect(api.postMessage).toHaveBeenCalledWith('chat-1', 'ship this task', 'a1', []);
     expect(onNewTask).toHaveBeenCalledWith('chat-1');
+  });
+
+  it('selects an attachment for a new task and sends attachment metadata', async () => {
+    window.electronAPI.openFileDialog.mockResolvedValue({
+      canceled: false,
+      filePaths: ['/Users/me/proxy.txt'],
+    });
+    const onNewTask = vi.fn();
+    render(
+      <NewTaskRoute
+        projects={projects}
+        agents={agents}
+        onNewTask={onNewTask}
+        initialProjectId="p1"
+      />
+    );
+
+    fireEvent.click(screen.getByTestId('new-task-attach'));
+    expect(await screen.findByTestId('attachment-chip')).toHaveTextContent('proxy.txt');
+    fireEvent.change(screen.getByTestId('new-task-input'), {
+      target: { value: 'inspect this' },
+    });
+    fireEvent.click(screen.getByTestId('start-crew-button'));
+
+    await waitFor(() => expect(api.createChat).toHaveBeenCalledOnce());
+    expect(api.createChat).toHaveBeenCalledWith('p1', 'inspect this', 'a1');
+    expect(api.postMessage).toHaveBeenCalledWith('chat-1', 'inspect this', 'a1', [
+      { display_name: 'proxy.txt', path: '/Users/me/proxy.txt', kind: 'file' },
+    ]);
+    expect(onNewTask).toHaveBeenCalledWith('chat-1');
+  });
+
+  it('accepts dropped file attachments in the new task composer', async () => {
+    render(
+      <NewTaskRoute
+        projects={projects}
+        agents={agents}
+        onNewTask={() => {}}
+        initialProjectId="p1"
+      />
+    );
+
+    const file = new File(['hello'], 'notes.txt', { type: 'text/plain' });
+    fireEvent.drop(screen.getByTestId('new-task-input'), {
+      dataTransfer: {
+        types: ['Files'],
+        items: [{ kind: 'file', getAsFile: () => file }],
+        files: [file],
+      },
+    });
+
+    expect(await screen.findByTestId('attachment-chip')).toHaveTextContent('notes.txt');
+    fireEvent.change(screen.getByTestId('new-task-input'), {
+      target: { value: 'from drop' },
+    });
+    fireEvent.click(screen.getByTestId('start-crew-button'));
+
+    await waitFor(() => expect(api.postMessage).toHaveBeenCalledOnce());
+    expect(api.postMessage).toHaveBeenCalledWith('chat-1', 'from drop', 'a1', [
+      { display_name: 'notes.txt', path: '/Users/me/notes.txt', kind: 'file' },
+    ]);
+  });
+
+  it('can start an attachment-only new task with the file name as the title', async () => {
+    window.electronAPI.openFileDialog.mockResolvedValue({
+      canceled: false,
+      filePaths: ['/Users/me/proxy.txt'],
+    });
+    render(
+      <NewTaskRoute
+        projects={projects}
+        agents={agents}
+        onNewTask={() => {}}
+        initialProjectId="p1"
+      />
+    );
+
+    fireEvent.click(screen.getByTestId('new-task-attach'));
+    expect(await screen.findByTestId('attachment-chip')).toHaveTextContent('proxy.txt');
+    fireEvent.click(screen.getByTestId('start-crew-button'));
+
+    await waitFor(() => expect(api.createChat).toHaveBeenCalledOnce());
+    expect(api.createChat).toHaveBeenCalledWith('p1', 'proxy.txt', 'a1');
+    expect(api.postMessage).toHaveBeenCalledWith('chat-1', '', 'a1', [
+      { display_name: 'proxy.txt', path: '/Users/me/proxy.txt', kind: 'file' },
+    ]);
   });
 });

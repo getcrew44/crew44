@@ -3,6 +3,10 @@ import { UI_FONT } from './components.jsx';
 import { CustomPicker, PickerRow } from './CustomPicker.jsx';
 import * as api from './api.js';
 import { mentionBounds, MentionHighlightText } from './composerMentions.jsx';
+import { AttachmentTray } from './AttachmentChips.jsx';
+import { attachmentsSupported, dedupeAttachments, droppedAttachments, pickAttachments } from './attachments.js';
+import { dataTransferHasFiles } from './dragDrop.js';
+import { textareaCaretPoint } from './textareaCaret.js';
 import {
   clearComposerDraft,
   readComposerDraft,
@@ -68,18 +72,23 @@ const SUGGESTIONS = [
   },
 ];
 
+const MENTION_MENU_WIDTH = 260;
+
 export default function NewTaskRoute({ projects, agents, onNewTask, onExistingFolder, initialProjectId }) {
   const initialStoredProjectId = React.useMemo(() => initialProjectId || readLastNewChatProjectId(), [initialProjectId]);
   const initialDraft = React.useMemo(() => readComposerDraft(initialStoredProjectId, ''), [initialStoredProjectId]);
   const [val, setVal] = React.useState(initialDraft.text || '');
+  const [attachments, setAttachments] = React.useState([]);
   const [cursor, setCursor] = React.useState(0);
   const [activeSuggestion, setActiveSuggestion] = React.useState(0);
+  const [mentionPoint, setMentionPoint] = React.useState(null);
   const [selectedProjectId, setSelectedProjectId] = React.useState(initialStoredProjectId || '');
   const [selectedAgentId, setSelectedAgentId] = React.useState(initialDraft.targetAgentId || '');
   const [submitting, setSubmitting] = React.useState(false);
   const [error, setError] = React.useState(null);
   const inputRef = React.useRef(null);
   const selectedProjectExists = projects.some(project => project.id === selectedProjectId);
+  const canAttach = attachmentsSupported();
 
   // Apply initialProjectId when it changes (e.g. clicking new chat on a project)
   React.useEffect(() => {
@@ -95,6 +104,7 @@ export default function NewTaskRoute({ projects, agents, onNewTask, onExistingFo
   React.useEffect(() => {
     const draft = readComposerDraft(selectedProjectId, '');
     setVal(current => draft.text || current);
+    setAttachments([]);
     setSelectedAgentId(draft.targetAgentId || '');
     if (selectedProjectExists) writeLastNewChatProjectId(selectedProjectId);
     else if (!selectedProjectId) writeLastNewChatProjectId('');
@@ -125,6 +135,14 @@ export default function NewTaskRoute({ projects, agents, onNewTask, onExistingFo
     setActiveSuggestion(0);
   }, [activeMention?.query]);
 
+  React.useLayoutEffect(() => {
+    if (!activeMention || !inputRef.current) {
+      setMentionPoint(null);
+      return;
+    }
+    setMentionPoint(textareaCaretPoint(inputRef.current, activeMention.start));
+  }, [activeMention, val]);
+
   const updateCursor = (node) => {
     setCursor(node?.selectionStart ?? val.length);
   };
@@ -141,9 +159,30 @@ export default function NewTaskRoute({ projects, agents, onNewTask, onExistingFo
     });
   };
 
+  const addAttachments = React.useCallback((nextAttachments) => {
+    if (!nextAttachments?.length) return;
+    setAttachments(current => dedupeAttachments(current, nextAttachments));
+  }, []);
+
+  const chooseAttachments = React.useCallback(async () => {
+    if (!canAttach || submitting) return;
+    addAttachments(await pickAttachments());
+  }, [addAttachments, canAttach, submitting]);
+
+  const removeAttachment = React.useCallback((path) => {
+    setAttachments(current => current.filter(attachment => attachment.path !== path));
+  }, []);
+
+  const handleDrop = React.useCallback(async (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!canAttach || submitting || !dataTransferHasFiles(e.dataTransfer)) return;
+    addAttachments(await droppedAttachments(e.dataTransfer));
+  }, [addAttachments, canAttach, submitting]);
+
   const startCrew = async () => {
     const text = val.trim();
-    if (!text || submitting) return;
+    if ((!text && attachments.length === 0) || submitting) return;
 
     const projectId = selectedProjectExists ? selectedProjectId : '';
     const agentId = selectedAgentId || agents[0]?.id;
@@ -157,9 +196,10 @@ export default function NewTaskRoute({ projects, agents, onNewTask, onExistingFo
     setError(null);
 
     try {
-      const title = text.length > 55 ? text.slice(0, 52) + '…' : text;
+      const titleSource = text || attachments[0]?.display_name || 'Attachments';
+      const title = titleSource.length > 55 ? titleSource.slice(0, 52) + '…' : titleSource;
       const chat = await api.createChat(projectId, title, agentId);
-      await api.postMessage(chat.id, text, chat.main_agent_id);
+      await api.postMessage(chat.id, text, chat.main_agent_id, attachments);
       clearComposerDraft(projectId, '');
       onNewTask(chat.id);
     } catch (err) {
@@ -194,7 +234,10 @@ export default function NewTaskRoute({ projects, agents, onNewTask, onExistingFo
     if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); startCrew(); }
   };
 
-  const canStart = val.trim() && !submitting && selectedProjectExists && selectedAgentId;
+  const canStart = (val.trim() || attachments.length > 0) && !submitting && selectedProjectExists && selectedAgentId;
+  const mentionMenuLeft = mentionPoint && inputRef.current
+    ? Math.min(Math.max(0, mentionPoint.left - 8), Math.max(0, inputRef.current.clientWidth - MENTION_MENU_WIDTH))
+    : 0;
 
   return (
     <div style={{ height: '100%', background: '#FAF5E8', padding: '60px 36px', overflow: 'auto', position: 'relative' }}>
@@ -221,17 +264,26 @@ export default function NewTaskRoute({ projects, agents, onNewTask, onExistingFo
         <div style={{
           border: '1px solid #DCD3BC', borderRadius: 14, background: '#FFFEF8',
           padding: 16, boxShadow: '0 1px 0 rgba(0,0,0,0.02)',
-        }}>
+        }}
+          onDragOver={(e) => {
+            if (!dataTransferHasFiles(e.dataTransfer)) return;
+            e.preventDefault();
+            e.stopPropagation();
+          }}
+          onDrop={handleDrop}
+        >
+          <AttachmentTray attachments={attachments} onRemove={removeAttachment} />
           <div style={{ position: 'relative' }}>
             {mentionOptions.length > 0 && (
               <div
+                data-testid="new-task-mention-list"
                 role="listbox"
                 aria-label="Agent suggestions"
                 style={{
                   position: 'absolute',
-                  left: 0,
-                  right: 0,
-                  bottom: 'calc(100% + 8px)',
+                  left: mentionMenuLeft,
+                  top: mentionPoint ? mentionPoint.top : 0,
+                  width: MENTION_MENU_WIDTH,
                   zIndex: 5,
                   background: '#FFFEF8',
                   border: '1px solid #DCD3BC',
@@ -289,6 +341,12 @@ export default function NewTaskRoute({ projects, agents, onNewTask, onExistingFo
               onClick={(e) => updateCursor(e.target)}
               onKeyUp={(e) => updateCursor(e.target)}
               onKeyDown={onKeyDown}
+              onDragOver={(e) => {
+                if (!dataTransferHasFiles(e.dataTransfer)) return;
+                e.preventDefault();
+                e.stopPropagation();
+              }}
+              onDrop={handleDrop}
               disabled={submitting}
               placeholder="Describe a task. The lead agent will plan it and assign subtasks."
               rows={5}
@@ -305,6 +363,24 @@ export default function NewTaskRoute({ projects, agents, onNewTask, onExistingFo
             display: 'flex', alignItems: 'center', gap: 8, marginTop: 8,
             paddingTop: 12, borderTop: '1px solid #ECE6D5', flexWrap: 'wrap',
           }}>
+            {canAttach && (
+              <button
+                type="button"
+                data-testid="new-task-attach"
+                onClick={chooseAttachments}
+                disabled={submitting}
+                title="Attach files"
+                style={{
+                  width: 28, height: 28, borderRadius: 999, border: 'none',
+                  background: 'transparent', color: '#A89F92', cursor: submitting ? 'default' : 'pointer',
+                  fontFamily: UI_FONT, fontSize: 20, lineHeight: '24px',
+                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                  opacity: submitting ? 0.45 : 1,
+                }}
+              >
+                +
+              </button>
+            )}
             <CustomPicker
               icon={<FolderAddIcon size={13} />}
               placeholder="Pick a project"
