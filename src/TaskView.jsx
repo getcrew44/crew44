@@ -84,7 +84,7 @@ function ThoughtChip({ thought }) {
   );
 }
 
-function MessageEvent({ event, agentsMap, thought }) {
+function MessageEvent({ event, agentsMap, thought, showHeader = true }) {
   const agent = resolveAuthor(event.author, agentsMap) || HUMAN_USER;
   const isUser = agent.kind === 'human';
 
@@ -107,14 +107,18 @@ function MessageEvent({ event, agentsMap, thought }) {
   }
 
   return (
-    <div style={{ display: 'flex', gap: 14, padding: '14px 0' }}>
-      <Avatar agent={agent} size={28} />
+    <div style={{ display: 'flex', gap: 14, padding: showHeader ? '14px 0' : '2px 0' }}>
+      {showHeader
+        ? <Avatar agent={agent} size={28} />
+        : <div style={{ width: 28, flexShrink: 0 }} aria-hidden="true" />}
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontSize: 13.5, marginBottom: 4, display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ fontWeight: 600, color: '#1C1A17' }}>{agent.name}</span>
-          {agent.archived && <DeletedTag />}
-          <span style={{ color: '#A89F92' }}>· {event.time}</span>
-        </div>
+        {showHeader && (
+          <div style={{ fontSize: 13.5, marginBottom: 4, display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ fontWeight: 600, color: '#1C1A17' }}>{agent.name}</span>
+            {agent.archived && <DeletedTag />}
+            <span style={{ color: '#A89F92' }}>· {event.time}</span>
+          </div>
+        )}
         {thought && (
           <div style={{ marginBottom: 8 }}>
             <ThoughtChip thought={thought} />
@@ -128,18 +132,22 @@ function MessageEvent({ event, agentsMap, thought }) {
   );
 }
 
-function ThinkingEvent({ event, agentsMap }) {
+function ThinkingEvent({ event, agentsMap, showHeader = true }) {
   const agent = resolveAuthor(event.author, agentsMap);
   if (!agent || agent.kind !== 'agent') return null;
   return (
-    <div style={{ display: 'flex', gap: 14, padding: '10px 0' }}>
-      <Avatar agent={agent} size={28} />
+    <div style={{ display: 'flex', gap: 14, padding: showHeader ? '10px 0' : '2px 0' }}>
+      {showHeader
+        ? <Avatar agent={agent} size={28} />
+        : <div style={{ width: 28, flexShrink: 0 }} aria-hidden="true" />}
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontSize: 13.5, marginBottom: 4, display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ fontWeight: 600, color: '#1C1A17' }}>{agent.name}</span>
-          {agent.archived && <DeletedTag />}
-          <span style={{ color: '#A89F92' }}>· {event.time}</span>
-        </div>
+        {showHeader && (
+          <div style={{ fontSize: 13.5, marginBottom: 4, display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ fontWeight: 600, color: '#1C1A17' }}>{agent.name}</span>
+            {agent.archived && <DeletedTag />}
+            <span style={{ color: '#A89F92' }}>· {event.time}</span>
+          </div>
+        )}
         <ThoughtChip thought={event} />
       </div>
     </div>
@@ -480,8 +488,8 @@ function StreamingIndicator({ agentsMap, currentAgentId }) {
 }
 
 function EventRouter({ event, agentsMap, showHeader = true, thought }) {
-  if (event.kind === 'message') return <MessageEvent event={event} agentsMap={agentsMap} thought={thought} />;
-  if (event.kind === 'thinking') return <ThinkingEvent event={event} agentsMap={agentsMap} />;
+  if (event.kind === 'message') return <MessageEvent event={event} agentsMap={agentsMap} thought={thought} showHeader={showHeader} />;
+  if (event.kind === 'thinking') return <ThinkingEvent event={event} agentsMap={agentsMap} showHeader={showHeader} />;
   if (event.kind === 'tool') return <ToolEvent event={event} agentsMap={agentsMap} showHeader={showHeader} />;
   if (event.kind === 'tool_group') return <ToolGroupEvent events={event.events} agentsMap={agentsMap} showHeader={showHeader} />;
   if (event.kind === 'tool_result') return <ToolResultEvent event={event} agentsMap={agentsMap} />;
@@ -783,9 +791,10 @@ function renderEventsWithHandovers({ events, agentsMap }) {
   // between two agents (e.g. "@Designer take it from here") should still let
   // us recognize the agent-to-agent handover that follows it.
   let prevAgentActor = null;
-  // Track the previous event's tool author so consecutive tool calls from
-  // the same agent share one header (avatar+name+time) instead of repeating.
-  let prevToolAuthor = null;
+  // Track the last agent whose header (avatar+name+time) was rendered, so
+  // consecutive events from the same agent share one header. Reset on
+  // handovers and user messages (anything that visually breaks the run).
+  let prevDisplayedActor = null;
   const isAgentActor = (id) => id && id !== '__human__';
 
   prepared.forEach((e, i) => {
@@ -813,7 +822,7 @@ function renderEventsWithHandovers({ events, agentsMap }) {
           />
         );
         prevAgentActor = to;
-        prevToolAuthor = null;
+        prevDisplayedActor = null;
       } else if (from && to && from === to) {
         // Still update the actor tracker so subsequent events don't
         // synthesize a fallback divider for the same identity.
@@ -834,10 +843,14 @@ function renderEventsWithHandovers({ events, agentsMap }) {
           agentsMap={agentsMap}
         />
       );
+      prevDisplayedActor = null;
     }
 
-    const isTool = e.kind === 'tool' || e.kind === 'tool_group';
-    const showHeader = !(isTool && prevToolAuthor === actor && actor);
+    // Events that don't display a header (user messages, tool_result) break
+    // the run for visual purposes. Agent events with the same actor as the
+    // previously displayed one suppress their header.
+    const isHeaderless = !isAgentActor(actor) || e.kind === 'tool_result';
+    const showHeader = isHeaderless ? true : prevDisplayedActor !== actor;
     out.push(
       <EventRouter
         key={e._seq ?? i}
@@ -849,7 +862,13 @@ function renderEventsWithHandovers({ events, agentsMap }) {
     );
 
     if (isAgentActor(actor)) prevAgentActor = actor;
-    prevToolAuthor = isTool ? actor : null;
+    if (isHeaderless) {
+      // tool_result keeps the prior header context (it's a continuation of
+      // the same agent's run). User messages break the run.
+      if (!isAgentActor(actor)) prevDisplayedActor = null;
+    } else if (showHeader) {
+      prevDisplayedActor = actor;
+    }
   });
   return out;
 }

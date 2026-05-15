@@ -498,7 +498,7 @@ describe('TaskView', () => {
     expect(screen.queryAllByTestId('tool-event-row')).toHaveLength(3);
   });
 
-  it('re-shows the agent header when a non-tool event sits between two tool calls from the same agent', async () => {
+  it('shares a single header across consecutive same-agent events (tool, message, tool)', async () => {
     api.streamChatEvents.mockImplementation(() => vi.fn());
 
     render(<TaskView chatId="chat-1" agentsMap={agentsMap} />);
@@ -521,9 +521,9 @@ describe('TaskView', () => {
     });
 
     await screen.findAllByTestId('tool-event-row');
-    // Aria appears for: first tool row, the message, and the second tool row → 3 headers.
+    // Same agent throughout → only the first event displays Aria's header.
     const column = screen.getByTestId('conversation-column');
-    expect(within(column).getAllByText('Aria')).toHaveLength(3);
+    expect(within(column).getAllByText('Aria')).toHaveLength(1);
   });
 
   it('renders an explicit backend handover event with the right verb and target', async () => {
