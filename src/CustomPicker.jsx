@@ -25,7 +25,7 @@ export function PickerRow({ icon, label, selected, onClick }) {
       style={{
         display: 'flex', alignItems: 'center', gap: 8,
         padding: '7px 10px', borderRadius: 8, cursor: 'default',
-        background: selected ? '#EBE5D6' : hover ? '#F4F0E8' : 'transparent',
+        background: hover ? '#F4F0E8' : 'transparent',
         fontSize: 13, color: '#1C1A17', userSelect: 'none',
       }}
     >
