@@ -254,7 +254,7 @@ export function Icon({ name, size = 16 }) {
     case 'agents':
       return <svg {...s} viewBox="0 0 16 16"><circle cx="4.5" cy="5" r="1.8" {...p}/><circle cx="11.5" cy="5" r="1.8" {...p}/><circle cx="4.5" cy="11" r="1.8" {...p}/><circle cx="11.5" cy="11" r="1.8" {...p}/></svg>;
     case 'auto':
-      return <svg {...s} viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.5" {...p}/><path d="M8 4v4l2.5 1.5" {...p}/></svg>;
+      return <svg {...s} viewBox="0 0 16 16"><path d="M6,4.5 L7.2,8.3 L11,9.5 L7.2,10.7 L6,14.5 L4.8,10.7 L1,9.5 L4.8,8.3 Z M13,1 L13.6,2.9 L15.5,3.5 L13.6,4.1 L13,6 L12.4,4.1 L10.5,3.5 L12.4,2.9 Z" {...p}/></svg>;
     case 'search':
       return <svg {...s} viewBox="0 0 16 16"><circle cx="7" cy="7" r="4.5" {...p}/><path d="M10.5 10.5l3 3" {...p}/></svg>;
     case 'folder':
