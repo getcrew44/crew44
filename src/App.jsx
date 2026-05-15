@@ -381,7 +381,10 @@ export default function App() {
       refreshProjects: loadData,
       showToast,
     });
-    if (createdProject?.id) setNewTaskProjectId(createdProject.id);
+    if (createdProject?.id) {
+      setNewTaskProjectId(createdProject.id);
+      setRoute('new');
+    }
     return createdProject;
   }, [agentsList, loadData, showToast]);
 
@@ -436,7 +439,10 @@ export default function App() {
     try {
       const folder = await window.electronAPI.createBlankProjectFolder(name);
       const project = await api.createProject(name, folder.path, mainAgentId);
-      if (project?.id) setNewTaskProjectId(project.id);
+      if (project?.id) {
+        setNewTaskProjectId(project.id);
+        setRoute('new');
+      }
       loadData();
     } catch (err) {
       showToast(`Failed to create project: ${err.message}`);
