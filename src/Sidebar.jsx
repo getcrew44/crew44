@@ -353,7 +353,7 @@ function SessionItem({ session, active, onPick, onArchive }) {
         fontWeight: 400,
       }}
     >
-      <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+      <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', lineHeight: '18px' }}>
         {session.title}
       </span>
       {isRunning ? (
