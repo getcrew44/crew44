@@ -348,7 +348,33 @@ function ToolGroupEvent({ events, agentsMap, showHeader = true }) {
               fontFamily: MONO_FONT, fontSize: 12, color: '#A89F92',
               whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
               flex: 1, minWidth: 0,
-            }}>{events.map(e => e.tool).join(' · ')}</span>
+            }}>{(() => {
+              const groups = [];
+              const indexByName = new Map();
+              for (const { tool } of events) {
+                if (indexByName.has(tool)) {
+                  groups[indexByName.get(tool)].count++;
+                } else {
+                  indexByName.set(tool, groups.length);
+                  groups.push({ name: tool, count: 1 });
+                }
+              }
+              return groups.map((g, i) => (
+                <React.Fragment key={g.name}>
+                  {i > 0 && ' · '}
+                  {g.name}
+                  {g.count > 1 && (
+                    <>
+                      {' '}
+                      <span
+                        key={g.count}
+                        style={{ display: 'inline-block', animation: 'cw-count-pop .28s ease-out' }}
+                      >x{g.count}</span>
+                    </>
+                  )}
+                </React.Fragment>
+              ));
+            })()}</span>
           )}
           {open && <span style={{ flex: 1 }} />}
           <ToolStatusChip result={status} />
@@ -1095,6 +1121,7 @@ function Composer({ onSend, isStreaming, onCancel, agentsMap, skills = [], proje
   const [cursor, setCursor] = React.useState(0);
   const [activeSuggestion, setActiveSuggestion] = React.useState(0);
   const [fileMatches, setFileMatches] = React.useState([]);
+  const [scrollTop, setScrollTop] = React.useState(0);
   const ta = React.useRef(null);
   const agents = React.useMemo(() => (
     Object.values(agentsMap || {})
@@ -1122,6 +1149,7 @@ function Composer({ onSend, isStreaming, onCancel, agentsMap, skills = [], proje
     if (!ta.current) return;
     ta.current.style.height = 'auto';
     ta.current.style.height = Math.min(160, ta.current.scrollHeight) + 'px';
+    setScrollTop(ta.current.scrollTop);
   }, [val]);
 
   React.useEffect(() => {
@@ -1298,6 +1326,7 @@ function Composer({ onSend, isStreaming, onCancel, agentsMap, skills = [], proje
               ))}
             </div>
           )}
+          <div style={{ position: 'relative', overflow: 'hidden' }}>
           {val && (
             <div
               aria-hidden="true"
@@ -1312,6 +1341,7 @@ function Composer({ onSend, isStreaming, onCancel, agentsMap, skills = [], proje
                 lineHeight: 1.5,
                 padding: 4,
                 color: '#1C1A17',
+                transform: `translateY(${-scrollTop}px)`,
               }}
             >
               <HighlightedComposerText text={val} agents={agents} skills={agentSkills} />
@@ -1325,6 +1355,7 @@ function Composer({ onSend, isStreaming, onCancel, agentsMap, skills = [], proje
             onSelect={(e) => updateCursor(e.target)}
             onClick={(e) => updateCursor(e.target)}
             onKeyUp={(e) => updateCursor(e.target)}
+            onScroll={(e) => setScrollTop(e.target.scrollTop)}
             onKeyDown={onKeyDown}
             onDragOver={(e) => {
               e.preventDefault();
@@ -1346,6 +1377,7 @@ function Composer({ onSend, isStreaming, onCancel, agentsMap, skills = [], proje
               opacity: isStreaming ? 0.5 : 1,
             }}
           />
+          </div>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6 }}>
           {agents.length > 0 && onChangeTargetAgent && (
@@ -1565,7 +1597,7 @@ export default function TaskView({ chatId, agentsMap, skills = [], projects = []
         targetAgentId={targetAgentId}
         onChangeTargetAgent={setTargetAgentId}
       />
-      <style>{`@keyframes pulse { 0%,100%{opacity:.3} 50%{opacity:1} } @keyframes cw-spin { to { transform: rotate(360deg) } } @keyframes wordFadeIn { from { opacity: 0; transform: translateY(2px) } to { opacity: 1; transform: translateY(0) } } @keyframes cw-fade-in { from { opacity: 0 } to { opacity: 1 } } @keyframes cw-expand-in { from { opacity: 0; transform: translateY(-3px) } to { opacity: 1; transform: translateY(0) } } @keyframes cw-type-jump { from { opacity: 0 } to { opacity: 1 } }`}</style>
+      <style>{`@keyframes pulse { 0%,100%{opacity:.3} 50%{opacity:1} } @keyframes cw-spin { to { transform: rotate(360deg) } } @keyframes wordFadeIn { from { opacity: 0; transform: translateY(2px) } to { opacity: 1; transform: translateY(0) } } @keyframes cw-fade-in { from { opacity: 0 } to { opacity: 1 } } @keyframes cw-expand-in { from { opacity: 0; transform: translateY(-3px) } to { opacity: 1; transform: translateY(0) } } @keyframes cw-type-jump { from { opacity: 0 } to { opacity: 1 } } @keyframes cw-count-pop { 0% { transform: scale(1.35); color: #5C544B } 60% { transform: scale(.96); color: #807972 } 100% { transform: scale(1); color: #A89F92 } }`}</style>
     </div>
   );
 }
