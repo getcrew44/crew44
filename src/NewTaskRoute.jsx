@@ -6,6 +6,7 @@ import { mentionBounds, MentionHighlightText } from './composerMentions.jsx';
 import { AttachmentTray } from './AttachmentChips.jsx';
 import { attachmentsSupported, dedupeAttachments, droppedAttachments, pickAttachments } from './attachments.js';
 import { dataTransferHasFiles } from './dragDrop.js';
+import { primeAudioContext } from './audio.js';
 import { textareaCaretPoint } from './textareaCaret.js';
 import {
   clearComposerDraft,
@@ -192,6 +193,7 @@ export default function NewTaskRoute({ projects, agents, onNewTask, onExistingFo
       return;
     }
 
+    primeAudioContext();
     setSubmitting(true);
     setError(null);
 

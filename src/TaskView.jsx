@@ -6,60 +6,7 @@ import { clearComposerDraft, readComposerDraft, writeComposerDraft } from './dra
 import { AttachmentTray } from './AttachmentChips.jsx';
 import { attachmentsSupported, dedupeAttachments, droppedAttachments, pickAttachments } from './attachments.js';
 import { dataTransferHasFiles } from './dragDrop.js';
-
-// Shared AudioContext — must be primed during a user gesture (Send click)
-// because Chromium autoplay policy starts contexts in "suspended" state
-// otherwise. Once running, it stays running for the session, so subsequent
-// playDoneSound calls (which fire on a network event, not a gesture) work.
-let sharedAudioCtx = null;
-
-function getAudioCtx() {
-  if (sharedAudioCtx) return sharedAudioCtx;
-  const Ctor = window.AudioContext || window.webkitAudioContext;
-  if (!Ctor) return null;
-  try {
-    sharedAudioCtx = new Ctor();
-  } catch (err) {
-    console.warn('AudioContext unavailable:', err);
-    return null;
-  }
-  return sharedAudioCtx;
-}
-
-function primeAudioContext() {
-  const ctx = getAudioCtx();
-  if (ctx && ctx.state === 'suspended') {
-    ctx.resume().catch(err => console.warn('AudioContext resume failed:', err));
-  }
-}
-
-function playDoneSound() {
-  const ctx = getAudioCtx();
-  if (!ctx) return;
-  const play = () => {
-    try {
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-      osc.type = 'sine';
-      const now = ctx.currentTime;
-      osc.frequency.setValueAtTime(660, now);
-      osc.frequency.setValueAtTime(880, now + 0.12);
-      gain.gain.setValueAtTime(0.25, now);
-      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.5);
-      osc.start(now);
-      osc.stop(now + 0.5);
-    } catch (err) {
-      console.warn('playDoneSound failed:', err);
-    }
-  };
-  if (ctx.state === 'suspended') {
-    ctx.resume().then(play).catch(err => console.warn('AudioContext resume failed:', err));
-  } else {
-    play();
-  }
-}
+import { primeAudioContext, playDoneSound } from './audio.js';
 
 function isAgentActivityEvent(event) {
   if (!event) return false;
@@ -509,7 +456,7 @@ function pickRandomGerund(previous) {
   return next;
 }
 
-function StreamingIndicator({ agentsMap, currentAgentId }) {
+function StreamingIndicator({ agentsMap, currentAgentId, showHeader = true }) {
   const agent = currentAgentId ? resolveAuthor(currentAgentId, agentsMap) : null;
   const [word, setWord] = React.useState(() => pickRandomGerund(null));
   React.useEffect(() => {
@@ -521,7 +468,9 @@ function StreamingIndicator({ agentsMap, currentAgentId }) {
   const subject = agent ? `${agent.name} is` : 'Agent is';
   return (
     <div style={{ display: 'flex', gap: 14, padding: '10px 0' }}>
-      <div style={{ width: 28, flexShrink: 0 }} aria-hidden="true" />
+      {showHeader && agent
+        ? <Avatar agent={agent} size={28} />
+        : <div style={{ width: 28, flexShrink: 0 }} aria-hidden="true" />}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#A89F92', fontSize: 13 }}>
         <span
           aria-hidden="true"
@@ -935,7 +884,7 @@ function renderEventsWithHandovers({ events, agentsMap }) {
       prevDisplayedActor = actor;
     }
   });
-  return out;
+  return { nodes: out, lastDisplayedActor: prevDisplayedActor };
 }
 
 // ─── Composer ─────────────────────────────────────────────────────────────────
@@ -1662,6 +1611,9 @@ export default function TaskView({ chatId, agentsMap, skills = [], projects = []
     api.getChat(chatId)
       .then(c => {
         setChat(c);
+        if (c.stream?.status === 'streaming') {
+          waitingForAgentRef.current = true;
+        }
         setIsStreaming(c.stream?.status === 'streaming');
         const defaultTarget = c.current_agent_id || c.main_agent_id || null;
         const draft = readComposerDraft(c.project_id, c.id);
@@ -1744,10 +1696,19 @@ export default function TaskView({ chatId, agentsMap, skills = [], projects = []
         style={{ flex: 1, overflow: 'auto', padding: '8px 36px 24px' }}
       >
         <div data-testid="conversation-column" style={conversationColumn}>
-          {renderEventsWithHandovers({ events, agentsMap })}
-          {isStreaming && (
-            <StreamingIndicator agentsMap={agentsMap} currentAgentId={chat?.current_agent_id} />
-          )}
+          {(() => {
+            const { nodes, lastDisplayedActor } = renderEventsWithHandovers({ events, agentsMap });
+            const streamingAgentId = chat?.current_agent_id;
+            const showStreamingHeader = lastDisplayedActor !== streamingAgentId;
+            return (
+              <>
+                {nodes}
+                {isStreaming && (
+                  <StreamingIndicator agentsMap={agentsMap} currentAgentId={streamingAgentId} showHeader={showStreamingHeader} />
+                )}
+              </>
+            );
+          })()}
           {events.length === 0 && !isStreaming && (
             <div style={{ paddingTop: 40, color: '#A89F92', fontSize: 13.5, fontStyle: 'italic' }}>
               No events yet.
