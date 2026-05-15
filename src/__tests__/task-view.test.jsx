@@ -105,6 +105,38 @@ describe('TaskView', () => {
     expect(screen.getByTestId('composer-mention-highlight').style.fontWeight).toBe('inherit');
   });
 
+  it('preserves overlay scroll position when auto-resize resets textarea scrollTop', async () => {
+    render(<TaskView chatId="chat-1" agentsMap={agentsMap} />);
+    const input = await screen.findByTestId('composer-input');
+
+    // Simulate content that overflows max height (>160px)
+    Object.defineProperty(input, 'scrollHeight', { configurable: true, get: () => 300 });
+
+    // Track scrollTop — initial value simulates cursor scrolled mid-content
+    let scrollTopValue = 80;
+    Object.defineProperty(input, 'scrollTop', {
+      configurable: true,
+      get: () => scrollTopValue,
+      set: (v) => { scrollTopValue = Math.max(0, v); },
+    });
+
+    // Intercept style.height to simulate browser resetting scrollTop when height='auto'
+    Object.defineProperty(input.style, 'height', {
+      configurable: true,
+      get: () => '',
+      set: (v) => { if (v === 'auto') scrollTopValue = 0; },
+    });
+
+    await act(async () => {
+      fireEvent.change(input, { target: { value: 'a'.repeat(200), selectionStart: 200, selectionEnd: 200 } });
+    });
+
+    // The overlay must translate by the restored scrollTop (80), not the reset 0
+    const overlay = input.previousElementSibling;
+    expect(overlay).not.toBeNull();
+    expect(overlay.style.transform).toBe('translateY(-80px)');
+  });
+
   it('deletes a whole mention when backspacing immediately after it', async () => {
     render(<TaskView chatId="chat-1" agentsMap={agentsMap} />);
 

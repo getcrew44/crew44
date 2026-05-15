@@ -131,7 +131,7 @@ function MessageEvent({ event, agentsMap, thought, showHeader = true }) {
   }
 
   return (
-    <div style={{ display: 'flex', gap: 14, padding: showHeader ? '14px 0' : '2px 0' }}>
+    <div style={{ display: 'flex', gap: 14, padding: showHeader ? '14px 0 2px' : '2px 0' }}>
       {showHeader
         ? <Avatar agent={agent} size={28} />
         : <div style={{ width: 28, flexShrink: 0 }} aria-hidden="true" />}
@@ -160,7 +160,7 @@ function ThinkingEvent({ event, agentsMap, showHeader = true }) {
   const agent = resolveAuthor(event.author, agentsMap);
   if (!agent || agent.kind !== 'agent') return null;
   return (
-    <div style={{ display: 'flex', gap: 14, padding: showHeader ? '10px 0' : '2px 0' }}>
+    <div style={{ display: 'flex', gap: 14, padding: showHeader ? '10px 0 2px' : '2px 0' }}>
       {showHeader
         ? <Avatar agent={agent} size={28} />
         : <div style={{ width: 28, flexShrink: 0 }} aria-hidden="true" />}
@@ -300,7 +300,7 @@ function ToolEventGutter({ author, time, showHeader, agentsMap, children, testid
   return (
     <div
       data-testid={testid}
-      style={{ display: 'flex', gap: 14, padding: showHeader ? '10px 0' : '2px 0' }}
+      style={{ display: 'flex', gap: 14, padding: showHeader ? '10px 0 2px' : '2px 0' }}
     >
       {showHeader
         ? <Avatar agent={agent} size={28} />
@@ -337,6 +337,7 @@ function ToolEvent({ event, agentsMap, showHeader = true }) {
 // own compact body.
 function ToolGroupEvent({ events, agentsMap, showHeader = true }) {
   const [open, setOpen] = React.useState(false);
+  const mountedLengthRef = React.useRef(events.length);
   const anyError = events.some(e => e.result === 'error');
   const anyPending = events.some(e => e.result === 'pending');
   const status = anyPending ? 'pending' : anyError ? 'error' : 'ok';
@@ -391,6 +392,7 @@ function ToolGroupEvent({ events, agentsMap, showHeader = true }) {
                   groups.push({ name: tool, count: 1 });
                 }
               }
+              const isLive = events.length > mountedLengthRef.current;
               return groups.map((g, i) => (
                 <React.Fragment key={g.name}>
                   {i > 0 && ' · '}
@@ -400,7 +402,7 @@ function ToolGroupEvent({ events, agentsMap, showHeader = true }) {
                       {' '}
                       <span
                         key={g.count}
-                        style={{ display: 'inline-block', animation: 'cw-count-pop .28s ease-out' }}
+                        style={{ display: 'inline-block', animation: isLive ? 'cw-count-pop .28s ease-out' : undefined }}
                       >x{g.count}</span>
                     </>
                   )}
@@ -479,6 +481,7 @@ function StreamingIndicator({ agentsMap, currentAgentId }) {
   const subject = agent ? `${agent.name} is` : 'Agent is';
   return (
     <div style={{ display: 'flex', gap: 14, padding: '10px 0' }}>
+      <div style={{ width: 28, flexShrink: 0 }} aria-hidden="true" />
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#A89F92', fontSize: 13 }}>
         <span
           aria-hidden="true"
@@ -1188,8 +1191,10 @@ function Composer({ onSend, isStreaming, onCancel, agentsMap, skills = [], proje
 
   React.useEffect(() => {
     if (!ta.current) return;
+    const prevScrollTop = ta.current.scrollTop;
     ta.current.style.height = 'auto';
     ta.current.style.height = Math.min(160, ta.current.scrollHeight) + 'px';
+    ta.current.scrollTop = prevScrollTop;
     setScrollTop(ta.current.scrollTop);
   }, [val]);
 
