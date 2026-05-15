@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"log"
 	"os"
 	"path/filepath"
 	"sort"
@@ -64,6 +65,9 @@ func New(cfg Config) (*App, error) {
 	if err := app.bootstrapDefaultState(); err != nil {
 		return nil, err
 	}
+	if err := app.recoverInterruptedStreams(); err != nil {
+		return nil, err
+	}
 	if err := app.seedOptimizerProject(); err != nil {
 		return nil, err
 	}
@@ -71,6 +75,69 @@ func New(cfg Config) (*App, error) {
 		return nil, err
 	}
 	return app, nil
+}
+
+// recoverInterruptedStreams flips any chats whose stream is persisted as
+// "streaming" back to "idle" on startup. Such chats represent runs interrupted
+// by the previous daemon's exit (crash, quit, SIGTERM); the goroutine that
+// would have called finishChatSuccess never got the chance. Without this
+// sweep the UI shows them as "still working" forever and the TaskView keeps
+// isStreaming pinned to true while waiting for events that will never come.
+// Appends a terminal error event so the conversation shows what happened.
+func (a *App) recoverInterruptedStreams() error {
+	projects, err := a.store.ListProjects()
+	if err != nil {
+		return err
+	}
+	now := time.Now().UTC()
+	for _, project := range projects {
+		chats, err := a.store.ListChats(project.ID)
+		if err != nil {
+			// A single corrupted project must not block daemon startup.
+			log.Printf("recovery: list chats for project %s failed: %v", project.ID, err)
+			continue
+		}
+		for _, chat := range chats {
+			if chat.Stream.Status != "streaming" {
+				continue
+			}
+			actorAgentID := chat.Stream.AgentID
+			if actorAgentID == "" {
+				actorAgentID = chat.CurrentAgentID
+			}
+			payload := model.ErrorPayload{
+				Subtype: "interrupted",
+				Code:    "stream_interrupted",
+				Message: "Daemon restarted while the agent was running. The turn was interrupted.",
+				AgentID: actorAgentID,
+			}
+			if payload.AgentID != "" {
+				if agent, agentErr := a.store.GetAgent(payload.AgentID); agentErr == nil {
+					payload.AgentName = agent.Name
+				}
+			}
+			if _, err := a.store.AppendEvent(chat.ID, model.Event{
+				Type:         model.EventTypeError,
+				TS:           now,
+				TurnID:       chat.ActiveTurnID,
+				ActorAgentID: actorAgentID,
+				Error:        &payload,
+			}); err != nil {
+				// Better to leave the chat unannotated than to skip the status
+				// flip — the user still needs the spinner to stop.
+				log.Printf("recovery: append error event for chat %s failed: %v", chat.ID, err)
+			}
+			chat.Stream.Status = "idle"
+			chat.Stream.LastError = payload.Message
+			chat.Stream.CancelRequested = false
+			chat.PendingHandoverAgentID = ""
+			chat.UpdatedAt = now
+			if err := a.store.SaveChat(chat); err != nil {
+				log.Printf("recovery: save chat %s failed: %v", chat.ID, err)
+			}
+		}
+	}
+	return nil
 }
 
 // seedOptimizerProject ensures the hidden __optimizer__ project exists.

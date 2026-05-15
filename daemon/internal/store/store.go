@@ -675,7 +675,11 @@ func readJSONL[T any](path string, out *[]T) error {
 	}
 	defer file.Close()
 
+	// Tool-call results in events.jsonl can be much larger than bufio.Scanner's
+	// 64KiB default token size (one observed line was 78KiB). Raise the cap so
+	// large tool outputs don't crash startup-time event reads.
 	scanner := bufio.NewScanner(file)
+	scanner.Buffer(make([]byte, 0, 64*1024), 64*1024*1024)
 	items := make([]T, 0)
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
