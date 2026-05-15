@@ -269,6 +269,42 @@ describe('NewTaskRoute', () => {
     ]);
   });
 
+  it('accepts dropped folder attachments in the new task composer', async () => {
+    window.electronAPI.getPathInfo.mockImplementationOnce(async (paths) => paths.map(path => ({
+      path,
+      name: path.split('/').pop(),
+      isDirectory: true,
+    })));
+    render(
+      <NewTaskRoute
+        projects={projects}
+        agents={agents}
+        onNewTask={() => {}}
+        initialProjectId="p1"
+      />
+    );
+
+    const folder = new File([''], 'Design Kit', { type: '' });
+    fireEvent.drop(screen.getByTestId('new-task-input'), {
+      dataTransfer: {
+        types: ['Files'],
+        items: [{ kind: 'file', getAsFile: () => folder }],
+        files: [folder],
+      },
+    });
+
+    expect(await screen.findByTestId('attachment-chip')).toHaveTextContent('Design Kit');
+    fireEvent.change(screen.getByTestId('new-task-input'), {
+      target: { value: 'from folder drop' },
+    });
+    fireEvent.click(screen.getByTestId('start-crew-button'));
+
+    await waitFor(() => expect(api.postMessage).toHaveBeenCalledOnce());
+    expect(api.postMessage).toHaveBeenCalledWith('chat-1', 'from folder drop', 'a1', [
+      { display_name: 'Design Kit', path: '/Users/me/Design Kit', kind: 'folder' },
+    ]);
+  });
+
   it('can start an attachment-only new task with the file name as the title', async () => {
     window.electronAPI.openFileDialog.mockResolvedValue({
       canceled: false,

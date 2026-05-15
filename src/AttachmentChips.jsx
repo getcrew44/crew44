@@ -46,7 +46,23 @@ function FileGlyph({ failed = false }) {
   );
 }
 
+function FolderGlyph() {
+  return (
+    <span style={{
+      width: 34, height: 34, borderRadius: 9,
+      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+      background: '#F1EBDC', color: '#807972', flexShrink: 0,
+    }}>
+      <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">
+        <path d="M2.5 5.5a1.4 1.4 0 0 1 1.4-1.4h3l1.2 1.4h6a1.4 1.4 0 0 1 1.4 1.4v6.2a1.4 1.4 0 0 1-1.4 1.4H3.9a1.4 1.4 0 0 1-1.4-1.4z"
+          fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round"/>
+      </svg>
+    </span>
+  );
+}
+
 function AttachmentThumb({ attachment }) {
+  if (attachment.kind === 'folder') return <FolderGlyph />;
   if (attachment.kind === 'image' && attachment.thumbnail_jpeg_base64) {
     return (
       <img

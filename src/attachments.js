@@ -54,9 +54,9 @@ async function buildAttachmentsFromPaths(paths) {
 async function buildAttachmentsFromInfos(infos, fileByPath) {
   const attachments = [];
   for (const info of infos || []) {
-    if (!info?.path || info.isDirectory) continue;
+    if (!info?.path) continue;
     const displayName = info.name || info.path.split(/[\\/]/).pop() || info.path;
-    const kind = attachmentKindForName(displayName);
+    const kind = info.isDirectory ? 'folder' : attachmentKindForName(displayName);
     const attachment = {
       display_name: displayName,
       path: info.path,

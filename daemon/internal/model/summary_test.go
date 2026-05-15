@@ -107,6 +107,11 @@ func TestBuildChatSummaryIncludesAttachmentLinksWithoutThumbnailData(t *testing.
 						Kind:             "image",
 						ThumbnailJPEGB64: "base64-thumbnail",
 					},
+					{
+						DisplayName: "Design Kit",
+						Path:        "/Users/mindivelabs/Design Kit",
+						Kind:        "folder",
+					},
 				},
 			},
 		},
@@ -117,7 +122,8 @@ func TestBuildChatSummaryIncludesAttachmentLinksWithoutThumbnailData(t *testing.
 		t.Fatalf("summary should include attachment section after user text, got %q", summary)
 	}
 	if !strings.Contains(summary, "- [proxy.txt](/Users/mindivelabs/proxy.txt)") ||
-		!strings.Contains(summary, "- [screen.png](/Users/mindivelabs/screen.png)") {
+		!strings.Contains(summary, "- [screen.png](/Users/mindivelabs/screen.png)") ||
+		!strings.Contains(summary, "- [Design Kit](/Users/mindivelabs/Design Kit)") {
 		t.Fatalf("summary should include attachment links, got %q", summary)
 	}
 	if strings.Contains(summary, "base64-thumbnail") {

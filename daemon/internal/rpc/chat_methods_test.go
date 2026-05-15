@@ -123,6 +123,11 @@ func TestChatMessageAttachmentsPersistAndAppendToRuntimePrompt(t *testing.T) {
 				"kind":                  "image",
 				"thumbnail_jpeg_base64": "base64-thumbnail",
 			},
+			{
+				"display_name": "Design Kit",
+				"path":         "/Users/mindivelabs/Design Kit",
+				"kind":         "folder",
+			},
 		},
 	}, "id", chatID), http.StatusAccepted, nil)
 	waitForChatIdle(t, env.server, chatID)
@@ -131,7 +136,8 @@ func TestChatMessageAttachmentsPersistAndAppendToRuntimePrompt(t *testing.T) {
 	case req := <-engine.requests:
 		if !strings.Contains(req.Prompt, "please inspect\n\nAttachments:") ||
 			!strings.Contains(req.Prompt, "- [proxy.txt](/Users/mindivelabs/proxy.txt)") ||
-			!strings.Contains(req.Prompt, "- [screen.png](/Users/mindivelabs/screen.png)") {
+			!strings.Contains(req.Prompt, "- [screen.png](/Users/mindivelabs/screen.png)") ||
+			!strings.Contains(req.Prompt, "- [Design Kit](/Users/mindivelabs/Design Kit)") {
 			t.Fatalf("expected runtime prompt to include markdown attachment links, got %q", req.Prompt)
 		}
 	case <-time.After(time.Second):
@@ -147,7 +153,8 @@ func TestChatMessageAttachmentsPersistAndAppendToRuntimePrompt(t *testing.T) {
 		t.Fatalf("expected persisted content to stay clean, got %#v", message["content"])
 	}
 	attachments := message["attachments"].([]any)
-	if len(attachments) != 2 || !strings.Contains(fmt.Sprint(attachments), "base64-thumbnail") {
+	if len(attachments) != 3 || !strings.Contains(fmt.Sprint(attachments), "base64-thumbnail") ||
+		!strings.Contains(fmt.Sprint(attachments), "folder") {
 		t.Fatalf("expected persisted attachments with thumbnail metadata, got %#v", attachments)
 	}
 }

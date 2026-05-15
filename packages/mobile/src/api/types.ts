@@ -73,7 +73,7 @@ export interface BackendEvent {
 export interface MessageAttachment {
   display_name: string;
   path: string;
-  kind: "file" | "image";
+  kind: "file" | "image" | "folder";
   thumbnail_jpeg_base64?: string;
   thumbnail_failed?: boolean;
 }

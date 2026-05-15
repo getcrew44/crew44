@@ -179,6 +179,34 @@ describe('TaskView', () => {
     ]);
   });
 
+  it('accepts dropped folder attachments in the composer', async () => {
+    window.electronAPI.getPathInfo.mockImplementationOnce(async (paths) => paths.map(path => ({
+      path,
+      name: path.split('/').pop(),
+      isDirectory: true,
+    })));
+    render(<TaskView chatId="chat-1" agentsMap={agentsMap} />);
+
+    const composer = await screen.findByTestId('composer-column');
+    const folder = new File([''], 'Design Kit', { type: '' });
+    fireEvent.drop(composer, {
+      dataTransfer: {
+        types: ['Files'],
+        items: [{ kind: 'file', getAsFile: () => folder }],
+        files: [folder],
+      },
+    });
+
+    expect(await screen.findByTestId('attachment-chip')).toHaveTextContent('Design Kit');
+    fireEvent.change(screen.getByTestId('composer-input'), { target: { value: 'use this folder' } });
+    fireEvent.click(screen.getByTestId('composer-send'));
+
+    await waitFor(() => expect(api.postMessage).toHaveBeenCalledOnce());
+    expect(api.postMessage).toHaveBeenCalledWith('chat-1', 'use this folder', 'agent-1', [
+      { display_name: 'Design Kit', path: '/Users/me/Design Kit', kind: 'folder' },
+    ]);
+  });
+
   it('removes an attachment before sending', async () => {
     window.electronAPI.openFileDialog.mockResolvedValue({
       canceled: false,
