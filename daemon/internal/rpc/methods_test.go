@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sqtech/crew-ai/crewai-repo/internal/runtime"
+	"github.com/getcrew44/crew44/daemon/internal/runtime"
 )
 
 func TestResourceLifecyclePersistsExpectedFiles(t *testing.T) {

@@ -7,14 +7,14 @@ const net = require('net');
 const os = require('os');
 const path = require('path');
 
-const isDev = Boolean(process.env.CREWAI_RENDERER_URL);
-const appName = 'CrewAI Desktop';
-const appIcon = path.join(__dirname, 'assets', 'crewai.icns');
-const bundledDaemon = path.join(__dirname, '..', 'bin', process.platform === 'win32' ? 'crewai-daemon.exe' : 'crewai-daemon');
-const configuredBackendUrl = (process.env.CREWAI_BACKEND_URL || process.env.CREWAI_BASE_URL || '').replace(/\/$/, '');
-const configuredRpcUrl = process.env.CREWAI_RPC_URL || '';
-const configuredAuthToken = process.env.AUTH_TOKEN || process.env.CREWAI_AUTH_TOKEN || process.env.CREWAI_API_TOKEN || '';
-const preferredPort = Number(process.env.CREWAI_DAEMON_PORT || process.env.PORT || 18766);
+const isDev = Boolean(process.env.CREW44_RENDERER_URL);
+const appName = 'Crew44';
+const appIcon = path.join(__dirname, 'assets', 'crew44.icns');
+const bundledDaemon = path.join(__dirname, '..', 'bin', process.platform === 'win32' ? 'crew44-daemon.exe' : 'crew44-daemon');
+const configuredBackendUrl = (process.env.CREW44_BACKEND_URL || process.env.CREW44_BASE_URL || '').replace(/\/$/, '');
+const configuredRpcUrl = process.env.CREW44_RPC_URL || '';
+const configuredAuthToken = process.env.AUTH_TOKEN || process.env.CREW44_AUTH_TOKEN || process.env.CREW44_API_TOKEN || '';
+const preferredPort = Number(process.env.CREW44_DAEMON_PORT || process.env.PORT || 18766);
 const cliPathEntries = [
   '/opt/homebrew/bin',
   '/opt/homebrew/sbin',
@@ -69,7 +69,7 @@ async function choosePort() {
   }
 
   const port = await findOpenPort();
-  console.log(`[crewai] preferred daemon port ${preferredPort || '(invalid)'} is unavailable; using ${port}`);
+  console.log(`[crew44] preferred daemon port ${preferredPort || '(invalid)'} is unavailable; using ${port}`);
   return port;
 }
 
@@ -89,7 +89,7 @@ function repairProcessPath() {
   if (process.platform === 'win32') return;
 
   const shellPath = process.env.SHELL || '/bin/zsh';
-  const marker = '__CREWAI_LOGIN_SHELL_PATH__';
+  const marker = '__CREW44_LOGIN_SHELL_PATH__';
   let loginShellPath = '';
 
   try {
@@ -104,7 +104,7 @@ function repairProcessPath() {
       loginShellPath = output.slice(markerIndex + marker.length).trim();
     }
   } catch (err) {
-    console.warn(`[crewai] could not recover login shell PATH via ${shellPath}: ${err.message}`);
+    console.warn(`[crew44] could not recover login shell PATH via ${shellPath}: ${err.message}`);
   }
 
   const entries = [
@@ -166,7 +166,7 @@ async function ensureBackend() {
     backendUrl = 'http://127.0.0.1:8080';
     rpcUrl = configuredRpcUrl || rpcUrlForBackend(backendUrl);
     authToken = configuredAuthToken;
-    console.log(`[crewai] bundled daemon missing at ${bundledDaemon}; using ${backendUrl}`);
+    console.log(`[crew44] bundled daemon missing at ${bundledDaemon}; using ${backendUrl}`);
     await waitForHealth(backendUrl);
     return;
   }
@@ -186,19 +186,19 @@ async function ensureBackend() {
   });
 
   daemonProcess.stderr.on('data', chunk => {
-    console.error(`[crewai-daemon] ${String(chunk).trimEnd()}`);
+    console.error(`[crew44-daemon] ${String(chunk).trimEnd()}`);
   });
 
   daemonProcess.on('exit', (code, signal) => {
     if (code !== 0 && signal !== 'SIGTERM') {
-      console.error(`[crewai] daemon exited code=${code} signal=${signal}`);
+      console.error(`[crew44] daemon exited code=${code} signal=${signal}`);
     }
     daemonProcess = null;
   });
 
-  console.log(`[crewai] daemon starting at ${backendUrl}`);
+  console.log(`[crew44] daemon starting at ${backendUrl}`);
   await waitForHealth(backendUrl);
-  console.log(`[crewai] daemon ready at ${backendUrl}`);
+  console.log(`[crew44] daemon ready at ${backendUrl}`);
 }
 
 function createWindow() {
@@ -225,7 +225,7 @@ function createWindow() {
   });
 
   if (isDev) {
-    mainWindow.loadURL(process.env.CREWAI_RENDERER_URL);
+    mainWindow.loadURL(process.env.CREW44_RENDERER_URL);
   } else {
     mainWindow.loadFile(path.join(__dirname, '..', 'dist', 'index.html'));
   }
@@ -270,9 +270,9 @@ ipcMain.handle('dialog:open-folder', async () => {
 
 ipcMain.handle('project:create-blank-folder', async (_event, name) => {
   const documentsDir = app.getPath('documents');
-  const crewaiDir = path.join(documentsDir, 'CrewAI');
+  const crew44Dir = path.join(documentsDir, 'Crew44');
   const folderName = sanitizeProjectFolderName(name);
-  const projectDir = await uniqueProjectFolderPath(crewaiDir, folderName);
+  const projectDir = await uniqueProjectFolderPath(crew44Dir, folderName);
   await fs.promises.mkdir(projectDir, { recursive: true });
   return { path: projectDir };
 });

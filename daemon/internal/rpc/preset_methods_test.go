@@ -9,7 +9,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/sqtech/crew-ai/crewai-repo/internal/runtime"
+	"github.com/getcrew44/crew44/daemon/internal/runtime"
 )
 
 // preset_keys we expect to see in the default crew. Update when the manifest changes.

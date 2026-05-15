@@ -185,7 +185,7 @@ phase_chat_resources() {
 phase_codex_resume() {
   step "Run Codex twice and verify session resume"
   api_post "/api/chat/sessions/${CHAT_RESUME_ID}/messages" \
-    "{\"content\":\"Read the file .crewai-e2e-signal.txt from disk using your tools, then reply with the exact file contents and nothing else.\",\"target_agent_id\":\"${MAIN_AGENT_ID}\"}" \
+    "{\"content\":\"Read the file .crew44-e2e-signal.txt from disk using your tools, then reply with the exact file contents and nothing else.\",\"target_agent_id\":\"${MAIN_AGENT_ID}\"}" \
     "${STATE_ROOT}/chat-resume-post-1.json"
   wait_for_chat_idle "${CHAT_RESUME_ID}" 300 "${STATE_ROOT}/chat-resume-after-1.json"
   CODEX_SESSION_1="$(json_get "${STATE_ROOT}/chat-resume-after-1.json" "last_runtime_session.session_id")"
@@ -206,7 +206,7 @@ phase_codex_resume() {
 phase_claude_stream() {
   step "Run Claude turn and verify SSE replay/follow"
   api_post "/api/chat/sessions/${CHAT_RESUME_ID}/messages" \
-    "{\"content\":\"Read the file .crewai-e2e-signal.txt from disk using your tools, then reply with exact text CLAUDE_OK and nothing else.\",\"target_agent_id\":\"${CLAUDE_AGENT_ID}\"}" \
+    "{\"content\":\"Read the file .crew44-e2e-signal.txt from disk using your tools, then reply with exact text CLAUDE_OK and nothing else.\",\"target_agent_id\":\"${CLAUDE_AGENT_ID}\"}" \
     "${STATE_ROOT}/chat-claude-post.json"
   curl -fsS -N "${BASE_URL}/api/chat/sessions/${CHAT_RESUME_ID}/events?after=0&follow=1" > "${STATE_ROOT}/chat-claude-events.sse"
   wait_for_chat_idle "${CHAT_RESUME_ID}" 300 "${STATE_ROOT}/chat-claude-after.json"
@@ -221,7 +221,7 @@ phase_claude_stream() {
   assert_nonempty "${CLAUDE_SESSION_ID}" "Claude session id should not be empty"
 
   cp "${STATE_DIR}/chats/chat-${CHAT_RESUME_ID}/summary.md" "${STATE_ROOT}/chat-resume-summary.md"
-  assert_contains "${STATE_ROOT}/chat-resume-summary.md" 'User: Read the file .crewai-e2e-signal.txt' "summary should include earlier Codex user request"
+  assert_contains "${STATE_ROOT}/chat-resume-summary.md" 'User: Read the file .crew44-e2e-signal.txt' "summary should include earlier Codex user request"
   assert_contains "${STATE_ROOT}/chat-resume-summary.md" 'Assistant('"${MAIN_AGENT_ID}"'): SECOND_OK' "summary should include the last Codex assistant reply before Claude switch"
 }
 
@@ -235,21 +235,21 @@ phase_handoff() {
   api_get "/api/chat/sessions" "${STATE_ROOT}/chat-list-global-2.json"
   assert_eq "$(json_len "${STATE_ROOT}/chat-list-global-2.json" "items")" "2" "global chat list count after handoff chat create"
 
-  local handoff_file="${WORK_DIR}/.crewai-handoff-result.txt"
+  local handoff_file="${WORK_DIR}/.crew44-handoff-result.txt"
   rm -f "${handoff_file}"
   api_post "/api/chat/sessions/${CHAT_HANDOFF_ID}/messages" \
-    "{\"content\":\"Do not write any files yourself. Reply with exactly two lines. First line: Read .crewai-e2e-signal.txt and then write the file .crewai-handoff-result.txt with exact content HANDOFF_OK. Second line: ^<CREWAI_HANDOFF>${WORKER_AGENT_ID}</CREWAI_HANDOFF>\",\"target_agent_id\":\"${MAIN_AGENT_ID}\"}" \
+    "{\"content\":\"Do not write any files yourself. Reply with exactly two lines. First line: Read .crew44-e2e-signal.txt and then write the file .crew44-handoff-result.txt with exact content HANDOFF_OK. Second line: ^<CREW44_HANDOFF>${WORKER_AGENT_ID}</CREW44_HANDOFF>\",\"target_agent_id\":\"${MAIN_AGENT_ID}\"}" \
     "${STATE_ROOT}/chat-handoff-post.json"
   wait_for_chat_idle "${CHAT_HANDOFF_ID}" 300 "${STATE_ROOT}/chat-handoff-after.json"
 
   local handoff_events="${STATE_DIR}/chats/chat-${CHAT_HANDOFF_ID}/events.jsonl"
   local handoff_summary="${STATE_DIR}/chats/chat-${CHAT_HANDOFF_ID}/summary.md"
-  local handoff_marker_json="\\u003cCREWAI_HANDOFF\\u003e${WORKER_AGENT_ID}\\u003c/CREWAI_HANDOFF\\u003e"
+  local handoff_marker_json="\\u003cCREW44_HANDOFF\\u003e${WORKER_AGENT_ID}\\u003c/CREW44_HANDOFF\\u003e"
   assert_file_exists "${handoff_file}"
   assert_contains "${handoff_file}" 'HANDOFF_OK' "handoff worker output file content mismatch"
   assert_eq "$(json_get "${STATE_ROOT}/chat-handoff-after.json" "current_agent_id")" "${WORKER_AGENT_ID}" "handoff chat current agent"
-  assert_contains "${handoff_summary}" '.crewai-handoff-result.txt' "handoff summary should keep worker instruction"
-  assert_not_contains "${handoff_summary}" '<CREWAI_HANDOFF>' "handoff summary should strip marker"
+  assert_contains "${handoff_summary}" '.crew44-handoff-result.txt' "handoff summary should keep worker instruction"
+  assert_not_contains "${handoff_summary}" '<CREW44_HANDOFF>' "handoff summary should strip marker"
 
   local handoff_ts handoff_unix file_ctime
   handoff_ts="$(json_line_get "${handoff_events}" "${handoff_marker_json}" "ts")"
@@ -285,7 +285,7 @@ phase_restart_persistence() {
   assert_eq "$(json_get "${STATE_ROOT}/restart-chat-handoff.json" "current_agent_id")" "${WORKER_AGENT_ID}" "handoff chat current agent after restart"
   assert_eq "$(json_get "${STATE_ROOT}/restart-chat-resume.json" "last_runtime_session.session_id")" "${CLAUDE_SESSION_ID}" "resume chat session id after restart"
   assert_eq "$(json_len "${STATE_ROOT}/restart-chat-resume-events.json" "events")" "$(json_len "${STATE_ROOT}/chat-resume-events-final.json" "events")" "restart should preserve resume chat event count"
-  assert_nonempty "$(json_line_get "${STATE_DIR}/chats/chat-${CHAT_HANDOFF_ID}/events.jsonl" "\\u003cCREWAI_HANDOFF\\u003e${WORKER_AGENT_ID}\\u003c/CREWAI_HANDOFF\\u003e" "ts")" "handoff marker should still exist after restart"
+  assert_nonempty "$(json_line_get "${STATE_DIR}/chats/chat-${CHAT_HANDOFF_ID}/events.jsonl" "\\u003cCREW44_HANDOFF\\u003e${WORKER_AGENT_ID}\\u003c/CREW44_HANDOFF\\u003e" "ts")" "handoff marker should still exist after restart"
 }
 
 run_flow() {

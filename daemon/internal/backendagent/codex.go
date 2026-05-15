@@ -458,7 +458,7 @@ func boundCodexToolOutput(output string) string {
 		return output
 	}
 	total := len(output)
-	marker := fmt.Sprintf("\n\n[output truncated by CrewAI: kept %d of %d bytes]", codexToolOutputMaxBytes, total)
+	marker := fmt.Sprintf("\n\n[output truncated by Crew44: kept %d of %d bytes]", codexToolOutputMaxBytes, total)
 	keep := codexToolOutputMaxBytes - len(marker)
 	if keep < 0 {
 		keep = 0

@@ -15,7 +15,7 @@ export default function Index() {
   if (client.status === "error") {
     return (
       <Screen>
-        <Header title="CrewAI Mobile" />
+        <Header title="Crew44 Mobile" />
         <EmptyState title="Connection failed" body={client.error} />
         <View style={{ padding: 18, gap: 10 }}>
           <Button label="Reconnect" onPress={client.reconnect} />
@@ -27,7 +27,7 @@ export default function Index() {
 
   return (
     <Screen>
-      <Header title="CrewAI Mobile" />
+      <Header title="Crew44 Mobile" />
       <LoadingState label={client.status === "connecting" ? "Connecting to desktop..." : "Loading pairing..."} />
     </Screen>
   );

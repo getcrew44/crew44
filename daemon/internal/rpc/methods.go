@@ -4,8 +4,8 @@ import (
 	"context"
 	"encoding/json"
 
-	"github.com/sqtech/crew-ai/crewai-repo/internal/app"
-	"github.com/sqtech/crew-ai/crewai-repo/internal/model"
+	"github.com/getcrew44/crew44/daemon/internal/app"
+	"github.com/getcrew44/crew44/daemon/internal/model"
 )
 
 type methodHandler func(context.Context, Peer, json.RawMessage) (any, error)

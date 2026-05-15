@@ -27,7 +27,7 @@ Operating principles:
 - Write or update tests for behavior changes. Run the focused tests first, then broaden verification when risk warrants it.
 - When debugging, form an explicit hypothesis and verify it instead of guessing.
 - Match existing patterns in the codebase. Do not impose unrelated style preferences.
-- Preserve user data in `~/.crewai` and existing workspace changes unless the user explicitly asks to change them.
+- Preserve user data in `~/.crew44` and existing workspace changes unless the user explicitly asks to change them.
 - Leave the working tree understandable. Do not mix unrelated cleanup into the same change.
 
 If implementation is blocked by a product or design decision, hand off with the concrete code context: relevant files, current finding, and the exact decision needed.

@@ -40,8 +40,8 @@ Or run the whole suite in one go:
 ./docs/e2e-test/api-e2e.sh all
 ```
 
-Artifacts are written under `/tmp/crewai-api-e2e` by default. Override with
-`CREWAI_API_E2E_ROOT=...` if needed.
+Artifacts are written under `/tmp/crew44-api-e2e` by default. Override with
+`CREW44_API_E2E_ROOT=...` if needed.
 
 ## Scenario Outline
 
@@ -58,7 +58,7 @@ verifies the following paths do **not** exist before the backend starts:
 
 It also creates a workspace sentinel file:
 
-- `workspace/.crewai-e2e-signal.txt`
+- `workspace/.crew44-e2e-signal.txt`
 
 ### 2. Rescan runtimes
 
@@ -191,7 +191,7 @@ This step specifically covers a frontend-facing expectation that
 
 The suite posts two messages to the first chat through the main Codex agent:
 
-1. Read `.crewai-e2e-signal.txt` and echo its exact contents
+1. Read `.crew44-e2e-signal.txt` and echo its exact contents
 2. Reply with exact text `SECOND_OK`
 
 Assertions:
@@ -225,19 +225,19 @@ replay, and live WebSocket follow.
 The suite creates a second chat, then instructs the main Codex agent to:
 
 - emit a plain-language instruction for another agent
-- append an exact standalone `<CREWAI_AGENT_HANDOVER agent_id="...">one sentence for the next agent</CREWAI_AGENT_HANDOVER>` marker
+- append an exact standalone `<CREW44_AGENT_HANDOVER agent_id="...">one sentence for the next agent</CREW44_AGENT_HANDOVER>` marker
 
 The worker Codex agent must then, after the handover:
 
-- read `.crewai-e2e-signal.txt`
-- write `.crewai-handoff-result.txt` with exact content `HANDOFF_OK`
+- read `.crew44-e2e-signal.txt`
+- write `.crew44-handoff-result.txt` with exact content `HANDOFF_OK`
 
 Assertions:
 
 - `events.jsonl` contains `handover.scheduled` and `handover.occurred` events
 - persisted assistant message content and `summary.md` keep the worker instruction but strip the marker
 - chat `current_agent_id` becomes the worker agent
-- `workspace/.crewai-handoff-result.txt` exists with exact expected content
+- `workspace/.crew44-handoff-result.txt` exists with exact expected content
 - file `ctime` is later than the persisted handoff-event timestamp
 
 That final timestamp check guards against false positives where the file was

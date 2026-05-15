@@ -10,7 +10,7 @@ import (
 	"strings"
 )
 
-const skillManifestFile = ".crewai-skill-manifest.json"
+const skillManifestFile = ".crew44-skill-manifest.json"
 
 var nonAlphaNum = regexp.MustCompile(`[^a-z0-9]+`)
 
@@ -155,7 +155,7 @@ func writeSkillFiles(skillsDir string, skills []SkillContext) error {
 			if exists, err := pathExists(dir); err != nil {
 				return err
 			} else if exists {
-				return fmt.Errorf("skill directory %q already exists and is not managed by CrewAI", dir)
+				return fmt.Errorf("skill directory %q already exists and is not managed by Crew44", dir)
 			}
 		}
 		if err := os.MkdirAll(dir, 0o755); err != nil {

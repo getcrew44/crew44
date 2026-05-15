@@ -4,9 +4,9 @@ const path = require('path');
 
 const root = path.resolve(__dirname, '..', '..');
 const daemonDir = path.join(root, 'daemon');
-const frontendPort = process.env.CREWAI_FRONTEND_PORT || '3000';
-const backendUrl = process.env.CREWAI_BACKEND_URL || process.env.CREWAI_BASE_URL || 'http://127.0.0.1:8080';
-const rpcUrl = process.env.CREWAI_RPC_URL || backendUrl.replace(/^http:/, 'ws:').replace(/^https:/, 'wss:') + '/rpc';
+const frontendPort = process.env.CREW44_FRONTEND_PORT || '3000';
+const backendUrl = process.env.CREW44_BACKEND_URL || process.env.CREW44_BASE_URL || 'http://127.0.0.1:8080';
+const rpcUrl = process.env.CREW44_RPC_URL || backendUrl.replace(/^http:/, 'ws:').replace(/^https:/, 'wss:') + '/rpc';
 const viteBin = path.join(root, 'node_modules', '.bin', process.platform === 'win32' ? 'vite.cmd' : 'vite');
 
 function spawnLogged(command, args, options = {}) {
@@ -40,7 +40,7 @@ function waitFor(url, retries = 80) {
 }
 
 async function main() {
-  const daemon = spawnLogged('go', ['run', './cmd/crewai-daemon'], { cwd: daemonDir });
+  const daemon = spawnLogged('go', ['run', './cmd/crew44-daemon'], { cwd: daemonDir });
 
   const cleanup = () => {
     if (!daemon.killed) daemon.kill();
@@ -60,9 +60,9 @@ async function main() {
     const vite = spawnLogged(viteBin, ['--host', '127.0.0.1', '--port', frontendPort], {
       env: {
         ...process.env,
-        CREWAI_BACKEND_URL: backendUrl,
-        VITE_CREWAI_RPC_URL: rpcUrl,
-        VITE_CREWAI_AUTH_TOKEN: process.env.AUTH_TOKEN || process.env.CREWAI_AUTH_TOKEN || '',
+        CREW44_BACKEND_URL: backendUrl,
+        VITE_CREW44_RPC_URL: rpcUrl,
+        VITE_CREW44_AUTH_TOKEN: process.env.AUTH_TOKEN || process.env.CREW44_AUTH_TOKEN || '',
       },
     });
     vite.on('exit', code => {

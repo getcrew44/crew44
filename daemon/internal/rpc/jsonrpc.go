@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/sqtech/crew-ai/crewai-repo/internal/app"
+	"github.com/getcrew44/crew44/daemon/internal/app"
 )
 
 var errInvalidParams = errors.New("invalid params")

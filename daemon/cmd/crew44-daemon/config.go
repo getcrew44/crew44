@@ -11,26 +11,26 @@ type serverConfig struct {
 }
 
 func loadServerConfig() (serverConfig, error) {
-	stateDir := os.Getenv("CREWAI_STATE_DIR")
+	stateDir := os.Getenv("CREW44_STATE_DIR")
 	if stateDir == "" {
 		home, err := os.UserHomeDir()
 		if err != nil {
 			return serverConfig{}, err
 		}
-		stateDir = home + "/.crewai"
+		stateDir = home + "/.crew44"
 	}
 
-	runtimeScanDir := os.Getenv("CREWAI_RUNTIME_SCAN_DIR")
+	runtimeScanDir := os.Getenv("CREW44_RUNTIME_SCAN_DIR")
 	if runtimeScanDir == "" {
 		runtimeScanDir = stateDir + "/runtime-manifests"
 	}
 
-	host := firstEnv("HOST", "CREWAI_DAEMON_HOST")
+	host := firstEnv("HOST", "CREW44_DAEMON_HOST")
 	if host == "" {
 		host = "127.0.0.1"
 	}
 
-	port := firstEnv("PORT", "CREWAI_DAEMON_PORT")
+	port := firstEnv("PORT", "CREW44_DAEMON_PORT")
 	if port == "" {
 		port = "8080"
 	}
@@ -40,7 +40,7 @@ func loadServerConfig() (serverConfig, error) {
 		RuntimeScanDir: runtimeScanDir,
 		Host:           host,
 		Port:           port,
-		AuthToken:      firstEnv("AUTH_TOKEN", "CREWAI_AUTH_TOKEN", "CREWAI_API_TOKEN"),
+		AuthToken:      firstEnv("AUTH_TOKEN", "CREW44_AUTH_TOKEN", "CREW44_API_TOKEN"),
 	}, nil
 }
 

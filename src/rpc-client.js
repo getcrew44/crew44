@@ -1,4 +1,4 @@
-const RPC_PROTOCOL = 'crewai.rpc.v1';
+const RPC_PROTOCOL = 'crew44.rpc.v1';
 
 function trimTrailingSlash(value) {
   return String(value || '').replace(/\/$/, '');
@@ -44,10 +44,10 @@ class RpcClient {
           };
         }
 
-        const rpcUrl = import.meta.env.VITE_CREWAI_RPC_URL || deriveRpcUrl(trimTrailingSlash(import.meta.env.VITE_CREWAI_BACKEND_URL || ''));
+        const rpcUrl = import.meta.env.VITE_CREW44_RPC_URL || deriveRpcUrl(trimTrailingSlash(import.meta.env.VITE_CREW44_BACKEND_URL || ''));
         return {
           rpcUrl,
-          token: import.meta.env.VITE_CREWAI_AUTH_TOKEN || '',
+          token: import.meta.env.VITE_CREW44_AUTH_TOKEN || '',
         };
       })();
     }
@@ -63,7 +63,7 @@ class RpcClient {
       if (!config.rpcUrl) throw new Error('RPC URL is not configured');
 
       const protocols = config.token
-        ? [RPC_PROTOCOL, `crewai.bearer.${config.token}`]
+        ? [RPC_PROTOCOL, `crew44.bearer.${config.token}`]
         : [RPC_PROTOCOL];
       const socket = new WebSocket(config.rpcUrl, protocols);
       this.socket = socket;

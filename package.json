@@ -1,6 +1,6 @@
 {
-  "name": "crewai-desktop",
-  "productName": "CrewAI Desktop",
+  "name": "crew44",
+  "productName": "Crew44",
   "version": "0.2.0",
   "main": "electron/main.cjs",
   "type": "module",
@@ -8,15 +8,15 @@
     "packages/*"
   ],
   "scripts": {
-    "dev": "mkdir -p bin && cd daemon && go build -o ../bin/crewai-daemon ./cmd/crewai-daemon && cd .. && node electron/scripts/dev.cjs",
-    "build": "mkdir -p bin && cd daemon && go build -o ../bin/crewai-daemon ./cmd/crewai-daemon && cd .. && vite build && node electron/scripts/build.cjs",
+    "dev": "mkdir -p bin && cd daemon && go build -o ../bin/crew44-daemon ./cmd/crew44-daemon && cd .. && node electron/scripts/dev.cjs",
+    "build": "mkdir -p bin && cd daemon && go build -o ../bin/crew44-daemon ./cmd/crew44-daemon && cd .. && vite build && node electron/scripts/build.cjs",
     "web:dev": "node daemon/scripts/web-dev.cjs",
-    "mobile:start": "npm --workspace=@crewai/mobile run start --",
-    "mobile:android": "npm --workspace=@crewai/mobile run android --",
-    "mobile:ios": "npm --workspace=@crewai/mobile run ios --",
-    "test:mobile": "npm --workspace=@crewai/mobile run test",
+    "mobile:start": "npm --workspace=@crew44/mobile run start --",
+    "mobile:android": "npm --workspace=@crew44/mobile run android --",
+    "mobile:ios": "npm --workspace=@crew44/mobile run ios --",
+    "test:mobile": "npm --workspace=@crew44/mobile run test",
     "test": "cd daemon && go test ./... && cd .. && vitest run && npm run test:mobile",
-    "clean": "rm -rf bin dist .electron-app crewai-server crewai-daemon"
+    "clean": "rm -rf bin dist .electron-app crew44-server crew44-daemon"
   },
   "dependencies": {
     "qrcode.react": "^4.2.0",

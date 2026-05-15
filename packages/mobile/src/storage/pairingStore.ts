@@ -2,8 +2,8 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as SecureStore from "expo-secure-store";
 import { PairedProfile } from "@/remote/client";
 
-const PROFILE_KEY = "crewai.mobile.profile";
-const PRIVATE_KEY = "crewai.mobile.devicePrivateKey";
+const PROFILE_KEY = "crew44.mobile.profile";
+const PRIVATE_KEY = "crew44.mobile.devicePrivateKey";
 
 export async function loadPairing(): Promise<{ profile: PairedProfile; privateKey: string } | null> {
   const [profileText, privateKey] = await Promise.all([

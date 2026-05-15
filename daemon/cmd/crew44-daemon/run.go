@@ -6,7 +6,7 @@ import (
 	"net"
 	"net/http"
 
-	"github.com/sqtech/crew-ai/crewai-repo/internal/httpapi"
+	"github.com/getcrew44/crew44/daemon/internal/httpapi"
 )
 
 var (
@@ -39,7 +39,7 @@ func runServer(cfg serverConfig, logger *log.Logger) error {
 	}
 
 	logger.Printf(
-		"crewai-daemon listening addr=%s state_dir=%s runtime_scan_dir=%s auth=%t",
+		"crew44-daemon listening addr=%s state_dir=%s runtime_scan_dir=%s auth=%t",
 		listener.Addr().String(),
 		cfg.StateDir,
 		cfg.RuntimeScanDir,

@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sqtech/crew-ai/crewai-repo/internal/id"
-	"github.com/sqtech/crew-ai/crewai-repo/internal/model"
+	"github.com/getcrew44/crew44/daemon/internal/id"
+	"github.com/getcrew44/crew44/daemon/internal/model"
 )
 
 type RunRequest struct {
@@ -119,7 +119,7 @@ func (MockEngine) Run(ctx context.Context, request RunRequest, emit func(StreamE
 	}
 	content = fmt.Sprintf("%s reply: %s", request.Agent.Name, content)
 	if target := extractDirectiveValue(request.Prompt, "/handover:"); target != "" {
-		content += "\n<CREWAI_AGENT_HANDOVER agent_id=\"" + target + "\">Continue the user's request.</CREWAI_AGENT_HANDOVER>"
+		content += "\n<CREW44_AGENT_HANDOVER agent_id=\"" + target + "\">Continue the user's request.</CREW44_AGENT_HANDOVER>"
 	}
 	if err := emit(StreamEvent{
 		Type: model.EventTypeMessage,

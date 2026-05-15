@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sqtech/crew-ai/crewai-repo/internal/model"
+	"github.com/getcrew44/crew44/daemon/internal/model"
 )
 
 func TestBuildSystemPromptExpandsTypedMemoryFiles(t *testing.T) {
@@ -150,8 +150,8 @@ func TestBuildSystemPromptStructuresRuntimeContext(t *testing.T) {
 	})
 
 	required := []string{
-		"## CrewAI Context",
-		"CrewAI Desktop is a local-first multi-agent workteam",
+		"## Crew44 Context",
+		"Crew44 is a local-first multi-agent workteam",
 		"## Agent Identity",
 		"- name: Personal partner",
 		"- uuid: agent-a",

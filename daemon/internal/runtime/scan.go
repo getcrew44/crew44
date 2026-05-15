@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	backendagent "github.com/sqtech/crew-ai/crewai-repo/internal/backendagent"
-	"github.com/sqtech/crew-ai/crewai-repo/internal/model"
+	backendagent "github.com/getcrew44/crew44/daemon/internal/backendagent"
+	"github.com/getcrew44/crew44/daemon/internal/model"
 )
 
 type LocalScanner struct{}
@@ -26,17 +26,17 @@ type providerSpec struct {
 var localProviderSpecs = []providerSpec{
 	{
 		Provider:    "claude",
-		PathEnv:     "CREWAI_CLAUDE_PATH",
+		PathEnv:     "CREW44_CLAUDE_PATH",
 		LegacyEnv:   "MULTICA_CLAUDE_PATH",
-		ModelEnv:    "CREWAI_CLAUDE_MODEL",
+		ModelEnv:    "CREW44_CLAUDE_MODEL",
 		LegacyModel: "MULTICA_CLAUDE_MODEL",
 		DefaultBin:  "claude",
 	},
 	{
 		Provider:    "codex",
-		PathEnv:     "CREWAI_CODEX_PATH",
+		PathEnv:     "CREW44_CODEX_PATH",
 		LegacyEnv:   "MULTICA_CODEX_PATH",
-		ModelEnv:    "CREWAI_CODEX_MODEL",
+		ModelEnv:    "CREW44_CODEX_MODEL",
 		LegacyModel: "MULTICA_CODEX_MODEL",
 		DefaultBin:  "codex",
 	},
@@ -100,7 +100,7 @@ func runtimePathCandidate(spec providerSpec) (string, string) {
 }
 
 func daemonDebugEnabled() bool {
-	for _, name := range []string{"daemon_debug", "DAEMON_DEBUG", "CREWAI_DAEMON_DEBUG"} {
+	for _, name := range []string{"daemon_debug", "DAEMON_DEBUG", "CREW44_DAEMON_DEBUG"} {
 		if envTruthy(os.Getenv(name)) {
 			return true
 		}

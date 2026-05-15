@@ -1,8 +1,8 @@
 {
   "expo": {
-    "name": "CrewAI Mobile",
-    "slug": "crewai-mobile",
-    "scheme": "crewai-mobile",
+    "name": "Crew44 Mobile",
+    "slug": "crew44-mobile",
+    "scheme": "crew44-mobile",
     "version": "0.1.0",
     "orientation": "portrait",
     "userInterfaceStyle": "automatic",
@@ -12,7 +12,7 @@
       [
         "expo-camera",
         {
-          "cameraPermission": "Allow CrewAI Mobile to scan pairing QR codes."
+          "cameraPermission": "Allow Crew44 Mobile to scan pairing QR codes."
         }
       ]
     ],

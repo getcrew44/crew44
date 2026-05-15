@@ -449,7 +449,7 @@ export default function App() {
     [projects, projectChats, chatStatusOverrides, nowTick]
   );
 
-  const deskName = runtimes[0]?.name || 'CrewAI Desktop';
+  const deskName = runtimes[0]?.name || 'Crew44';
 
   const shouldShowOnboarding =
     !loading && backendOnline && (

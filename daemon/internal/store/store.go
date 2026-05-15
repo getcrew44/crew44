@@ -12,7 +12,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/sqtech/crew-ai/crewai-repo/internal/model"
+	"github.com/getcrew44/crew44/daemon/internal/model"
 )
 
 type Store struct {

@@ -125,7 +125,7 @@ func TestDefaultCrewCodingAgentInstructionKeepsCodingSpecificContextAndSkills(t 
 			t.Fatalf("coding instruction missing %q\ninstruction:\n%s", want, instruction)
 		}
 	}
-	if strings.Contains(instruction, "CrewAI Desktop is a local-first multi-agent workteam") {
-		t.Fatalf("common CrewAI context should be injected by runtime prompt builder, not preset agent instruction:\n%s", instruction)
+	if strings.Contains(instruction, "Crew44 is a local-first multi-agent workteam") {
+		t.Fatalf("common Crew44 context should be injected by runtime prompt builder, not preset agent instruction:\n%s", instruction)
 	}
 }

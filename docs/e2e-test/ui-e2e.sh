@@ -2,18 +2,18 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-STATE_ROOT="${CREWAI_UI_E2E_ROOT:-/tmp/crewai-ui-e2e}"
+STATE_ROOT="${CREW44_UI_E2E_ROOT:-/tmp/crew44-ui-e2e}"
 VITE_BIN="${ROOT_DIR}/node_modules/.bin/vite"
 STATE_DIR="${STATE_ROOT}/state"
 WORK_DIR="${STATE_ROOT}/workspace"
-BIN_PATH="${STATE_ROOT}/crewai-daemon"
+BIN_PATH="${STATE_ROOT}/crew44-daemon"
 JSONQ_BIN="${STATE_ROOT}/jsonq"
 PID_FILE="${STATE_ROOT}/server.pid"
 VITE_PID_FILE="${STATE_ROOT}/vite.pid"
 LOG_FILE="${STATE_ROOT}/server.log"
 VITE_LOG_FILE="${STATE_ROOT}/vite.log"
-PORT="${CREWAI_UI_E2E_PORT:-18767}"
-FRONTEND_PORT="${CREWAI_UI_E2E_FRONTEND_PORT:-3977}"
+PORT="${CREW44_UI_E2E_PORT:-18767}"
+FRONTEND_PORT="${CREW44_UI_E2E_FRONTEND_PORT:-3977}"
 BASE_URL="http://127.0.0.1:${PORT}"
 RENDERER_URL="http://127.0.0.1:${FRONTEND_PORT}"
 
@@ -93,22 +93,22 @@ build_binaries() {
   require_cmd go
   require_cmd npm
 
-  step "Build crewai-daemon and jsonq"
+  step "Build crew44-daemon and jsonq"
   (
     cd "${ROOT_DIR}/daemon"
-    go build -o "${BIN_PATH}" ./cmd/crewai-daemon
+    go build -o "${BIN_PATH}" ./cmd/crew44-daemon
     go build -o "${JSONQ_BIN}" ./test-utils/jsonq
   )
 }
 
 seed_runtime_state() {
   mkdir -p "${STATE_DIR}" "${WORK_DIR}"
-  printf 'UI_E2E_SIGNAL\n' > "${WORK_DIR}/.crewai-ui-e2e-signal.txt"
+  printf 'UI_E2E_SIGNAL\n' > "${WORK_DIR}/.crew44-ui-e2e-signal.txt"
 }
 
 start_server() {
   step "Start isolated backend"
-  CREWAI_STATE_DIR="${STATE_DIR}" \
+  CREW44_STATE_DIR="${STATE_DIR}" \
   PORT="${PORT}" \
   nohup "${BIN_PATH}" >"${LOG_FILE}" 2>&1 < /dev/null &
   local pid=$!
@@ -168,7 +168,7 @@ start_frontend() {
   step "Start Vite renderer"
   (
     cd "${ROOT_DIR}"
-    CREWAI_BACKEND_URL="${BASE_URL}" \
+    CREW44_BACKEND_URL="${BASE_URL}" \
     nohup "${VITE_BIN}" --host 127.0.0.1 --port "${FRONTEND_PORT}" >"${VITE_LOG_FILE}" 2>&1 < /dev/null &
     echo "$!" > "${VITE_PID_FILE}"
     disown || true
@@ -180,8 +180,8 @@ open_electron() {
   step "Open Electron UI"
   (
     cd "${ROOT_DIR}"
-    CREWAI_RENDERER_URL="${RENDERER_URL}" \
-    CREWAI_BACKEND_URL="${BASE_URL}" \
+    CREW44_RENDERER_URL="${RENDERER_URL}" \
+    CREW44_BACKEND_URL="${BASE_URL}" \
     node electron/scripts/run.cjs
   )
 }

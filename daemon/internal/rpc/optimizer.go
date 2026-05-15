@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 
-	"github.com/sqtech/crew-ai/crewai-repo/internal/optimizer"
+	"github.com/getcrew44/crew44/daemon/internal/optimizer"
 )
 
 func (s *Server) optimizerSuggestionsList(context.Context, Peer, json.RawMessage) (any, error) {

@@ -51,7 +51,7 @@ type Preview struct {
 	Type    string   `json:"type"`               // "plan" | "diff" | "skill" | "memory"
 	Lines   []string `json:"lines,omitempty"`    // plan, diff, skill
 	Name    string   `json:"name,omitempty"`     // skill: target SKILL.md name
-	Scope   string   `json:"scope,omitempty"`    // memory: display name ("Jordan" or "crewai-desktop")
+	Scope   string   `json:"scope,omitempty"`    // memory: display name ("Jordan" or "crew44")
 	ScopeID string   `json:"scope_id,omitempty"` // memory-project: project UUID; memory-user: empty
 	Text    string   `json:"text,omitempty"`     // memory: the bullet to append
 }

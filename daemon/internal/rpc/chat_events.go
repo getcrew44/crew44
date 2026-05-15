@@ -4,9 +4,9 @@ import (
 	"context"
 	"encoding/json"
 
-	"github.com/sqtech/crew-ai/crewai-repo/internal/broker"
-	"github.com/sqtech/crew-ai/crewai-repo/internal/id"
-	"github.com/sqtech/crew-ai/crewai-repo/internal/model"
+	"github.com/getcrew44/crew44/daemon/internal/broker"
+	"github.com/getcrew44/crew44/daemon/internal/id"
+	"github.com/getcrew44/crew44/daemon/internal/model"
 )
 
 func (s *Server) chatsEventsSubscribe(ctx context.Context, conn Peer, params json.RawMessage) (any, error) {
