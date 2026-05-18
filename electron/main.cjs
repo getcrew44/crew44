@@ -293,6 +293,12 @@ ipcMain.handle('shell:show-in-folder', async (_event, folderPath) => {
   return true;
 });
 
+ipcMain.handle('shell:reveal-in-finder', async (_event, filePath) => {
+  if (!filePath || typeof filePath !== 'string') return false;
+  shell.showItemInFolder(filePath);
+  return true;
+});
+
 ipcMain.handle('system:computer-name', async () => {
   if (process.platform === 'darwin') {
     try {
@@ -341,6 +347,11 @@ ipcMain.handle('paths:info', async (_event, paths) => {
       return { path: filePath, name: path.basename(filePath), isDirectory: false };
     }
   }));
+});
+
+ipcMain.handle('window:zoom', (_event) => {
+  if (!mainWindow) return;
+  mainWindow.isMaximized() ? mainWindow.unmaximize() : mainWindow.maximize();
 });
 
 app.whenReady().then(async () => {

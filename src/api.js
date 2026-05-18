@@ -52,6 +52,15 @@ export async function listProjectFiles(projectId, query, limit = 50) {
   return data.items || [];
 }
 
+export async function readProjectFile(projectId, path) {
+  return rpc.call('projects.files.read', { id: projectId, path });
+}
+
+export async function getProjectGitDiff(projectId) {
+  const data = await rpc.call('projects.git.diff', { id: projectId });
+  return data.items || [];
+}
+
 export async function listAgents() {
   const data = await rpc.call('agents.list');
   return data.items || [];

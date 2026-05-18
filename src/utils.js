@@ -144,13 +144,18 @@ export function mapBackendEvent(event) {
     };
   }
   if (event.type === 'tool_call') {
+    const input = event.tool_call?.input || null;
     return {
       kind: 'tool',
       author: event.actor_agent_id,
       time: ts,
       tsISO,
       tool: event.tool_call?.name || 'tool',
-      path: summarizeToolInput(event.tool_call?.input),
+      path: summarizeToolInput(input),
+      // Preserve the raw input so downstream consumers (e.g. the files drawer)
+      // can pick out file_path/path/paths without re-parsing the human-readable
+      // summary.
+      input,
       result: 'pending',
       _seq: event.seq,
     };

@@ -11,6 +11,7 @@ import { displayAgent, relativeTime, rememberAgents, HUMAN_USER } from './utils.
 import * as api from './api.js';
 import { createExistingFolderProject } from './existingFolderProject.js';
 import { dataTransferHasFiles } from './dragDrop.js';
+import { playDoneSound } from './audio.js';
 
 // Minimal toast — renders a small pill at the bottom-center of the window
 function Toast({ message, onDone }) {
@@ -357,6 +358,9 @@ export default function App() {
           const c = await api.getChat(id);
           if (cancelled) return;
           if (c?.stream?.status !== 'streaming') {
+            if (route !== 'task' || currentChatId !== id) {
+              playDoneSound();
+            }
             setChatStatusOverrides(prev => {
               if (!prev[id]) return prev;
               const next = { ...prev };
@@ -371,7 +375,7 @@ export default function App() {
     };
     const interval = setInterval(reconcile, 5000);
     return () => { cancelled = true; clearInterval(interval); };
-  }, [runningChatIdsKey]);
+  }, [currentChatId, route, runningChatIdsKey]);
 
   const handleDataRefresh = React.useCallback(() => {
     loadData();

@@ -49,6 +49,8 @@ func (s *Server) registerMethods() {
 		"projects.delete":                  s.projectsDelete,
 		"projects.chats.list":              s.projectsChatsList,
 		"projects.files.list":              s.projectsFilesList,
+		"projects.files.read":              s.projectsFilesRead,
+		"projects.git.diff":                s.projectsGitDiff,
 		"chats.create":                     s.chatsCreate,
 		"chats.list":                       s.chatsList,
 		"chats.get":                        s.chatsGet,
@@ -407,6 +409,31 @@ func (s *Server) projectsFilesList(_ context.Context, _ Peer, params json.RawMes
 		return nil, err
 	}
 	items, err := s.app.ListProjectFiles(body.ID, body.Query, body.Limit)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{"items": items}, nil
+}
+
+func (s *Server) projectsFilesRead(_ context.Context, _ Peer, params json.RawMessage) (any, error) {
+	var body struct {
+		ID   string `json:"id"`
+		Path string `json:"path"`
+	}
+	if err := decodeParams(params, &body); err != nil {
+		return nil, err
+	}
+	return s.app.ReadProjectFile(body.ID, body.Path)
+}
+
+func (s *Server) projectsGitDiff(_ context.Context, _ Peer, params json.RawMessage) (any, error) {
+	var body struct {
+		ID string `json:"id"`
+	}
+	if err := decodeParams(params, &body); err != nil {
+		return nil, err
+	}
+	items, err := s.app.GitDiff(body.ID)
 	if err != nil {
 		return nil, err
 	}

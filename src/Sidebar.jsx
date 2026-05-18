@@ -1,5 +1,5 @@
 import React from 'react';
-import { Icon } from './components.jsx';
+import { Icon, FixedTooltip, HeadingTooltip } from './components.jsx';
 import { dataTransferHasFiles, getDroppedDirectoryPaths } from './dragDrop.js';
 
 function TrafficLights() {
@@ -31,25 +31,6 @@ function NavItem({ icon, label, active, onClick, testId }) {
       <span style={{ color: '#5C544B', display: 'flex' }}><Icon name={icon} /></span>
       <span>{label}</span>
     </div>
-  );
-}
-
-// Shared fixed-position tooltip (plain, no text-transform)
-function FixedTooltip({ text, anchorRect }) {
-  if (!anchorRect) return null;
-  return (
-    <div style={{
-      position: 'fixed',
-      top: anchorRect.top - 34,
-      left: anchorRect.left + anchorRect.width / 2,
-      transform: 'translateX(-50%)',
-      background: 'rgba(28,26,23,0.88)', color: '#FCFBF7',
-      fontSize: 12, fontWeight: 400, whiteSpace: 'nowrap',
-      textTransform: 'none', letterSpacing: 0,
-      padding: '5px 9px', borderRadius: 7,
-      pointerEvents: 'none', zIndex: 9999,
-      boxShadow: '0 2px 8px rgba(0,0,0,0.18)',
-    }}>{text}</div>
   );
 }
 
@@ -393,19 +374,6 @@ const iconBtnStyle = {
   borderRadius: 6, color: '#5C544B', cursor: 'pointer',
   display: 'flex', alignItems: 'center', justifyContent: 'center',
 };
-
-// Reusable fixed-position tooltip for sidebar header buttons
-function HeadingTooltip({ text, anchorRef, visible }) {
-  const [rect, setRect] = React.useState(null);
-  React.useEffect(() => {
-    if (visible && anchorRef.current) setRect(anchorRef.current.getBoundingClientRect());
-    else setRect(null);
-  }, [visible, anchorRef]);
-  if (!visible || !rect) return null;
-  return (
-    <FixedTooltip text={text} anchorRect={rect} />
-  );
-}
 
 function ProjectsHeading({ openIds, setOpenIds, projectIds, onNewBlank, onExistingFolder }) {
   const [hover, setHover] = React.useState(false);

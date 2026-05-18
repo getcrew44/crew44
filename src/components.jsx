@@ -16,6 +16,46 @@ export function Avatar({ agent, size = 28 }) {
   );
 }
 
+// Shared fixed-position tooltip — anchored to a DOMRect supplied by the
+// caller. Useful when a tooltip needs to escape an overflow-clipped parent.
+// Prefers the anchor's top edge but flips below when that would clip past the
+// viewport (e.g. for toolbar buttons hugging the window's top).
+export function FixedTooltip({ text, anchorRect }) {
+  if (!anchorRect) return null;
+  const TOOLTIP_HEIGHT = 28;
+  const GAP = 6;
+  const VIEWPORT_PAD = 4;
+  const aboveTop = anchorRect.top - GAP - TOOLTIP_HEIGHT;
+  const flipBelow = aboveTop < VIEWPORT_PAD;
+  const top = flipBelow ? anchorRect.bottom + GAP : aboveTop;
+  return (
+    <div style={{
+      position: 'fixed',
+      top,
+      left: anchorRect.left + anchorRect.width / 2,
+      transform: 'translateX(-50%)',
+      background: 'rgba(28,26,23,0.88)', color: '#FCFBF7',
+      fontFamily: UI_FONT, fontSize: 12, fontWeight: 400, whiteSpace: 'nowrap',
+      textTransform: 'none', letterSpacing: 0,
+      padding: '5px 9px', borderRadius: 7,
+      pointerEvents: 'none', zIndex: 9999,
+      boxShadow: '0 2px 8px rgba(0,0,0,0.18)',
+    }}>{text}</div>
+  );
+}
+
+// FixedTooltip wrapper that reads the anchor element's rect lazily so the
+// caller just supplies a ref and a `visible` flag.
+export function HeadingTooltip({ text, anchorRef, visible }) {
+  const [rect, setRect] = React.useState(null);
+  React.useEffect(() => {
+    if (visible && anchorRef.current) setRect(anchorRef.current.getBoundingClientRect());
+    else setRect(null);
+  }, [visible, anchorRef]);
+  if (!visible || !rect) return null;
+  return <FixedTooltip text={text} anchorRect={rect} />;
+}
+
 export function MetaPill({ children, dot, dotColor }) {
   return (
     <span style={{
@@ -112,6 +152,46 @@ const CODE_BLOCK_STYLE = {
   color: '#1C1A17', whiteSpace: 'pre',
   overflowX: 'auto',
 };
+
+function CodeBlock({ lines, margin }) {
+  const [copied, setCopied] = React.useState(false);
+  const [hovered, setHovered] = React.useState(false);
+  const text = lines.join('\n');
+  const copy = React.useCallback(() => {
+    if (!navigator.clipboard) return;
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    }).catch(() => {});
+  }, [text]);
+  return (
+    <div
+      style={{ position: 'relative', margin }}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+    >
+      <pre style={CODE_BLOCK_STYLE}>{text}</pre>
+      {(hovered || copied) && (
+        <button
+          type="button"
+          onClick={copy}
+          style={{
+            position: 'absolute', top: 6, right: 6,
+            padding: '2px 8px', borderRadius: 4,
+            background: copied ? '#6E9E5B' : 'rgba(244,239,224,0.95)',
+            color: copied ? '#FCFBF7' : '#5C544B',
+            border: '1px solid ' + (copied ? '#6E9E5B' : '#DCD3BC'),
+            cursor: 'pointer',
+            fontFamily: UI_FONT, fontSize: 11, fontWeight: 500,
+            lineHeight: 1.4,
+          }}
+        >
+          {copied ? 'Copied' : 'Copy'}
+        </button>
+      )}
+    </div>
+  );
+}
 
 // Render an inline paragraph's lines, preserving single newlines as <br>.
 function renderParagraphLines(lines, keyPrefix) {
@@ -215,10 +295,7 @@ export function RichText({ text }) {
           }} />
         );
         if (b.kind === 'code') return (
-          <pre key={i} style={{
-            ...CODE_BLOCK_STYLE,
-            margin: i === 0 ? '0 0 8px' : '8px 0',
-          }}>{b.lines.join('\n')}</pre>
+          <CodeBlock key={i} lines={b.lines} margin={i === 0 ? '0 0 8px' : '8px 0'} />
         );
         if (b.kind === 'p') return (
           <p key={i} style={{ margin: i === 0 ? '0 0 8px' : '8px 0' }}>

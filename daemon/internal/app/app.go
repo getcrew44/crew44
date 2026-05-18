@@ -801,8 +801,11 @@ func (a *App) ListProjectFiles(projectID, query string, limit int) ([]ProjectFil
 	if root == "" {
 		return nil, ErrBadRequest
 	}
-	if limit <= 0 || limit > 200 {
+	if limit <= 0 {
 		limit = 50
+	}
+	if limit > 10000 {
+		limit = 10000
 	}
 	q := strings.ToLower(strings.TrimSpace(query))
 
