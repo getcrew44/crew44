@@ -2745,6 +2745,11 @@ export default function TaskView({ chatId, agentsMap, skills = [], projects = []
     [events, currentProject?.workdir],
   );
   const headerToolEventCount = React.useMemo(() => events.filter(e => e.kind === 'tool').length, [events]);
+  const [debouncedHeaderToolEventCount, setDebouncedHeaderToolEventCount] = React.useState(headerToolEventCount);
+  React.useEffect(() => {
+    const t = setTimeout(() => setDebouncedHeaderToolEventCount(headerToolEventCount), 600);
+    return () => clearTimeout(t);
+  }, [headerToolEventCount]);
   const [workingTreeFileCount, setWorkingTreeFileCount] = React.useState({ projectId: '', count: null });
   const currentProjectId = currentProject?.id || '';
   const hasCurrentWorkdir = Boolean(currentProject?.workdir);
@@ -2763,7 +2768,7 @@ export default function TaskView({ chatId, agentsMap, skills = [], projects = []
         if (!cancelled) setWorkingTreeFileCount({ projectId: currentProjectId, count: null });
       });
     return () => { cancelled = true; };
-  }, [currentProjectId, hasCurrentWorkdir, headerToolEventCount]);
+  }, [currentProjectId, hasCurrentWorkdir, debouncedHeaderToolEventCount]);
 
   const fileCount = hasCurrentWorkdir &&
     workingTreeFileCount.projectId === currentProjectId &&

@@ -229,10 +229,14 @@ func TestGitDiffWorksFromRepoSubdirectory(t *testing.T) {
 	repo := t.TempDir()
 	workdir := filepath.Join(repo, "sub")
 	writeAt(t, repo, "sub/file.txt", "before\n")
+	writeAt(t, repo, "other/file.txt", "before\n")
 	runGitForTest(t, repo, "init", "-q", "-b", "main")
 	runGitForTest(t, repo, "add", ".")
 	runGitForTest(t, repo, "commit", "-q", "-m", "initial")
 	writeAt(t, repo, "sub/file.txt", "after\n")
+	writeAt(t, repo, "sub/new.txt", "new\n")
+	writeAt(t, repo, "other/file.txt", "after\n")
+	writeAt(t, repo, "other/new.txt", "new\n")
 
 	project, err := a.CreateProject("Subdir Git Project", workdir, agentID)
 	if err != nil {
@@ -243,8 +247,21 @@ func TestGitDiffWorksFromRepoSubdirectory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GitDiff: %v", err)
 	}
-	if len(files) != 1 || files[0].Path != "file.txt" || files[0].Status != "M" {
+	byPath := map[string]GitDiffFile{}
+	for _, f := range files {
+		byPath[f.Path] = f
+	}
+	if len(byPath) != 2 {
+		t.Fatalf("expected only subdir changes, got %#v", files)
+	}
+	if got := byPath["file.txt"].Status; got != "M" {
 		t.Fatalf("expected modified file relative to subdir, got %#v", files)
+	}
+	if got := byPath["new.txt"].Status; got != "?" {
+		t.Fatalf("expected untracked file relative to subdir, got %#v", files)
+	}
+	if _, ok := byPath["other/file.txt"]; ok {
+		t.Fatalf("expected outer repo changes to be excluded, got %#v", files)
 	}
 }
 

@@ -1257,6 +1257,44 @@ describe('TaskView', () => {
       expect(api.getProjectGitDiff).toHaveBeenCalledWith('proj-1');
     });
 
+    it('coalesces working-tree badge refreshes during bursts of tool events', async () => {
+      const stream = captureStream();
+      api.getChat.mockResolvedValue({ ...chat, project_id: 'proj-1' });
+      api.getProjectGitDiff.mockResolvedValue([
+        { path: 'src/one.js', status: 'M', added: 1, removed: 0, diff: [] },
+      ]);
+      const projects = [{ id: 'proj-1', name: 'demo', workdir: '/tmp/demo' }];
+
+      render(<TaskView chatId="chat-1" agentsMap={agentsMap} projects={projects} />);
+      await waitFor(() => expect(stream.onEvent).toBeDefined());
+      await waitFor(() => expect(api.getProjectGitDiff).toHaveBeenCalledWith('proj-1'));
+      api.getProjectGitDiff.mockClear();
+
+      await act(async () => {
+        stream.onEvent({
+          seq: 1, ts: '2026-05-12T10:00:01Z', type: 'tool_call', actor_agent_id: 'agent-1',
+          tool_call: { name: 'edit_file', input: { file_path: 'src/one.js' } },
+        });
+      });
+      await new Promise(resolve => setTimeout(resolve, 50));
+      await act(async () => {
+        stream.onEvent({
+          seq: 2, ts: '2026-05-12T10:00:02Z', type: 'tool_call', actor_agent_id: 'agent-1',
+          tool_call: { name: 'edit_file', input: { file_path: 'src/two.js' } },
+        });
+      });
+      await new Promise(resolve => setTimeout(resolve, 50));
+      await act(async () => {
+        stream.onEvent({
+          seq: 3, ts: '2026-05-12T10:00:03Z', type: 'tool_call', actor_agent_id: 'agent-1',
+          tool_call: { name: 'edit_file', input: { file_path: 'src/three.js' } },
+        });
+      });
+
+      expect(api.getProjectGitDiff).not.toHaveBeenCalled();
+      await waitFor(() => expect(api.getProjectGitDiff).toHaveBeenCalledTimes(1), { timeout: 1200 });
+    });
+
     it('opens the drawer and shows touched files under their directories in tree mode', async () => {
       const stream = captureStream();
       render(<TaskView chatId="chat-1" agentsMap={agentsMap} />);

@@ -149,7 +149,7 @@ func runGit(root string, args ...string) ([]byte, error) {
 }
 
 func gitUntrackedFiles(root string) ([]string, error) {
-	out, err := runGit(root, "ls-files", "--others", "--exclude-standard", "-z")
+	out, err := runGit(root, "ls-files", "--others", "--exclude-standard", "-z", "--", ".")
 	if err != nil {
 		return nil, err
 	}
@@ -180,6 +180,7 @@ func gitDiffCommandArgs(hasHead bool, tail ...string) []string {
 		args = append(args, "--cached")
 	}
 	args = append(args, tail...)
+	args = append(args, "--", ".")
 	return args
 }
 
