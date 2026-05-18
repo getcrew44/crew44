@@ -1,5 +1,5 @@
 import React from 'react';
-import { Avatar, RichText, UI_FONT, MONO_FONT } from './components.jsx';
+import { Avatar, Icon, RichText, UI_FONT, MONO_FONT } from './components.jsx';
 import { mapBackendEvent, mergeToolResults, relativeTime, formatTime, HUMAN_USER, resolveAuthor } from './utils.js';
 import * as api from './api.js';
 import { clearComposerDraft, readComposerDraft, writeComposerDraft } from './draftStore.js';
@@ -130,17 +130,6 @@ function MessageEvent({ event, agentsMap, thought, showHeader = true }) {
     return (
       <div style={{ display: 'flex', justifyContent: 'flex-end', padding: '14px 0' }}>
         <div style={{ maxWidth: '72%', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 5 }}>
-          <div style={{
-            background: '#EFE9D8',
-            color: '#1C1A17',
-            fontSize: 14, lineHeight: 1.55,
-            padding: '10px 16px',
-            borderRadius: 18,
-            fontFamily: UI_FONT,
-          }}>
-            <RichText text={event.body} />
-            <AttachmentTray attachments={event.attachments} />
-          </div>
           {event.userSteer && (
             <div style={{
               display: 'inline-flex',
@@ -155,6 +144,17 @@ function MessageEvent({ event, agentsMap, thought, showHeader = true }) {
               You steered the conversation
             </div>
           )}
+          <div style={{
+            background: '#EFE9D8',
+            color: '#1C1A17',
+            fontSize: 14, lineHeight: 1.55,
+            padding: '10px 16px',
+            borderRadius: 18,
+            fontFamily: UI_FONT,
+          }}>
+            <RichText text={event.body} />
+            <AttachmentTray attachments={event.attachments} />
+          </div>
         </div>
       </div>
     );
@@ -1438,7 +1438,7 @@ function Composer({ onSend, isStreaming, onCancel, pendingSteer, onCancelSteer, 
               gridTemplateColumns: 'minmax(0, 1fr) auto auto',
               alignItems: 'center',
               gap: 10,
-              padding: '7px 8px 9px',
+              padding: '4px 8px 5px',
               marginBottom: 8,
               borderBottom: '1px solid #ECE6D5',
             }}
@@ -1479,10 +1479,11 @@ function Composer({ onSend, isStreaming, onCancel, pendingSteer, onCancelSteer, 
                   background: 'transparent',
                   color: '#A89F92',
                   cursor: 'pointer',
-                  fontSize: 16,
-                  lineHeight: '26px',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
                 }}
-              >⌫</button>
+              ><Icon name="trash" size={13} /></button>
               <button
                 type="button"
                 data-testid="queued-steer-menu"
