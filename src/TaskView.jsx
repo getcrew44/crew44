@@ -1410,6 +1410,13 @@ function FilesDrawer({ chatId, events, agentsMap, project, onClose }) {
   const [projectFilesFetched, setProjectFilesFetched] = React.useState(false);
 
   const toolEventCount = React.useMemo(() => events.filter(e => e.kind === 'tool').length, [events]);
+  // Coalesce bursts of tool events into a single refetch tick so an active
+  // stream doesn't storm `git diff` / workspace walks on every keystroke.
+  const [debouncedToolEventCount, setDebouncedToolEventCount] = React.useState(toolEventCount);
+  React.useEffect(() => {
+    const t = setTimeout(() => setDebouncedToolEventCount(toolEventCount), 600);
+    return () => clearTimeout(t);
+  }, [toolEventCount]);
 
   const fetchGitDiff = React.useCallback(() => {
     if (!projectId || !hasWorkdir) return undefined;
@@ -1434,7 +1441,7 @@ function FilesDrawer({ chatId, events, agentsMap, project, onClose }) {
   React.useEffect(() => {
     if (mode !== 'diff') return undefined;
     return fetchGitDiff();
-  }, [mode, fetchGitDiff, toolEventCount]);
+  }, [mode, fetchGitDiff, debouncedToolEventCount]);
 
   // Fetch the full project file listing when entering tree mode. Capped at
   // 10k entries on the daemon side; that's more than enough for the kinds of
@@ -1459,7 +1466,7 @@ function FilesDrawer({ chatId, events, agentsMap, project, onClose }) {
     return () => { cancelled = true; };
     // Re-fetch when chat (=project workspace state) or tool events change so
     // newly-created files surface in the tree.
-  }, [mode, projectId, hasWorkdir, chatId, toolEventCount]);
+  }, [mode, projectId, hasWorkdir, chatId, debouncedToolEventCount]);
 
   // Re-resolve the default mode when the project changes.
   React.useEffect(() => {
@@ -2733,10 +2740,35 @@ export default function TaskView({ chatId, agentsMap, skills = [], projects = []
     if (!pid) return null;
     return (projects || []).find(p => p.id === pid) || null;
   }, [chat?.project_id, projects]);
-  const fileCount = React.useMemo(
+  const editedEventFileCount = React.useMemo(
     () => collectFiles(events, currentProject?.workdir || '').filter(f => f.edits > 0).length,
     [events, currentProject?.workdir],
   );
+  const headerToolEventCount = React.useMemo(() => events.filter(e => e.kind === 'tool').length, [events]);
+  const [workingTreeFileCount, setWorkingTreeFileCount] = React.useState(null);
+  const currentProjectId = currentProject?.id || '';
+  const hasCurrentWorkdir = Boolean(currentProject?.workdir);
+
+  React.useEffect(() => {
+    if (!currentProjectId || !hasCurrentWorkdir) {
+      setWorkingTreeFileCount(null);
+      return undefined;
+    }
+    let cancelled = false;
+    setWorkingTreeFileCount(null);
+    api.getProjectGitDiff(currentProjectId)
+      .then(items => {
+        if (!cancelled) setWorkingTreeFileCount((items || []).length);
+      })
+      .catch(() => {
+        if (!cancelled) setWorkingTreeFileCount(null);
+      });
+    return () => { cancelled = true; };
+  }, [currentProjectId, hasCurrentWorkdir, headerToolEventCount]);
+
+  const fileCount = hasCurrentWorkdir && workingTreeFileCount !== null
+    ? workingTreeFileCount
+    : editedEventFileCount;
 
   const onSplitDragStart = React.useCallback((e) => {
     e.preventDefault();

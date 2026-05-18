@@ -447,7 +447,7 @@ func (a *App) ReadProjectFile(projectID, relPath string) (ProjectFileContent, er
 		return ProjectFileContent{}, ErrBadRequest
 	}
 
-	info, err := os.Stat(absFile)
+	info, err := os.Stat(realFile)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return ProjectFileContent{}, ErrNotFound
@@ -458,7 +458,9 @@ func (a *App) ReadProjectFile(projectID, relPath string) (ProjectFileContent, er
 		return ProjectFileContent{}, ErrBadRequest
 	}
 
-	f, err := os.Open(absFile)
+	// Open the symlink-resolved path so a TOCTOU swap between EvalSymlinks
+	// and Open can't pivot us to a file outside realRoot.
+	f, err := os.Open(realFile)
 	if err != nil {
 		return ProjectFileContent{}, err
 	}
