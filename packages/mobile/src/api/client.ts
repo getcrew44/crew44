@@ -48,6 +48,22 @@ export class CrewApi {
     });
   }
 
+  async interruptMessage(chatId: string, content: string, attachments: MessageAttachment[] = []): Promise<unknown> {
+    return this.rpc.call("chats.messages.interrupt", {
+      id: chatId,
+      content,
+      attachments
+    });
+  }
+
+  async cancelPendingSteer(chatId: string, steerId: string): Promise<unknown> {
+    return this.rpc.call("chats.messages.interrupt.cancel", { id: chatId, steer_id: steerId });
+  }
+
+  async deliverPendingSteers(chatId: string, steerIds: string[]): Promise<unknown> {
+    return this.rpc.call("chats.messages.interrupt.deliver", { id: chatId, steer_ids: steerIds });
+  }
+
   async cancelChat(chatId: string): Promise<unknown> {
     return this.rpc.call("chats.cancel", { id: chatId });
   }

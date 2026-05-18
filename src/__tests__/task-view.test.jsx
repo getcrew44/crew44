@@ -9,6 +9,9 @@ import { generateImageThumbnail } from '../thumbnail.js';
 vi.mock('../api.js', () => ({
   getChat: vi.fn(),
   postMessage: vi.fn(),
+  interruptMessage: vi.fn(),
+  cancelPendingSteer: vi.fn(),
+  deliverPendingSteers: vi.fn(),
   cancelChat: vi.fn(),
   streamChatEvents: vi.fn(),
   listProjectFiles: vi.fn(),
@@ -70,6 +73,9 @@ beforeEach(() => {
   generateImageThumbnail.mockResolvedValue('thumb-base64');
   api.getChat.mockResolvedValue(chat);
   api.postMessage.mockResolvedValue({ ...chat, stream: { status: 'streaming' } });
+  api.interruptMessage.mockResolvedValue({ ...chat, stream: { status: 'streaming' } });
+  api.cancelPendingSteer.mockResolvedValue({ ...chat, stream: { status: 'streaming' } });
+  api.deliverPendingSteers.mockResolvedValue({ ...chat, stream: { status: 'streaming' } });
   api.cancelChat.mockResolvedValue({});
   api.streamChatEvents.mockImplementation((_chatId, _after, _onEvent, onDone) => {
     onDone?.();
@@ -349,6 +355,43 @@ describe('TaskView', () => {
     fireEvent.click(stop);
 
     await waitFor(() => expect(api.cancelChat).toHaveBeenCalledWith('chat-1'));
+  });
+
+  it('renders multiple queued steer cards and delivers them from the final card', async () => {
+    api.getChat.mockResolvedValue({ ...chat, stream: { status: 'streaming' } });
+    api.streamChatEvents.mockImplementation(() => vi.fn());
+    const queued = [];
+    api.interruptMessage.mockImplementation((_chatId, content, attachments = []) => {
+      queued.push({ id: `steer-${queued.length + 1}`, content, attachments, queued_at: new Date().toISOString() });
+      return Promise.resolve({ ...chat, stream: { status: 'streaming', pending_steers: [...queued] } });
+    });
+    api.deliverPendingSteers.mockImplementation((_chatId, ids) => {
+      const remaining = queued.filter(item => !ids.includes(item.id));
+      queued.splice(0, queued.length, ...remaining);
+      return Promise.resolve({ ...chat, stream: { status: 'streaming', pending_steers: [...queued] } });
+    });
+
+    render(<TaskView chatId="chat-1" agentsMap={agentsMap} />);
+
+    const input = await screen.findByTestId('composer-input');
+    await waitFor(() => expect(screen.getByTestId('composer-send')).toHaveTextContent('Steer'));
+
+    fireEvent.change(input, { target: { value: 'first steer' } });
+    fireEvent.click(screen.getByTestId('composer-send'));
+
+    expect(await screen.findByTestId('queued-steer-card')).toHaveTextContent('first steer');
+
+    fireEvent.change(input, { target: { value: 'second steer' } });
+    fireEvent.click(screen.getByTestId('composer-send'));
+
+    await waitFor(() => expect(screen.getAllByTestId('queued-steer-card')).toHaveLength(2));
+    expect(screen.getByText('Deliver all 2 now')).toBeInTheDocument();
+    expect(screen.queryByText('Deliver now')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByText('Deliver all 2 now'));
+
+    await waitFor(() => expect(api.deliverPendingSteers).toHaveBeenCalledWith('chat-1', ['steer-1', 'steer-2']));
+    await waitFor(() => expect(screen.queryByTestId('queued-steer-card')).not.toBeInTheDocument());
   });
 
   it('reconciles a persisted user stream event with the optimistic user message', async () => {

@@ -125,6 +125,9 @@ export function mapBackendEvent(event) {
       time: ts,
       tsISO,
       body: event.message?.content || '',
+      ...(event.message?.user_steer ? { userSteer: true } : {}),
+      ...(event.message?.steer_agent_id ? { steerAgentId: event.message.steer_agent_id } : {}),
+      ...(event.message?.interrupted ? { interrupted: true } : {}),
       ...(attachments.length > 0 ? { attachments } : {}),
       _seq: event.seq,
     };

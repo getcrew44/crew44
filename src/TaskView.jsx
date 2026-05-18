@@ -36,6 +36,41 @@ function DeletedTag() {
   );
 }
 
+function SteerTrendIcon({ size = 11 }) {
+  return (
+    <svg
+      aria-hidden="true"
+      width={size}
+      height={size}
+      viewBox="0 0 11 11"
+      fill="none"
+      style={{ flex: '0 0 auto' }}
+    >
+      <path
+        d="M2 7.5 5 4.5l2 2 2.5-3M7 3.5h2.5V6"
+        stroke="currentColor"
+        strokeWidth="1.2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function QueueClockIcon({ size = 10 }) {
+  return (
+    <svg aria-hidden="true" width={size} height={size} viewBox="0 0 10 10" fill="none" style={{ flex: '0 0 auto' }}>
+      <circle cx="5" cy="5" r="4" stroke="currentColor" strokeWidth="1" />
+      <path
+        d="M5 2.6V5l1.7 1"
+        stroke="currentColor"
+        strokeWidth="1"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
 // Collapsible "thought for Ns" chip — used standalone in ThinkingEvent and
 // inlined inside MessageEvent when a thinking event immediately precedes a
 // message from the same author.
@@ -99,8 +134,9 @@ function MessageEvent({ event, agentsMap, thought, showHeader = true }) {
   const isUser = agent.kind === 'human';
 
   if (isUser) {
+    const steeredAgent = event.steerAgentId ? agentsMap?.[event.steerAgentId] : null;
     return (
-      <div style={{ display: 'flex', justifyContent: 'flex-end', padding: '14px 0' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', padding: '14px 0' }}>
         <div style={{
           maxWidth: '72%',
           background: '#EFE9D8',
@@ -113,6 +149,26 @@ function MessageEvent({ event, agentsMap, thought, showHeader = true }) {
           <RichText text={event.body} />
           <AttachmentTray attachments={event.attachments} />
         </div>
+        {event.userSteer && (
+          <div style={{
+            marginTop: 6,
+            padding: '0 4px',
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 6,
+            fontSize: 11.5,
+            color: '#807972',
+            fontFamily: UI_FONT,
+          }}>
+            <span style={{ color: '#C4644A', display: 'inline-flex' }}><SteerTrendIcon size={11} /></span>
+            <span>
+              Steered <span style={{ color: '#5C544B', fontWeight: 500 }}>
+                {steeredAgent ? steeredAgent.name : 'the crew'}
+              </span>
+              <span style={{ color: '#A89F92' }}> mid-run</span>
+            </span>
+          </div>
+        )}
       </div>
     );
   }
@@ -895,6 +951,24 @@ const chip = {
   cursor: 'pointer', fontFamily: UI_FONT,
 };
 
+const miniBtn = {
+  background: 'transparent', border: '1px solid #DCD3BC',
+  color: '#5C544B', fontSize: 11.5, fontFamily: UI_FONT,
+  padding: '2px 8px', borderRadius: 999, cursor: 'pointer',
+};
+
+const miniBtnPrimary = {
+  background: '#1C1A17', border: '1px solid #1C1A17',
+  color: '#FCFBF7', fontSize: 11.5, fontFamily: UI_FONT, fontWeight: 500,
+  padding: '2px 10px', borderRadius: 999, cursor: 'pointer',
+};
+
+const miniBtnIcon = {
+  background: 'transparent', border: '1px solid transparent',
+  color: '#807972', padding: '2px 4px', borderRadius: 999, cursor: 'pointer',
+  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+};
+
 function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
@@ -1149,7 +1223,57 @@ function SuggestionRow({ option, active, onSelect }) {
   return null;
 }
 
-function Composer({ onSend, isStreaming, onCancel, agentsMap, skills = [], projects = [], chatId, projectId, defaultTargetAgentId, targetAgentId, onChangeTargetAgent }) {
+function QueuedSteerCard({ item, isLast, queueCount, onCancel, onEdit, onDeliverAll }) {
+  return (
+    <div style={{ display: 'flex', justifyContent: 'flex-start', padding: '2px 0' }}>
+      <div style={{ maxWidth: '72%', display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 4 }}>
+        <div
+          data-testid="queued-steer-card"
+          onClick={onEdit}
+          title="Click to edit"
+          style={{
+            background: 'repeating-linear-gradient(45deg, #FCFAF1 0 8px, #F6F0DC 8px 16px)',
+            border: '1px dashed #C9BFA3',
+            color: '#1C1A17',
+            fontSize: 13,
+            lineHeight: 1.45,
+            padding: '6px 12px',
+            borderRadius: 14,
+            fontFamily: UI_FONT,
+            cursor: 'pointer',
+            whiteSpace: 'pre-wrap',
+            overflowWrap: 'break-word',
+          }}
+        >
+          {item.content}
+        </div>
+        <div style={{
+          display: 'inline-flex', alignItems: 'center', gap: 8,
+          fontSize: 11.5, color: '#807972', padding: '0 4px',
+        }}>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+            <span style={{ color: '#C4644A', display: 'inline-flex' }}><QueueClockIcon size={10} /></span>
+            <span>Queued</span>
+          </span>
+          <span style={{ color: '#D6CDB6' }}>·</span>
+          <button type="button" onClick={onEdit} style={miniBtn}>Edit</button>
+          {isLast && (
+            <button type="button" data-testid="queued-steer-deliver" onClick={onDeliverAll} style={miniBtnPrimary}>
+              {queueCount > 1 ? `Deliver all ${queueCount} now` : 'Deliver now'}
+            </button>
+          )}
+          <button type="button" onClick={onCancel} title="Discard" style={miniBtnIcon}>
+            <svg width="9" height="9" viewBox="0 0 9 9" aria-hidden="true">
+              <path d="M2 2l5 5M7 2l-5 5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+            </svg>
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Composer({ onSend, isStreaming, onCancel, pendingSteers = [], onCancelSteer, onEditSteer, onDeliverSteers, agentsMap, skills = [], projects = [], chatId, projectId, defaultTargetAgentId, targetAgentId, onChangeTargetAgent }) {
   const [val, setVal] = React.useState(() => readComposerDraft(projectId, chatId).text || '');
   const [attachments, setAttachments] = React.useState([]);
   const [cursor, setCursor] = React.useState(0);
@@ -1179,7 +1303,6 @@ function Composer({ onSend, isStreaming, onCancel, agentsMap, skills = [], proje
     if (!projectId) return false;
     return Boolean((projects || []).find(p => p.id === projectId)?.workdir);
   }, [projects, projectId]);
-
   React.useEffect(() => {
     if (!ta.current) return;
     const prevScrollTop = ta.current.scrollTop;
@@ -1277,9 +1400,9 @@ function Composer({ onSend, isStreaming, onCancel, agentsMap, skills = [], proje
   }, []);
 
   const chooseAttachments = React.useCallback(async () => {
-    if (!canAttach || isStreaming) return;
+    if (!canAttach) return;
     addAttachments(await pickAttachments());
-  }, [addAttachments, canAttach, isStreaming]);
+  }, [addAttachments, canAttach]);
 
   const removeAttachment = React.useCallback((path) => {
     setAttachments(current => current.filter(attachment => attachment.path !== path));
@@ -1288,18 +1411,33 @@ function Composer({ onSend, isStreaming, onCancel, agentsMap, skills = [], proje
   const handleDrop = React.useCallback(async (e) => {
     e.preventDefault();
     e.stopPropagation();
-    if (!canAttach || isStreaming || !dataTransferHasFiles(e.dataTransfer)) return;
+    if (!canAttach || !dataTransferHasFiles(e.dataTransfer)) return;
     addAttachments(await droppedAttachments(e.dataTransfer));
-  }, [addAttachments, canAttach, isStreaming]);
+  }, [addAttachments, canAttach]);
 
   const send = () => {
     const text = val.trim();
-    if ((!text && attachments.length === 0) || isStreaming) return;
+    if (!text && attachments.length === 0) return;
     const outgoingAttachments = attachments;
     setVal('');
     setAttachments([]);
     if (chatId && projectId) clearComposerDraft(projectId, chatId);
     onSend(text, outgoingAttachments);
+  };
+
+  const editPendingSteer = async (item) => {
+    if (!item) return;
+    const text = item.content || '';
+    const queuedAttachments = item.attachments || [];
+    await onEditSteer?.(item.id);
+    setVal(text);
+    setAttachments(queuedAttachments);
+    window.requestAnimationFrame?.(() => {
+      ta.current?.focus();
+      const nextCursor = text.length;
+      ta.current?.setSelectionRange(nextCursor, nextCursor);
+      setCursor(nextCursor);
+    });
   };
 
   const onKeyDown = (e) => {
@@ -1345,10 +1483,29 @@ function Composer({ onSend, isStreaming, onCancel, agentsMap, skills = [], proje
     if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); send(); }
   };
 
-  const canSend = (Boolean(val.trim()) || attachments.length > 0) && !isStreaming;
+  const canSend = Boolean(val.trim()) || attachments.length > 0;
 
   return (
-    <div style={{ background: '#FAF5E8', padding: '0 36px 16px' }}>
+    <div style={{
+      borderTop: '1px solid #ECE6D5',
+      background: '#FCFAF1',
+      padding: '10px 36px 14px',
+    }}>
+      {pendingSteers.length > 0 && (
+        <div style={{ ...conversationColumn, marginBottom: 8, display: 'flex', flexDirection: 'column', gap: 2 }}>
+          {pendingSteers.map((item, index) => (
+            <QueuedSteerCard
+              key={item.id || `${item.queued_at}:${index}`}
+              item={item}
+              isLast={index === pendingSteers.length - 1}
+              queueCount={pendingSteers.length}
+              onCancel={() => onCancelSteer?.(item.id)}
+              onEdit={() => editPendingSteer(item)}
+              onDeliverAll={() => onDeliverSteers?.(pendingSteers.map(steer => steer.id))}
+            />
+          ))}
+        </div>
+      )}
       <div
         data-testid="composer-column"
         onDragOver={(e) => {
@@ -1430,8 +1587,7 @@ function Composer({ onSend, isStreaming, onCancel, agentsMap, skills = [], proje
               e.stopPropagation();
             }}
             onDrop={handleDrop}
-            disabled={isStreaming}
-            placeholder={isStreaming ? 'Crew is working…' : 'Steer the crew — @agent to direct, ⌘↵ to send'}
+            placeholder={isStreaming ? 'Steer this run…' : 'Steer the crew — @agent to direct, ⌘↵ to send'}
             rows={1}
             style={{
               position: 'relative', zIndex: 1,
@@ -1439,7 +1595,7 @@ function Composer({ onSend, isStreaming, onCancel, agentsMap, skills = [], proje
               background: 'transparent', fontFamily: UI_FONT, fontSize: 14,
               color: val ? 'transparent' : '#1C1A17', caretColor: '#1C1A17',
               lineHeight: 1.5, padding: 4,
-              opacity: isStreaming ? 0.5 : 1,
+              opacity: 1,
             }}
           />
           </div>
@@ -1450,14 +1606,13 @@ function Composer({ onSend, isStreaming, onCancel, agentsMap, skills = [], proje
               type="button"
               data-testid="composer-attach"
               onClick={chooseAttachments}
-              disabled={isStreaming}
               title="Attach files"
               style={{
                 width: 28, height: 28, borderRadius: 999, border: 'none',
-                background: 'transparent', color: '#A89F92', cursor: isStreaming ? 'default' : 'pointer',
+                background: 'transparent', color: '#A89F92', cursor: 'pointer',
                 fontFamily: UI_FONT, fontSize: 20, lineHeight: '24px',
                 display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                opacity: isStreaming ? 0.45 : 1,
+                opacity: 1,
               }}
             >
               +
@@ -1468,18 +1623,32 @@ function Composer({ onSend, isStreaming, onCancel, agentsMap, skills = [], proje
           )}
           <div style={{ flex: 1 }} />
           <span style={{ fontSize: 11.5, color: '#A89F92' }}>⌘↵ send</span>
+          {isStreaming && (
+            <button
+              type="button"
+              data-testid="composer-stop"
+              onClick={onCancel}
+              style={{
+                ...chip,
+                background: '#FCFAF1',
+                color: '#807972',
+                border: '1px solid #DCD3BC',
+                fontWeight: 500,
+              }}
+            >Stop</button>
+          )}
           <button
             data-testid="composer-send"
-            onClick={isStreaming ? onCancel : send}
-            disabled={!isStreaming && !canSend}
+            onClick={send}
+            disabled={!canSend}
             style={{
               ...chip,
-              background: isStreaming || canSend ? '#1C1A17' : '#F0EAD8',
-              color: isStreaming || canSend ? '#FCFBF7' : '#A89F92',
-              border: '1px solid ' + (isStreaming || canSend ? '#1C1A17' : '#E6DFCC'),
+              background: canSend ? '#1C1A17' : '#F0EAD8',
+              color: canSend ? '#FCFBF7' : '#A89F92',
+              border: '1px solid ' + (canSend ? '#1C1A17' : '#E6DFCC'),
               fontWeight: 500,
             }}
-          >{isStreaming ? 'Stop' : '↑ Send'}</button>
+          >{isStreaming ? 'Steer' : '↑ Send'}</button>
         </div>
       </div>
     </div>
@@ -1494,6 +1663,7 @@ export default function TaskView({ chatId, agentsMap, skills = [], projects = []
   const [isStreaming, setIsStreaming] = React.useState(false);
   const [error, setError] = React.useState(null);
   const [targetAgentId, setTargetAgentId] = React.useState(null);
+  const [pendingSteers, setPendingSteers] = React.useState([]);
   const timelineRef = React.useRef(null);
   const lastSeqRef = React.useRef(0);
   const streamCleanupRef = React.useRef(() => {});
@@ -1532,12 +1702,18 @@ export default function TaskView({ chatId, agentsMap, skills = [], projects = []
           agentActivitySinceSendRef.current = true;
         }
         setEvents(prev => {
-          if (prev.some(e => e._seq === event.seq)) return prev;
-          lastSeqRef.current = Math.max(lastSeqRef.current, event.seq);
           const mapped = mapBackendEvent(event);
           if (!mapped) return prev;
+          if (prev.some(e => e._seq === event.seq)) return prev;
+          lastSeqRef.current = Math.max(lastSeqRef.current, event.seq);
 
           if (mapped.kind === 'message' && mapped.author === '__human__') {
+            if (mapped.userSteer) {
+              api.getChat(id).then(c => {
+                setChat(c);
+                setPendingSteers(c.stream?.pending_steers || []);
+              }).catch(() => {});
+            }
             const optimisticIndex = prev.findIndex(e =>
               e._optimistic &&
               e.kind === 'message' &&
@@ -1575,6 +1751,7 @@ export default function TaskView({ chatId, agentsMap, skills = [], projects = []
         if (waitingForAgentRef.current && !agentActivitySinceSendRef.current) {
           api.getChat(id).then(c => {
             setChat(c);
+            setPendingSteers(c.stream?.pending_steers || []);
             setIsStreaming(c.stream?.status === 'streaming');
           }).catch(() => {});
           return;
@@ -1586,7 +1763,10 @@ export default function TaskView({ chatId, agentsMap, skills = [], projects = []
           playDoneSound();
         }
         // Refresh chat metadata
-        api.getChat(id).then(setChat).catch(() => {});
+        api.getChat(id).then(c => {
+          setChat(c);
+          setPendingSteers(c.stream?.pending_steers || []);
+        }).catch(() => {});
       },
       (err) => {
         console.error('Chat stream error:', err);
@@ -1603,6 +1783,7 @@ export default function TaskView({ chatId, agentsMap, skills = [], projects = []
     setChat(null);
     setEvents([]);
     setError(null);
+    setPendingSteers([]);
     lastSeqRef.current = 0;
     waitingForAgentRef.current = false;
     waitingAfterSeqRef.current = 0;
@@ -1611,6 +1792,7 @@ export default function TaskView({ chatId, agentsMap, skills = [], projects = []
     api.getChat(chatId)
       .then(c => {
         setChat(c);
+        setPendingSteers(c.stream?.pending_steers || []);
         if (c.stream?.status === 'streaming') {
           waitingForAgentRef.current = true;
         }
@@ -1631,6 +1813,7 @@ export default function TaskView({ chatId, agentsMap, skills = [], projects = []
 
   const handleSend = React.useCallback(async (text, attachments = []) => {
     if (!chatId) return;
+    const steeringActiveRun = isStreaming;
 
     // Prime the AudioContext while we still have a user gesture. The
     // done-sound that fires when the agent finishes is created from a
@@ -1638,33 +1821,65 @@ export default function TaskView({ chatId, agentsMap, skills = [], projects = []
     // priming here the context stays suspended and produces silence.
     primeAudioContext();
 
-    // Optimistic user message
-    const now = new Date();
-    const ts = now.getHours() + ':' + String(now.getMinutes()).padStart(2, '0');
-    setEvents(prev => [...prev, {
-      kind: 'message',
-      author: '__human__',
-      time: ts,
-      body: text,
-      attachments,
-      _seq: -Date.now(),
-      _optimistic: true,
-    }]);
+    if (!steeringActiveRun) {
+      // Optimistic user message for normal sends. Interrupt messages are
+      // appended by the daemon only after the previous run has actually
+      // stopped, preserving the session order.
+      const now = new Date();
+      const ts = now.getHours() + ':' + String(now.getMinutes()).padStart(2, '0');
+      setEvents(prev => [...prev, {
+        kind: 'message',
+        author: '__human__',
+        time: ts,
+        body: text,
+        attachments,
+        _seq: -Date.now(),
+        _optimistic: true,
+      }]);
+    }
 
     try {
-      // target_agent_id is required by the backend — prefer user-selected, fall back to current/lead
-      const effectiveTarget = targetAgentId || chat?.current_agent_id || chat?.main_agent_id;
-      await api.postMessage(chatId, text, effectiveTarget, attachments);
       waitingForAgentRef.current = true;
       waitingAfterSeqRef.current = lastSeqRef.current;
       agentActivitySinceSendRef.current = false;
-      // Reconnect after the last known seq to get agent response
-      connectEventStream(chatId, lastSeqRef.current);
+      if (steeringActiveRun) {
+        const updatedChat = await api.interruptMessage(chatId, text, attachments);
+        setChat(updatedChat);
+        setPendingSteers(updatedChat?.stream?.pending_steers || []);
+      } else {
+        // target_agent_id is required by the backend — prefer user-selected, fall back to current/lead
+        const effectiveTarget = targetAgentId || chat?.current_agent_id || chat?.main_agent_id;
+        await api.postMessage(chatId, text, effectiveTarget, attachments);
+        // Reconnect after the last known seq to get agent response
+        connectEventStream(chatId, lastSeqRef.current);
+      }
     } catch (err) {
       console.error('Send failed:', err);
-      setIsStreaming(false);
+      if (!steeringActiveRun) setIsStreaming(false);
     }
-  }, [chatId, chat, connectEventStream, targetAgentId]);
+  }, [chatId, chat, connectEventStream, isStreaming, targetAgentId]);
+
+  const handleCancelSteer = React.useCallback(async (steerId) => {
+    if (!chatId || !steerId) return;
+    try {
+      const updatedChat = await api.cancelPendingSteer(chatId, steerId);
+      setChat(updatedChat);
+      setPendingSteers(updatedChat?.stream?.pending_steers || []);
+    } catch (err) {
+      console.error('Cancel steer failed:', err);
+    }
+  }, [chatId]);
+
+  const handleDeliverSteers = React.useCallback(async (steerIds) => {
+    if (!chatId || !steerIds?.length) return;
+    try {
+      const updatedChat = await api.deliverPendingSteers(chatId, steerIds);
+      setChat(updatedChat);
+      setPendingSteers(updatedChat?.stream?.pending_steers || []);
+    } catch (err) {
+      console.error('Deliver steer failed:', err);
+    }
+  }, [chatId]);
 
   const handleCancel = React.useCallback(async () => {
     if (!chatId) return;
@@ -1674,6 +1889,7 @@ export default function TaskView({ chatId, agentsMap, skills = [], projects = []
       agentActivitySinceSendRef.current = false;
       streamCleanupRef.current();
       setIsStreaming(false);
+      setPendingSteers([]);
     } catch (err) {
       console.error('Cancel failed:', err);
     }
@@ -1720,6 +1936,10 @@ export default function TaskView({ chatId, agentsMap, skills = [], projects = []
         onSend={handleSend}
         isStreaming={isStreaming}
         onCancel={handleCancel}
+        pendingSteers={pendingSteers}
+        onCancelSteer={handleCancelSteer}
+        onEditSteer={handleCancelSteer}
+        onDeliverSteers={handleDeliverSteers}
         agentsMap={agentsMap}
         skills={skills}
         projects={projects}

@@ -34,8 +34,8 @@ type App struct {
 	engine         runtime.Engine
 	broker         *broker.Broker[model.Event]
 
-	mu      sync.Mutex
-	cancels map[string]context.CancelFunc
+	mu   sync.Mutex
+	runs map[string]*chatRunController
 
 	// presetMu serializes seed/reset operations on the same preset so two
 	// concurrent API calls cannot create duplicate records.
@@ -60,7 +60,7 @@ func New(cfg Config) (*App, error) {
 		scanner:        firstScanner(cfg.Scanner),
 		engine:         firstEngine(cfg.Engine),
 		broker:         broker.New[model.Event](),
-		cancels:        make(map[string]context.CancelFunc),
+		runs:           make(map[string]*chatRunController),
 	}
 	if err := app.bootstrapDefaultState(); err != nil {
 		return nil, err
@@ -82,8 +82,8 @@ func New(cfg Config) (*App, error) {
 // and safe under concurrent callers: serialized on a.mu.
 //
 // Detection signal: PostMessage holds a.mu while it both writes
-// stream.status="streaming" and inserts into a.cancels, so the pair is atomic.
-// status=="streaming" AND no a.cancels entry therefore means a stale record.
+// stream.status="streaming" and inserts into a.runs, so the pair is atomic.
+// status=="streaming" AND no a.runs entry therefore means a stale record.
 func (a *App) reconcileStaleStream(chat model.ChatRecord) model.ChatRecord {
 	if chat.Stream.Status != "streaming" {
 		return chat
@@ -104,7 +104,7 @@ func (a *App) reconcileStaleStreamLocked(chat model.ChatRecord) model.ChatRecord
 	if fresh.Stream.Status != "streaming" {
 		return fresh
 	}
-	if _, active := a.cancels[chat.ID]; active {
+	if _, active := a.runs[chat.ID]; active {
 		return fresh
 	}
 	now := time.Now().UTC()
@@ -951,12 +951,12 @@ func (a *App) ListEvents(chatID string, after int64) ([]model.Event, error) {
 
 func (a *App) CancelChat(chatID string) error {
 	a.mu.Lock()
-	cancel := a.cancels[chatID]
+	controller := a.runs[chatID]
 	a.mu.Unlock()
-	if cancel == nil {
+	if controller == nil || controller.cancel == nil {
 		return nil
 	}
-	cancel()
+	controller.cancel()
 	return nil
 }
 

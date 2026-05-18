@@ -34,6 +34,12 @@ export interface Chat {
   status: string;
   stream?: {
     status?: string;
+    pending_steers?: Array<{
+      id: string;
+      content: string;
+      attachments?: MessageAttachment[];
+      queued_at: string;
+    }>;
   };
 }
 
@@ -46,6 +52,9 @@ export interface BackendEvent {
     role: "user" | "assistant";
     content: string;
     attachments?: MessageAttachment[];
+    user_steer?: boolean;
+    steer_agent_id?: string;
+    interrupted?: boolean;
   };
   thinking?: {
     content: string;

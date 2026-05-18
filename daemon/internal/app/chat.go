@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/getcrew44/crew44/daemon/internal/broker"
@@ -13,6 +14,19 @@ import (
 )
 
 var errChatStoppedAfterError = errors.New("chat stopped after error event")
+
+type chatRunController struct {
+	cancel            context.CancelFunc
+	pendingInterrupts []pendingInterrupt
+}
+
+type pendingInterrupt struct {
+	id          string
+	content     string
+	attachments []model.MessageAttachment
+	queuedAt    time.Time
+	triggered   bool
+}
 
 func (a *App) PostMessage(chatID, content, targetAgentID string, attachments []model.MessageAttachment) (model.ChatRecord, error) {
 	a.mu.Lock()
@@ -77,15 +91,135 @@ func (a *App) PostMessage(chatID, content, targetAgentID string, attachments []m
 	a.broker.Publish(chatID, broker.Notification[model.Event]{Kind: broker.KindEvent, Value: userEvent})
 
 	ctx, cancel := context.WithCancel(context.Background())
-	a.cancels[chatID] = cancel
-	go a.runChat(ctx, chatID, targetAgentID, turnID, model.AppendAttachmentLinks(content, attachments))
+	controller := &chatRunController{cancel: cancel}
+	a.runs[chatID] = controller
+	go a.runChat(ctx, controller, chatID, targetAgentID, turnID, model.AppendAttachmentLinks(content, attachments))
 	return chat, nil
 }
 
-func (a *App) runChat(ctx context.Context, chatID, agentID, turnID, prompt string) {
+func (a *App) InterruptMessage(chatID, content string, attachments []model.MessageAttachment) (model.ChatRecord, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	chat, err := a.store.GetChat(chatID)
+	if err != nil {
+		return model.ChatRecord{}, a.mapError(err)
+	}
+	chat = a.reconcileStaleStreamLocked(chat)
+	if chat.Stream.Status != "streaming" {
+		return model.ChatRecord{}, ErrConflict
+	}
+	controller := a.runs[chatID]
+	if controller == nil || controller.cancel == nil {
+		return model.ChatRecord{}, ErrConflict
+	}
+	now := time.Now().UTC()
+	pending := pendingInterrupt{
+		id:          id.New(),
+		content:     content,
+		attachments: attachments,
+		queuedAt:    now,
+	}
+	controller.pendingInterrupts = append(controller.pendingInterrupts, pending)
+	chat.Stream.PendingSteers = pendingSteerStates(controller.pendingInterrupts)
+	chat.UpdatedAt = now
+	if err := a.store.SaveChat(chat); err != nil {
+		return model.ChatRecord{}, err
+	}
+	return chat, nil
+}
+
+func (a *App) CancelPendingSteer(chatID, steerID string) (model.ChatRecord, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	chat, err := a.store.GetChat(chatID)
+	if err != nil {
+		return model.ChatRecord{}, a.mapError(err)
+	}
+	chat = a.reconcileStaleStreamLocked(chat)
+	controller := a.runs[chatID]
+	if controller == nil {
+		return model.ChatRecord{}, ErrConflict
+	}
+	next := controller.pendingInterrupts[:0]
+	removed := false
+	for _, pending := range controller.pendingInterrupts {
+		if pending.id == steerID {
+			if pending.triggered {
+				return model.ChatRecord{}, ErrConflict
+			}
+			removed = true
+			continue
+		}
+		next = append(next, pending)
+	}
+	if !removed {
+		return model.ChatRecord{}, ErrConflict
+	}
+	controller.pendingInterrupts = next
+	chat.Stream.PendingSteers = pendingSteerStates(controller.pendingInterrupts)
+	chat.UpdatedAt = time.Now().UTC()
+	if err := a.store.SaveChat(chat); err != nil {
+		return model.ChatRecord{}, err
+	}
+	return chat, nil
+}
+
+func (a *App) DeliverPendingSteers(chatID string, steerIDs []string) (model.ChatRecord, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	chat, err := a.store.GetChat(chatID)
+	if err != nil {
+		return model.ChatRecord{}, a.mapError(err)
+	}
+	chat = a.reconcileStaleStreamLocked(chat)
+	if chat.Stream.Status != "streaming" {
+		return model.ChatRecord{}, ErrConflict
+	}
+	controller := a.runs[chatID]
+	if controller == nil || controller.cancel == nil {
+		return model.ChatRecord{}, ErrConflict
+	}
+	if len(steerIDs) == 0 {
+		return model.ChatRecord{}, ErrBadRequest
+	}
+	selected := make(map[string]bool, len(steerIDs))
+	for _, steerID := range steerIDs {
+		selected[steerID] = true
+	}
+	matched := 0
+	for i := range controller.pendingInterrupts {
+		if selected[controller.pendingInterrupts[i].id] {
+			if controller.pendingInterrupts[i].triggered {
+				return model.ChatRecord{}, ErrConflict
+			}
+			controller.pendingInterrupts[i].triggered = true
+			matched++
+		}
+	}
+	if matched != len(selected) {
+		return model.ChatRecord{}, ErrConflict
+	}
+	chat.Stream.PendingSteers = pendingSteerStates(controller.pendingInterrupts)
+	chat.UpdatedAt = time.Now().UTC()
+	if err := a.store.SaveChat(chat); err != nil {
+		return model.ChatRecord{}, err
+	}
+	cancel := controller.cancel
+	if cancel != nil {
+		cancel()
+	}
+	return chat, nil
+}
+
+func (a *App) runChat(ctx context.Context, controller *chatRunController, chatID, agentID, turnID, prompt string) {
 	defer func() {
 		a.mu.Lock()
-		delete(a.cancels, chatID)
+		if a.runs[chatID] == controller {
+			delete(a.runs, chatID)
+		}
 		a.mu.Unlock()
 	}()
 
@@ -170,25 +304,28 @@ func (a *App) runChat(ctx context.Context, chatID, agentID, turnID, prompt strin
 			if streamEvent.Message != nil && streamEvent.Message.Role == model.MessageRoleAssistant {
 				cleaned, handoverTargets := model.ExtractAgentHandoverMarkers(streamEvent.Message.Content)
 				lastAssistant = cleaned
-				for _, handover := range handoverTargets {
-					target, errorPayload := a.validateHandoverTarget(handover.AgentID, currentAgentID)
-					if errorPayload != nil {
-						a.finishChatWithErrorPayload(chatID, currentTurnID, currentAgentID, *errorPayload)
-						return errChatStoppedAfterError
-					}
-					pendingHandoverAgent = target
-					pendingHandoverNote = handover.Note
-					latestChat, err := a.store.GetChat(chatID)
-					if err != nil {
-						return err
-					}
-					latestChat.PendingHandoverAgentID = target.ID
-					latestChat.UpdatedAt = time.Now().UTC()
-					if err := a.store.SaveChat(latestChat); err != nil {
-						return err
-					}
-					if err := a.appendHandoverEvent(chatID, currentTurnID, currentAgentID, handoverSubtypeScheduled, target, handover.Note); err != nil {
-						return err
+				triggerSteer := cleaned != "" && a.hasPendingSteer(chatID, controller)
+				if !triggerSteer {
+					for _, handover := range handoverTargets {
+						target, errorPayload := a.validateHandoverTarget(handover.AgentID, currentAgentID)
+						if errorPayload != nil {
+							a.finishChatWithErrorPayload(chatID, currentTurnID, currentAgentID, *errorPayload)
+							return errChatStoppedAfterError
+						}
+						pendingHandoverAgent = target
+						pendingHandoverNote = handover.Note
+						latestChat, err := a.store.GetChat(chatID)
+						if err != nil {
+							return err
+						}
+						latestChat.PendingHandoverAgentID = target.ID
+						latestChat.UpdatedAt = time.Now().UTC()
+						if err := a.store.SaveChat(latestChat); err != nil {
+							return err
+						}
+						if err := a.appendHandoverEvent(chatID, currentTurnID, currentAgentID, handoverSubtypeScheduled, target, handover.Note); err != nil {
+							return err
+						}
 					}
 				}
 				if cleaned == "" {
@@ -204,13 +341,22 @@ func (a *App) runChat(ctx context.Context, chatID, agentID, turnID, prompt strin
 				}
 				message := *streamEvent.Message
 				message.Content = cleaned
+				if triggerSteer {
+					message.Interrupted = true
+				}
 				event.Message = &message
 			}
 			persisted, err := a.store.AppendEvent(chatID, event)
 			if err != nil {
 				return err
 			}
+			if streamEvent.RuntimeSession != nil && streamEvent.RuntimeSession.SessionID != "" {
+				a.updateLastRuntimeSession(chatID, currentAgentID, streamEvent.RuntimeSession.SessionID)
+			}
 			a.broker.Publish(chatID, broker.Notification[model.Event]{Kind: broker.KindEvent, Value: persisted})
+			if event.Message != nil && event.Message.Interrupted {
+				a.triggerPendingSteer(chatID, controller)
+			}
 			return nil
 		})
 		if err != nil {
@@ -218,6 +364,12 @@ func (a *App) runChat(ctx context.Context, chatID, agentID, turnID, prompt strin
 				return
 			}
 			if errors.Is(err, context.Canceled) || ctx.Err() != nil {
+				if delivered, remaining, ok := a.consumeTriggeredPendingSteer(chatID, controller); ok {
+					if restartErr := a.restartAfterSteer(chatID, currentAgentID, delivered, remaining); restartErr != nil {
+						a.finishChatWithError(chatID, restartErr.Error())
+					}
+					return
+				}
 				a.finishChatCanceled(chatID)
 				return
 			}
@@ -283,7 +435,212 @@ func (a *App) runChat(ctx context.Context, chatID, agentID, turnID, prompt strin
 		currentTurnID = nextTurnID
 	}
 
+	if pending, ok := a.consumePendingSteer(chatID, controller); ok {
+		if restartErr := a.restartAfterSteer(chatID, currentAgentID, pending, nil); restartErr != nil {
+			a.finishChatWithError(chatID, restartErr.Error())
+		}
+		return
+	}
 	a.finishChatSuccess(chatID)
+}
+
+func (a *App) hasPendingSteer(chatID string, controller *chatRunController) bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.runs[chatID] != controller {
+		return false
+	}
+	for _, pending := range controller.pendingInterrupts {
+		if !pending.triggered {
+			return true
+		}
+	}
+	return false
+}
+
+func (a *App) triggerPendingSteer(chatID string, controller *chatRunController) {
+	a.mu.Lock()
+	if a.runs[chatID] != controller {
+		a.mu.Unlock()
+		return
+	}
+	triggered := false
+	for i := range controller.pendingInterrupts {
+		if !controller.pendingInterrupts[i].triggered {
+			controller.pendingInterrupts[i].triggered = true
+			triggered = true
+		}
+	}
+	if !triggered {
+		a.mu.Unlock()
+		return
+	}
+	cancel := controller.cancel
+	a.mu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+}
+
+func (a *App) consumeTriggeredPendingSteer(chatID string, controller *chatRunController) ([]pendingInterrupt, []pendingInterrupt, bool) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.runs[chatID] != controller {
+		return nil, nil, false
+	}
+	delivered, remaining := splitPendingSteers(controller.pendingInterrupts)
+	if len(delivered) == 0 {
+		return nil, nil, false
+	}
+	controller.pendingInterrupts = nil
+	return delivered, remaining, true
+}
+
+func (a *App) consumePendingSteer(chatID string, controller *chatRunController) ([]pendingInterrupt, bool) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.runs[chatID] != controller || len(controller.pendingInterrupts) == 0 {
+		return nil, false
+	}
+	pending := append([]pendingInterrupt(nil), controller.pendingInterrupts...)
+	controller.pendingInterrupts = nil
+	return pending, true
+}
+
+func splitPendingSteers(pending []pendingInterrupt) ([]pendingInterrupt, []pendingInterrupt) {
+	delivered := make([]pendingInterrupt, 0, len(pending))
+	remaining := make([]pendingInterrupt, 0, len(pending))
+	for _, item := range pending {
+		if item.triggered {
+			item.triggered = false
+			delivered = append(delivered, item)
+			continue
+		}
+		remaining = append(remaining, item)
+	}
+	return delivered, remaining
+}
+
+func pendingSteerStates(pending []pendingInterrupt) []model.PendingSteerState {
+	states := make([]model.PendingSteerState, 0, len(pending))
+	for _, item := range pending {
+		if item.triggered {
+			continue
+		}
+		states = append(states, model.PendingSteerState{
+			ID:          item.id,
+			Content:     item.content,
+			Attachments: item.attachments,
+			QueuedAt:    item.queuedAt,
+		})
+	}
+	return states
+}
+
+func (a *App) restartAfterSteer(chatID, agentID string, delivered []pendingInterrupt, remaining []pendingInterrupt) error {
+	if agentID == "" {
+		return ErrBadRequest
+	}
+	if len(delivered) == 0 {
+		return ErrBadRequest
+	}
+
+	a.mu.Lock()
+	chat, err := a.store.GetChat(chatID)
+	if err != nil {
+		a.mu.Unlock()
+		return a.mapError(err)
+	}
+	agent, err := a.store.GetAgent(agentID)
+	if err != nil {
+		a.mu.Unlock()
+		return a.mapError(err)
+	}
+	runtimeRecord, err := a.store.GetRuntime(agent.RuntimeID)
+	if err != nil {
+		a.mu.Unlock()
+		return a.mapError(err)
+	}
+	if runtimeRecord.Status == model.RuntimeStatusMissing {
+		a.mu.Unlock()
+		return ErrConflict
+	}
+
+	now := time.Now().UTC()
+	turnID := id.New()
+	chat.ActiveTurnID = turnID
+	chat.CurrentAgentID = agentID
+	chat.UpdatedAt = now
+	chat.Stream = model.ChatStreamState{
+		Status:        "streaming",
+		AgentID:       agentID,
+		StartedAt:     now,
+		PendingSteers: pendingSteerStates(remaining),
+	}
+	chat.PendingHandoverAgentID = ""
+	chat.ParticipantAgentIDs = appendUnique(chat.ParticipantAgentIDs, agentID)
+	if err := a.store.SaveChat(chat); err != nil {
+		a.mu.Unlock()
+		return err
+	}
+
+	userEvents := make([]model.Event, 0, len(delivered))
+	for _, pending := range delivered {
+		userEvent, err := a.store.AppendEvent(chatID, model.Event{
+			Type:         model.EventTypeMessage,
+			TS:           now,
+			TurnID:       turnID,
+			ActorAgentID: agentID,
+			Message: &model.MessagePayload{
+				Role:         model.MessageRoleUser,
+				Content:      pending.content,
+				Attachments:  pending.attachments,
+				UserSteer:    true,
+				SteerAgentID: agentID,
+			},
+		})
+		if err != nil {
+			a.mu.Unlock()
+			return err
+		}
+		userEvents = append(userEvents, userEvent)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	nextController := &chatRunController{
+		cancel:            cancel,
+		pendingInterrupts: append([]pendingInterrupt(nil), remaining...),
+	}
+	a.runs[chatID] = nextController
+	a.mu.Unlock()
+
+	for _, userEvent := range userEvents {
+		a.broker.Publish(chatID, broker.Notification[model.Event]{Kind: broker.KindEvent, Value: userEvent})
+	}
+	go a.runChat(ctx, nextController, chatID, agentID, turnID, buildInterruptPrompt(delivered))
+	return nil
+}
+
+func buildInterruptPrompt(pending []pendingInterrupt) string {
+	parts := make([]string, 0, len(pending))
+	for _, item := range pending {
+		parts = append(parts, model.AppendAttachmentLinks(item.content, item.attachments))
+	}
+	return "The user interrupted the previous run with new steering. Treat this as the latest instruction and continue from the newest context.\n\nUser steer:\n" + strings.Join(parts, "\n\n")
+}
+
+func (a *App) updateLastRuntimeSession(chatID, agentID, sessionID string) {
+	chat, err := a.store.GetChat(chatID)
+	if err != nil {
+		return
+	}
+	chat.LastRuntimeSession = model.LastRuntimeSession{
+		AgentID:   agentID,
+		SessionID: sessionID,
+		UpdatedAt: time.Now().UTC(),
+	}
+	chat.UpdatedAt = time.Now().UTC()
+	_ = a.store.SaveChat(chat)
 }
 
 func (a *App) finishChatSuccess(chatID string) {
@@ -294,6 +651,7 @@ func (a *App) finishChatSuccess(chatID string) {
 	chat.Stream.Status = "idle"
 	chat.Stream.LastError = ""
 	chat.Stream.CancelRequested = false
+	chat.Stream.PendingSteers = nil
 	chat.PendingHandoverAgentID = ""
 	chat.UpdatedAt = time.Now().UTC()
 	_ = a.store.SaveChat(chat)
@@ -308,6 +666,7 @@ func (a *App) finishChatCanceled(chatID string) {
 	chat.Stream.Status = "idle"
 	chat.Stream.LastError = ""
 	chat.Stream.CancelRequested = false
+	chat.Stream.PendingSteers = nil
 	chat.PendingHandoverAgentID = ""
 	chat.UpdatedAt = time.Now().UTC()
 	_ = a.store.SaveChat(chat)
@@ -372,6 +731,7 @@ func (a *App) finishChatWithErrorPayload(chatID, turnID, actorAgentID string, pa
 		chat.Stream.Status = "idle"
 		chat.Stream.LastError = payload.Message
 		chat.Stream.CancelRequested = true
+		chat.Stream.PendingSteers = nil
 		chat.PendingHandoverAgentID = ""
 		chat.UpdatedAt = time.Now().UTC()
 		_ = a.store.SaveChat(chat)

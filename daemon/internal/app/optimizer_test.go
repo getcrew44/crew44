@@ -84,11 +84,11 @@ func TestAppDispatcherWaitDoneReturnsRuntimeLastError(t *testing.T) {
 	if err := a.store.SaveChat(chat); err != nil {
 		t.Fatal(err)
 	}
-	// Register a cancel so reconcileStaleStream sees this as a live stream
-	// (status=streaming + active cancels) and skips recovery. Without this
+	// Register a run controller so reconcileStaleStream sees this as a live stream
+	// (status=streaming + active run) and skips recovery. Without this
 	// the lazy recovery in GetChat overwrites the runtime error we set below.
 	a.mu.Lock()
-	a.cancels[chatID] = func() {}
+	a.runs[chatID] = &chatRunController{cancel: func() {}}
 	a.mu.Unlock()
 
 	go a.finishChatWithRuntimeError(chatID, "turn-1", agentID, "bufio.Scanner: token too long")
@@ -125,7 +125,7 @@ func TestAppDispatcherWaitDoneResetsIdleTimeoutOnActivity(t *testing.T) {
 	// See note in TestAppDispatcherWaitDoneReturnsRuntimeLastError: register a
 	// cancel so the chat reads as live, not stale.
 	a.mu.Lock()
-	a.cancels[chatID] = func() {}
+	a.runs[chatID] = &chatRunController{cancel: func() {}}
 	a.mu.Unlock()
 
 	go func() {

@@ -19,6 +19,12 @@ type cancelAwareEngine struct {
 	started chan struct{}
 }
 
+type interruptRestartEngine struct {
+	firstStarted chan struct{}
+	allowText    chan struct{}
+	requests     chan runtime.RunRequest
+}
+
 func (e *cancelAwareEngine) Run(ctx context.Context, _ runtime.RunRequest, emit func(runtime.StreamEvent) error) (runtime.RunResult, error) {
 	close(e.started)
 	if err := emit(runtime.StreamEvent{
@@ -31,6 +37,58 @@ func (e *cancelAwareEngine) Run(ctx context.Context, _ runtime.RunRequest, emit 
 	}
 	<-ctx.Done()
 	return runtime.RunResult{}, ctx.Err()
+}
+
+func (e *interruptRestartEngine) Run(ctx context.Context, request runtime.RunRequest, emit func(runtime.StreamEvent) error) (runtime.RunResult, error) {
+	e.requests <- request
+	if request.Prompt == "start work" {
+		if err := emit(runtime.StreamEvent{
+			Type: model.EventTypeRuntimeSession,
+			RuntimeSession: &model.RuntimeSessionPayload{
+				RuntimeID: request.Runtime.ID,
+				Provider:  request.Runtime.Provider,
+				SessionID: "session-one",
+				Status:    "running",
+			},
+		}); err != nil {
+			return runtime.RunResult{}, err
+		}
+		if err := emit(runtime.StreamEvent{
+			Type: model.EventTypeToolCall,
+			ToolCall: &model.ToolCallPayload{
+				Name:  "exec_command",
+				Input: map[string]any{"command": "echo working"},
+			},
+		}); err != nil {
+			return runtime.RunResult{}, err
+		}
+		close(e.firstStarted)
+		select {
+		case <-e.allowText:
+		case <-ctx.Done():
+			return runtime.RunResult{}, ctx.Err()
+		}
+		if err := emit(runtime.StreamEvent{
+			Type: model.EventTypeMessage,
+			Message: &model.MessagePayload{
+				Role:    model.MessageRoleAssistant,
+				Content: "partial answer",
+			},
+		}); err != nil {
+			return runtime.RunResult{}, err
+		}
+		return runtime.RunResult{SessionID: "session-one"}, nil
+	}
+	if err := emit(runtime.StreamEvent{
+		Type: model.EventTypeMessage,
+		Message: &model.MessagePayload{
+			Role:    model.MessageRoleAssistant,
+			Content: "continued after steer",
+		},
+	}); err != nil {
+		return runtime.RunResult{}, err
+	}
+	return runtime.RunResult{SessionID: "session-two"}, nil
 }
 
 func TestChatMessageReplayAndEventList(t *testing.T) {
@@ -53,6 +111,207 @@ func TestChatMessageReplayAndEventList(t *testing.T) {
 	if len(items) < 4 {
 		t.Fatalf("expected replay events, got %#v", replay)
 	}
+}
+
+func TestChatMessageInterruptRestartsRunWithSteerFlags(t *testing.T) {
+	engine := &interruptRestartEngine{
+		firstStarted: make(chan struct{}),
+		allowText:    make(chan struct{}),
+		requests:     make(chan runtime.RunRequest, 4),
+	}
+	env := newTestEnvWithEngine(t, engine)
+	callRPCStatus(t, env.server, "runtimes.rescan", nil, http.StatusOK, nil)
+
+	agentID := createAgent(t, env, "Aria")
+	projectID := createProject(t, env, agentID)
+	chatID := createChat(t, env, projectID, agentID)
+
+	callRPCStatus(t, env.server, "chats.messages.post", withRPCParam(t, map[string]any{
+		"content":         "start work",
+		"target_agent_id": agentID,
+	}, "id", chatID), http.StatusAccepted, nil)
+
+	select {
+	case <-engine.firstStarted:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for first run to start")
+	}
+
+	var firstReq runtime.RunRequest
+	select {
+	case firstReq = <-engine.requests:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for first runtime request")
+	}
+	if firstReq.Prompt != "start work" {
+		t.Fatalf("first prompt = %q, want start work", firstReq.Prompt)
+	}
+
+	callRPCStatus(t, env.server, "chats.messages.interrupt", withRPCParam(t, map[string]any{
+		"content": "use the new direction",
+	}, "id", chatID), http.StatusOK, nil)
+	callRPCStatus(t, env.server, "chats.messages.interrupt", withRPCParam(t, map[string]any{
+		"content": "also keep the tests focused",
+	}, "id", chatID), http.StatusOK, nil)
+
+	var queued map[string]any
+	callRPCStatus(t, env.server, "chats.get", rpcParams("id", chatID), http.StatusOK, &queued)
+	stream := queued["stream"].(map[string]any)
+	pendingSteers, _ := stream["pending_steers"].([]any)
+	if len(pendingSteers) != 2 || pendingSteers[0].(map[string]any)["content"] != "use the new direction" {
+		t.Fatalf("expected queued steer in chat stream, got %#v", queued)
+	}
+
+	select {
+	case req := <-engine.requests:
+		t.Fatalf("steer restarted before assistant text event: %#v", req)
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	close(engine.allowText)
+	waitForChatIdle(t, env.server, chatID)
+
+	var secondReq runtime.RunRequest
+	select {
+	case secondReq = <-engine.requests:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for restarted runtime request")
+	}
+	if !strings.Contains(secondReq.Prompt, "User steer:") ||
+		!strings.Contains(secondReq.Prompt, "use the new direction") ||
+		!strings.Contains(secondReq.Prompt, "also keep the tests focused") {
+		t.Fatalf("restart prompt did not include steer wrapper: %q", secondReq.Prompt)
+	}
+	if secondReq.ResumeSessionID != "session-one" {
+		t.Fatalf("restart resume session = %q, want session-one", secondReq.ResumeSessionID)
+	}
+
+	var replay map[string]any
+	callRPCStatus(t, env.server, "chats.events.list", rpcParams("chat_id", chatID, "after", int64(0)), http.StatusOK, &replay)
+	replayBytes, _ := json.Marshal(replay)
+	replayText := string(replayBytes)
+	if !strings.Contains(replayText, `"interrupted":true`) ||
+		strings.Count(replayText, `"user_steer":true`) != 2 ||
+		!strings.Contains(replayText, "continued after steer") {
+		t.Fatalf("expected interrupted assistant and user steer flags, got %#v", replay)
+	}
+}
+
+func TestChatMessageInterruptCancelClearsQueuedSteer(t *testing.T) {
+	engine := &interruptRestartEngine{
+		firstStarted: make(chan struct{}),
+		allowText:    make(chan struct{}),
+		requests:     make(chan runtime.RunRequest, 4),
+	}
+	env := newTestEnvWithEngine(t, engine)
+	callRPCStatus(t, env.server, "runtimes.rescan", nil, http.StatusOK, nil)
+
+	agentID := createAgent(t, env, "Aria")
+	projectID := createProject(t, env, agentID)
+	chatID := createChat(t, env, projectID, agentID)
+
+	callRPCStatus(t, env.server, "chats.messages.post", withRPCParam(t, map[string]any{
+		"content":         "start work",
+		"target_agent_id": agentID,
+	}, "id", chatID), http.StatusAccepted, nil)
+	<-engine.requests
+	select {
+	case <-engine.firstStarted:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for first run to reach tool call")
+	}
+
+	callRPCStatus(t, env.server, "chats.messages.interrupt", withRPCParam(t, map[string]any{
+		"content": "use the new direction",
+	}, "id", chatID), http.StatusOK, nil)
+
+	var queued map[string]any
+	callRPCStatus(t, env.server, "chats.get", rpcParams("id", chatID), http.StatusOK, &queued)
+	stream := queued["stream"].(map[string]any)
+	pendingSteers := stream["pending_steers"].([]any)
+	steerID := pendingSteers[0].(map[string]any)["id"].(string)
+
+	callRPCStatus(t, env.server, "chats.messages.interrupt.cancel", rpcParams("id", chatID, "steer_id", steerID), http.StatusOK, nil)
+
+	var afterCancel map[string]any
+	callRPCStatus(t, env.server, "chats.get", rpcParams("id", chatID), http.StatusOK, &afterCancel)
+	stream = afterCancel["stream"].(map[string]any)
+	if stream["pending_steers"] != nil {
+		t.Fatalf("expected pending steer to be cleared, got %#v", afterCancel)
+	}
+
+	close(engine.allowText)
+	waitForChatIdle(t, env.server, chatID)
+	select {
+	case req := <-engine.requests:
+		t.Fatalf("cancelled steer should not restart, got %#v", req)
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	var replay map[string]any
+	callRPCStatus(t, env.server, "chats.events.list", rpcParams("chat_id", chatID, "after", int64(0)), http.StatusOK, &replay)
+	replayBytes, _ := json.Marshal(replay)
+	if strings.Contains(string(replayBytes), `"user_steer":true`) {
+		t.Fatalf("cancelled steer should not append user steer, got %#v", replay)
+	}
+}
+
+func TestChatMessageInterruptDeliverNowRestartsSelectedSteer(t *testing.T) {
+	engine := &interruptRestartEngine{
+		firstStarted: make(chan struct{}),
+		allowText:    make(chan struct{}),
+		requests:     make(chan runtime.RunRequest, 4),
+	}
+	env := newTestEnvWithEngine(t, engine)
+	callRPCStatus(t, env.server, "runtimes.rescan", nil, http.StatusOK, nil)
+
+	agentID := createAgent(t, env, "Aria")
+	projectID := createProject(t, env, agentID)
+	chatID := createChat(t, env, projectID, agentID)
+
+	callRPCStatus(t, env.server, "chats.messages.post", withRPCParam(t, map[string]any{
+		"content":         "start work",
+		"target_agent_id": agentID,
+	}, "id", chatID), http.StatusAccepted, nil)
+
+	<-engine.requests
+	select {
+	case <-engine.firstStarted:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for first run to start")
+	}
+
+	callRPCStatus(t, env.server, "chats.messages.interrupt", withRPCParam(t, map[string]any{
+		"content": "deliver this now",
+	}, "id", chatID), http.StatusOK, nil)
+	callRPCStatus(t, env.server, "chats.messages.interrupt", withRPCParam(t, map[string]any{
+		"content": "leave this queued",
+	}, "id", chatID), http.StatusOK, nil)
+
+	var queued map[string]any
+	callRPCStatus(t, env.server, "chats.get", rpcParams("id", chatID), http.StatusOK, &queued)
+	stream := queued["stream"].(map[string]any)
+	pendingSteers := stream["pending_steers"].([]any)
+	firstID := pendingSteers[0].(map[string]any)["id"].(string)
+
+	var delivered map[string]any
+	callRPCStatus(t, env.server, "chats.messages.interrupt.deliver", rpcParams("id", chatID, "steer_ids", []string{firstID}), http.StatusOK, &delivered)
+	deliveredStream := delivered["stream"].(map[string]any)
+	remaining := deliveredStream["pending_steers"].([]any)
+	if len(remaining) != 1 || remaining[0].(map[string]any)["content"] != "leave this queued" {
+		t.Fatalf("expected one remaining queued steer, got %#v", delivered)
+	}
+
+	var secondReq runtime.RunRequest
+	select {
+	case secondReq = <-engine.requests:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for immediate deliver restart")
+	}
+	if !strings.Contains(secondReq.Prompt, "deliver this now") || strings.Contains(secondReq.Prompt, "leave this queued") {
+		t.Fatalf("deliver-now prompt = %q", secondReq.Prompt)
+	}
+	waitForChatIdle(t, env.server, chatID)
 }
 
 func TestChatResolvesAgentSkillsIntoRuntimeRequest(t *testing.T) {

@@ -12,53 +12,56 @@ type methodHandler func(context.Context, Peer, json.RawMessage) (any, error)
 
 func (s *Server) registerMethods() {
 	s.methods = map[string]methodHandler{
-		"system.health":             s.systemHealth,
-		"remote.status":             s.remoteStatus,
-		"remote.pairing.create":     s.remotePairingCreate,
-		"remote.devices.list":       s.remoteDevicesList,
-		"remote.devices.delete":     s.remoteDevicesDelete,
-		"onboarding.get":            s.onboardingGet,
-		"onboarding.complete":       s.onboardingComplete,
-		"runtimes.list":             s.runtimesList,
-		"runtimes.rescan":           s.runtimesRescan,
-		"runtimes.get":              s.runtimesGet,
-		"runtimes.update":           s.runtimesUpdate,
-		"agents.list":               s.agentsList,
-		"agents.create":             s.agentsCreate,
-		"agents.get":                s.agentsGet,
-		"agents.update":             s.agentsUpdate,
-		"agents.archive":            s.agentsArchive,
-		"agents.restore":            s.agentsRestore,
-		"agents.skills.replace":     s.agentsSkillsReplace,
-		"agents.preset.reset":       s.agentsPresetReset,
-		"presets.list":              s.presetsList,
-		"presets.defaultCrew.seed":  s.presetsDefaultCrewSeed,
-		"presets.defaultCrew.reset": s.presetsDefaultCrewReset,
-		"skills.list":               s.skillsList,
-		"skills.create":             s.skillsCreate,
-		"skills.get":                s.skillsGet,
-		"skills.update":             s.skillsUpdate,
-		"skills.delete":             s.skillsDelete,
-		"skills.files.list":         s.skillsFilesList,
-		"skills.files.put":          s.skillsFilesPut,
-		"skills.files.delete":       s.skillsFilesDelete,
-		"projects.list":             s.projectsList,
-		"projects.create":           s.projectsCreate,
-		"projects.get":              s.projectsGet,
-		"projects.update":           s.projectsUpdate,
-		"projects.delete":           s.projectsDelete,
-		"projects.chats.list":       s.projectsChatsList,
-		"projects.files.list":       s.projectsFilesList,
-		"chats.create":              s.chatsCreate,
-		"chats.list":                s.chatsList,
-		"chats.get":                 s.chatsGet,
-		"chats.update":              s.chatsUpdate,
-		"chats.delete":              s.chatsDelete,
-		"chats.messages.post":       s.chatsMessagesPost,
-		"chats.events.list":         s.chatsEventsList,
-		"chats.events.subscribe":    s.chatsEventsSubscribe,
-		"chats.events.unsubscribe":  s.chatsEventsUnsubscribe,
-		"chats.cancel":              s.chatsCancel,
+		"system.health":                    s.systemHealth,
+		"remote.status":                    s.remoteStatus,
+		"remote.pairing.create":            s.remotePairingCreate,
+		"remote.devices.list":              s.remoteDevicesList,
+		"remote.devices.delete":            s.remoteDevicesDelete,
+		"onboarding.get":                   s.onboardingGet,
+		"onboarding.complete":              s.onboardingComplete,
+		"runtimes.list":                    s.runtimesList,
+		"runtimes.rescan":                  s.runtimesRescan,
+		"runtimes.get":                     s.runtimesGet,
+		"runtimes.update":                  s.runtimesUpdate,
+		"agents.list":                      s.agentsList,
+		"agents.create":                    s.agentsCreate,
+		"agents.get":                       s.agentsGet,
+		"agents.update":                    s.agentsUpdate,
+		"agents.archive":                   s.agentsArchive,
+		"agents.restore":                   s.agentsRestore,
+		"agents.skills.replace":            s.agentsSkillsReplace,
+		"agents.preset.reset":              s.agentsPresetReset,
+		"presets.list":                     s.presetsList,
+		"presets.defaultCrew.seed":         s.presetsDefaultCrewSeed,
+		"presets.defaultCrew.reset":        s.presetsDefaultCrewReset,
+		"skills.list":                      s.skillsList,
+		"skills.create":                    s.skillsCreate,
+		"skills.get":                       s.skillsGet,
+		"skills.update":                    s.skillsUpdate,
+		"skills.delete":                    s.skillsDelete,
+		"skills.files.list":                s.skillsFilesList,
+		"skills.files.put":                 s.skillsFilesPut,
+		"skills.files.delete":              s.skillsFilesDelete,
+		"projects.list":                    s.projectsList,
+		"projects.create":                  s.projectsCreate,
+		"projects.get":                     s.projectsGet,
+		"projects.update":                  s.projectsUpdate,
+		"projects.delete":                  s.projectsDelete,
+		"projects.chats.list":              s.projectsChatsList,
+		"projects.files.list":              s.projectsFilesList,
+		"chats.create":                     s.chatsCreate,
+		"chats.list":                       s.chatsList,
+		"chats.get":                        s.chatsGet,
+		"chats.update":                     s.chatsUpdate,
+		"chats.delete":                     s.chatsDelete,
+		"chats.messages.post":              s.chatsMessagesPost,
+		"chats.messages.interrupt":         s.chatsMessagesInterrupt,
+		"chats.messages.interrupt.cancel":  s.chatsMessagesInterruptCancel,
+		"chats.messages.interrupt.deliver": s.chatsMessagesInterruptDeliver,
+		"chats.events.list":                s.chatsEventsList,
+		"chats.events.subscribe":           s.chatsEventsSubscribe,
+		"chats.events.unsubscribe":         s.chatsEventsUnsubscribe,
+		"chats.cancel":                     s.chatsCancel,
 
 		"optimizer.suggestions.list": s.optimizerSuggestionsList,
 		"optimizer.scan.run":         s.optimizerScanRun,
@@ -486,6 +489,40 @@ func (s *Server) chatsMessagesPost(_ context.Context, _ Peer, params json.RawMes
 		return nil, err
 	}
 	return s.app.PostMessage(body.ID, body.Content, body.TargetAgentID, body.Attachments)
+}
+
+func (s *Server) chatsMessagesInterrupt(_ context.Context, _ Peer, params json.RawMessage) (any, error) {
+	var body struct {
+		ID          string                    `json:"id"`
+		Content     string                    `json:"content"`
+		Attachments []model.MessageAttachment `json:"attachments"`
+	}
+	if err := decodeParams(params, &body); err != nil {
+		return nil, err
+	}
+	return s.app.InterruptMessage(body.ID, body.Content, body.Attachments)
+}
+
+func (s *Server) chatsMessagesInterruptCancel(_ context.Context, _ Peer, params json.RawMessage) (any, error) {
+	var body struct {
+		ID      string `json:"id"`
+		SteerID string `json:"steer_id"`
+	}
+	if err := decodeParams(params, &body); err != nil {
+		return nil, err
+	}
+	return s.app.CancelPendingSteer(body.ID, body.SteerID)
+}
+
+func (s *Server) chatsMessagesInterruptDeliver(_ context.Context, _ Peer, params json.RawMessage) (any, error) {
+	var body struct {
+		ID       string   `json:"id"`
+		SteerIDs []string `json:"steer_ids"`
+	}
+	if err := decodeParams(params, &body); err != nil {
+		return nil, err
+	}
+	return s.app.DeliverPendingSteers(body.ID, body.SteerIDs)
 }
 
 func (s *Server) chatsEventsList(_ context.Context, _ Peer, params json.RawMessage) (any, error) {

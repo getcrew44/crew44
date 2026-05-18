@@ -1,7 +1,7 @@
 import { BackendEvent, MessageAttachment } from "./types";
 
 export type TimelineItem =
-  | { kind: "message"; seq: number; author: string; role: "user" | "assistant"; content: string; attachments?: MessageAttachment[]; time: string }
+  | { kind: "message"; seq: number; author: string; role: "user" | "assistant"; content: string; attachments?: MessageAttachment[]; userSteer?: boolean; steerAgentId?: string; interrupted?: boolean; time: string }
   | { kind: "thinking"; seq: number; author: string; content: string; time: string }
   | { kind: "tool"; seq: number; author: string; name: string; detail: string; time: string }
   | { kind: "tool_result"; seq: number; author: string; name: string; output: string; time: string }
@@ -24,6 +24,9 @@ export function mapBackendEvent(event: BackendEvent): TimelineItem | null {
       role: event.message?.role || "assistant",
       content: event.message?.content || "",
       attachments: event.message?.attachments || [],
+      userSteer: Boolean(event.message?.user_steer),
+      steerAgentId: event.message?.steer_agent_id,
+      interrupted: Boolean(event.message?.interrupted),
       time
     };
   }
