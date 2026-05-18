@@ -1315,6 +1315,39 @@ describe('TaskView', () => {
       expect(rows[1]).toHaveTextContent('NEW.md');
     });
 
+    it('clears stale working-tree diffs when switching projects', async () => {
+      api.getChat.mockImplementation(async (id) => ({
+        ...chat,
+        id,
+        project_id: id === 'chat-1' ? 'proj-1' : 'proj-2',
+      }));
+      let resolveProj2Diff;
+      api.getProjectGitDiff.mockImplementation((projectId) => {
+        if (projectId === 'proj-1') {
+          return Promise.resolve([
+            { path: 'old-project.js', status: 'M', added: 1, removed: 0, diff: [] },
+          ]);
+        }
+        return new Promise(resolve => { resolveProj2Diff = resolve; });
+      });
+      const projects = [
+        { id: 'proj-1', name: 'one', workdir: '/tmp/one' },
+        { id: 'proj-2', name: 'two', workdir: '/tmp/two' },
+      ];
+
+      const { rerender } = render(<TaskView chatId="chat-1" agentsMap={agentsMap} projects={projects} />);
+      fireEvent.click(await screen.findByTestId('files-drawer-toggle'));
+      await waitFor(() => expect(api.getProjectGitDiff).toHaveBeenCalledWith('proj-1'));
+      expect(await screen.findByText('old-project.js')).toBeInTheDocument();
+
+      rerender(<TaskView chatId="chat-2" agentsMap={agentsMap} projects={projects} />);
+      fireEvent.click(await screen.findByTestId('files-drawer-toggle'));
+      await waitFor(() => expect(api.getProjectGitDiff).toHaveBeenCalledWith('proj-2'));
+
+      expect(screen.queryByText('old-project.js')).not.toBeInTheDocument();
+      resolveProj2Diff([]);
+    });
+
     it('clicking a diff row opens the file with the diff toggle and unified diff visible', async () => {
       const stream = captureStream();
       api.getChat.mockResolvedValue({ ...chat, project_id: 'proj-1' });

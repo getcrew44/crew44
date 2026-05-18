@@ -35,7 +35,7 @@ export function FixedTooltip({ text, anchorRect }) {
       left: anchorRect.left + anchorRect.width / 2,
       transform: 'translateX(-50%)',
       background: 'rgba(28,26,23,0.88)', color: '#FCFBF7',
-      fontSize: 12, fontWeight: 400, whiteSpace: 'nowrap',
+      fontFamily: UI_FONT, fontSize: 12, fontWeight: 400, whiteSpace: 'nowrap',
       textTransform: 'none', letterSpacing: 0,
       padding: '5px 9px', borderRadius: 7,
       pointerEvents: 'none', zIndex: 9999,

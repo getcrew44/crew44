@@ -803,11 +803,14 @@ function buildFileTree(paths) {
   return root;
 }
 
-function TreeNode({ node, depth = 0, onPick, selectedPath, filesByPath, defaultOpenDepth = Infinity }) {
+function TreeNode({ node, depth = 0, onPick, selectedPath, filesByPath, workdir, defaultOpenDepth = Infinity }) {
   // Folders auto-open while depth is below the cap. For the touched-files tree
   // this stays Infinity (everything open, since there are few entries); the
   // full project tree passes a small value so deep folders start collapsed.
   const [open, setOpen] = React.useState(depth < defaultOpenDepth);
+  const [hovered, setHovered] = React.useState(false);
+  const [revealHover, setRevealHover] = React.useState(false);
+  const revealBtnRef = React.useRef(null);
   const kids = [...node.children.values()].sort((a, b) => {
     if (a.isFile !== b.isFile) return a.isFile ? 1 : -1;
     return a.name.localeCompare(b.name);
@@ -816,18 +819,19 @@ function TreeNode({ node, depth = 0, onPick, selectedPath, filesByPath, defaultO
   if (node.isFile) {
     const meta = filesByPath?.get(node.path);
     const isSelected = selectedPath === node.path;
+    const canReveal = Boolean(workdir && window.electronAPI?.revealInFinder);
     return (
       <div
         onClick={() => onPick && onPick(node.path)}
+        onMouseEnter={() => setHovered(true)}
+        onMouseLeave={() => setHovered(false)}
         style={{
           padding: '3px 8px 3px ' + (depth * 14 + 10) + 'px',
           fontSize: 12.5, color: '#1C1A17', fontFamily: MONO_FONT,
           display: 'flex', alignItems: 'center', gap: 6,
           cursor: onPick ? 'pointer' : 'default', borderRadius: 5,
-          background: isSelected ? '#F4ECD7' : 'transparent',
+          background: isSelected ? '#F4ECD7' : (hovered && onPick ? '#EDE5CF' : 'transparent'),
         }}
-        onMouseEnter={(e) => { if (onPick && !isSelected) e.currentTarget.style.background = '#F7EFDD'; }}
-        onMouseLeave={(e) => { if (onPick && !isSelected) e.currentTarget.style.background = 'transparent'; }}
       >
         <svg width="11" height="12" viewBox="0 0 11 12" style={{ color: '#A89F92', flexShrink: 0 }} aria-hidden="true">
           <path d="M2 1h4.5L9 3.5V11H2V1z" fill="none" stroke="currentColor" strokeWidth="0.9"/>
@@ -839,6 +843,30 @@ function TreeNode({ node, depth = 0, onPick, selectedPath, filesByPath, defaultO
             {meta.edits} edit{meta.edits === 1 ? '' : 's'}
           </span>
         )}
+        {canReveal && hovered && (
+          <>
+            <button
+              ref={revealBtnRef}
+              onClick={(e) => {
+                e.stopPropagation();
+                const fullPath = workdir.replace(/\/+$/, '') + '/' + node.path;
+                window.electronAPI.revealInFinder(fullPath);
+              }}
+              style={{
+                background: 'none', border: 'none', padding: '1px 3px',
+                cursor: 'pointer', color: '#A89F92', display: 'flex', alignItems: 'center',
+                borderRadius: 3, flexShrink: 0, lineHeight: 0,
+              }}
+              onMouseEnter={(e) => { setRevealHover(true); e.currentTarget.style.color = '#5C544B'; e.currentTarget.style.background = '#EDE5D0'; }}
+              onMouseLeave={(e) => { setRevealHover(false); e.currentTarget.style.color = '#A89F92'; e.currentTarget.style.background = 'none'; }}
+            >
+              <svg width="13" height="11" viewBox="0 0 13 11" fill="none" aria-hidden="true">
+                <path d="M1 9.5V4C1 3.4477 1.4477 3 2 3H5L6 2H10.5C11.0523 2 11.5 2.4477 11.5 3V9.5C11.5 10.0523 11.0523 10.5 10.5 10.5H2C1.4477 10.5 1 10.0523 1 9.5Z" stroke="currentColor" strokeWidth="0.9" strokeLinejoin="round"/>
+              </svg>
+            </button>
+            <HeadingTooltip text="Reveal in Finder" anchorRef={revealBtnRef} visible={revealHover} />
+          </>
+        )}
       </div>
     );
   }
@@ -847,11 +875,14 @@ function TreeNode({ node, depth = 0, onPick, selectedPath, filesByPath, defaultO
       {node.name && (
         <div
           onClick={() => setOpen(!open)}
+          onMouseEnter={() => setHovered(true)}
+          onMouseLeave={() => setHovered(false)}
           style={{
-            padding: '3px 0 3px ' + (depth * 14 + 6) + 'px',
+            padding: '3px 4px 3px ' + (depth * 14 + 6) + 'px',
             fontSize: 12.5, color: '#5C544B', fontFamily: MONO_FONT,
             cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4,
-            userSelect: 'none',
+            userSelect: 'none', borderRadius: 5,
+            background: hovered ? '#EDE5CF' : 'transparent',
           }}
         >
           <svg width="9" height="9" viewBox="0 0 9 9" style={{
@@ -861,7 +892,31 @@ function TreeNode({ node, depth = 0, onPick, selectedPath, filesByPath, defaultO
           }} aria-hidden="true">
             <path d="M3 2l3 2.5L3 7" stroke="currentColor" strokeWidth="1.1" fill="none" strokeLinecap="round" strokeLinejoin="round"/>
           </svg>
-          <span>{node.name}/</span>
+          <span style={{ flex: 1 }}>{node.name}/</span>
+          {hovered && workdir && window.electronAPI?.revealInFinder && (
+            <>
+              <button
+                ref={revealBtnRef}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  const fullPath = workdir.replace(/\/+$/, '') + '/' + node.path;
+                  window.electronAPI.revealInFinder(fullPath);
+                }}
+                style={{
+                  background: 'none', border: 'none', padding: '1px 3px',
+                  cursor: 'pointer', color: '#A89F92', display: 'flex', alignItems: 'center',
+                  borderRadius: 3, flexShrink: 0, lineHeight: 0,
+                }}
+                onMouseEnter={(e) => { setRevealHover(true); e.currentTarget.style.color = '#5C544B'; e.currentTarget.style.background = '#D8D0BC'; }}
+                onMouseLeave={(e) => { setRevealHover(false); e.currentTarget.style.color = '#A89F92'; e.currentTarget.style.background = 'none'; }}
+              >
+                <svg width="13" height="11" viewBox="0 0 13 11" fill="none" aria-hidden="true">
+                  <path d="M1 9.5V4C1 3.4477 1.4477 3 2 3H5L6 2H10.5C11.0523 2 11.5 2.4477 11.5 3V9.5C11.5 10.0523 11.0523 10.5 10.5 10.5H2C1.4477 10.5 1 10.0523 1 9.5Z" stroke="currentColor" strokeWidth="0.9" strokeLinejoin="round"/>
+                </svg>
+              </button>
+              <HeadingTooltip text="Reveal in Finder" anchorRef={revealBtnRef} visible={revealHover} />
+            </>
+          )}
         </div>
       )}
       {open && kids.map(k => (
@@ -872,6 +927,7 @@ function TreeNode({ node, depth = 0, onPick, selectedPath, filesByPath, defaultO
           onPick={onPick}
           selectedPath={selectedPath}
           filesByPath={filesByPath}
+          workdir={workdir}
           defaultOpenDepth={defaultOpenDepth}
         />
       ))}
@@ -910,9 +966,14 @@ function FileTreeIcon({ active }) {
   );
 }
 
-// Working-tree diff card: status badge + path + +/- line counts. Click opens
-// the file content view, where the user can flip between code and diff modes.
+// Working-tree diff card: status badge + path + +/- line counts. Expands
+// inline to show diff lines; a small icon opens the full file content view.
 function GitDiffCard({ file, onOpen }) {
+  const hasDiff = Boolean(file.diff?.length > 0);
+  const [open, setOpen] = React.useState(hasDiff);
+  const [headerHovered, setHeaderHovered] = React.useState(false);
+  const [openFileHover, setOpenFileHover] = React.useState(false);
+  const openFileBtnRef = React.useRef(null);
   const statusInfo = {
     'A': { color: '#3E7A4A', bg: '#E6F1DA' },
     'M': { color: '#8A6E2F', bg: '#F2E9D2' },
@@ -923,17 +984,21 @@ function GitDiffCard({ file, onOpen }) {
   }[file.status] || { color: '#8A6E2F', bg: '#F2E9D2' };
   return (
     <div
-      onClick={onOpen}
       data-testid="git-diff-row"
-      style={{
-        border: '1px solid #ECE6D5', borderRadius: 8, background: '#FFFEF8',
-        marginBottom: 6, cursor: 'pointer',
-        transition: 'background 100ms ease, border-color 100ms ease',
-      }}
-      onMouseEnter={(e) => { e.currentTarget.style.background = '#FAF5E8'; e.currentTarget.style.borderColor = '#DCD3BC'; }}
-      onMouseLeave={(e) => { e.currentTarget.style.background = '#FFFEF8'; e.currentTarget.style.borderColor = '#ECE6D5'; }}
+      style={{ border: '1px solid #E4DCCA', borderRadius: 8, marginBottom: 6, overflow: 'hidden' }}
     >
-      <div style={{ padding: '8px 10px', display: 'flex', alignItems: 'center', gap: 8 }}>
+      <div
+        onClick={() => hasDiff ? setOpen(o => !o) : onOpen()}
+        onMouseEnter={() => setHeaderHovered(true)}
+        onMouseLeave={() => setHeaderHovered(false)}
+        style={{
+          padding: '7px 8px 7px 10px', display: 'flex', alignItems: 'center', gap: 8,
+          cursor: 'pointer',
+          background: headerHovered ? '#EDE8DC' : '#FCFAF1',
+          borderBottom: open && hasDiff ? '1px solid #E4DFCE' : 'none',
+          transition: 'background 80ms ease',
+        }}
+      >
         <span style={{
           width: 16, height: 16, borderRadius: 3,
           display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
@@ -942,7 +1007,7 @@ function GitDiffCard({ file, onOpen }) {
         }}>{file.status}</span>
         <div style={{
           flex: 1, minWidth: 0,
-          fontFamily: MONO_FONT, fontSize: 12, color: '#1C1A17',
+          fontFamily: MONO_FONT, fontSize: 12.5, fontWeight: 500, color: '#1C1A17',
           overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
         }} title={file.path}>{file.path}</div>
         {(file.added > 0 || file.removed > 0) && (
@@ -954,17 +1019,43 @@ function GitDiffCard({ file, onOpen }) {
         {file.binary && (
           <span style={{ fontSize: 10, color: '#807972', fontFamily: UI_FONT }}>binary</span>
         )}
-        <svg width="10" height="10" viewBox="0 0 10 10" style={{ color: '#A89F92', flexShrink: 0 }} aria-hidden="true">
+        {hasDiff && (
+          <>
+            <button
+              ref={openFileBtnRef}
+              onClick={(e) => { e.stopPropagation(); onOpen(); }}
+              style={{
+                background: 'none', border: 'none', padding: '2px 3px', cursor: 'pointer',
+                color: '#A89F92', display: 'flex', alignItems: 'center',
+                borderRadius: 3, flexShrink: 0, lineHeight: 0,
+              }}
+              onMouseEnter={(e) => { setOpenFileHover(true); e.currentTarget.style.color = '#3C3630'; e.currentTarget.style.background = '#D0D4DC'; }}
+              onMouseLeave={(e) => { setOpenFileHover(false); e.currentTarget.style.color = '#807972'; e.currentTarget.style.background = 'none'; }}
+            >
+              <svg width="11" height="11" viewBox="0 0 11 11" fill="none" aria-hidden="true">
+                <path d="M4 2H2C1.4477 2 1 2.4477 1 3V9C1 9.5523 1.4477 10 2 10H8C8.5523 10 9 9.5523 9 9V7" stroke="currentColor" strokeWidth="1" strokeLinecap="round"/>
+                <path d="M6 1H10M10 1V5M10 1L5 6" stroke="currentColor" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round"/>
+              </svg>
+            </button>
+            <HeadingTooltip text="Open file view" anchorRef={openFileBtnRef} visible={openFileHover} />
+          </>
+        )}
+        <svg width="10" height="10" viewBox="0 0 10 10" style={{
+          color: '#9A9085', flexShrink: 0,
+          transform: open ? 'rotate(90deg)' : 'rotate(0deg)',
+          transition: 'transform 120ms ease',
+        }} aria-hidden="true">
           <path d="M3.5 2l3 3-3 3" stroke="currentColor" strokeWidth="1.2" fill="none" strokeLinecap="round" strokeLinejoin="round"/>
         </svg>
       </div>
+      {open && hasDiff && <DiffLines lines={file.diff} compact />}
     </div>
   );
 }
 
-function DiffLines({ lines }) {
+function DiffLines({ lines, compact }) {
   return (
-    <div style={{ fontFamily: MONO_FONT, fontSize: 12, lineHeight: 1.65, padding: '10px 0' }}>
+    <div style={{ fontFamily: MONO_FONT, fontSize: 12, lineHeight: 1.65, padding: compact ? '6px 0' : '10px 0 20px' }}>
       {lines.map((line, i) => (
         <div key={i} style={{
           padding: '0 14px 0 26px', position: 'relative',
@@ -1029,7 +1120,7 @@ function FileContentView({ projectId, path, diff, onBack }) {
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
       <div style={{
         padding: '10px 14px', borderBottom: '1px solid #ECE6D5',
-        display: 'flex', alignItems: 'center', gap: 8, background: '#FAF5E8',
+        display: 'flex', alignItems: 'center', gap: 8,
       }}>
         <button
           onClick={onBack}
@@ -1042,7 +1133,7 @@ function FileContentView({ projectId, path, diff, onBack }) {
             display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
             flexShrink: 0,
           }}
-          onMouseEnter={(e) => { e.currentTarget.style.background = '#F0EAD8'; }}
+          onMouseEnter={(e) => { e.currentTarget.style.background = '#E8E0CC'; }}
           onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
         >
           <svg width="13" height="13" viewBox="0 0 13 13" aria-hidden="true">
@@ -1074,30 +1165,26 @@ function FileContentView({ projectId, path, diff, onBack }) {
         )}
       </div>
 
-      <div style={{ flex: 1, overflow: 'auto', padding: '12px 14px 20px' }}>
-        <div style={{
-          border: '1px solid #ECE6D5', borderRadius: 8, background: '#FFFEF8',
-          overflow: 'hidden',
-        }}>
+      <div style={{ flex: 1, overflow: 'auto' }}>
         {view === 'diff' && hasDiff && <DiffLines lines={diff} />}
         {view === 'file' && (
           <>
             {loading && (
-              <div style={{ padding: '24px 14px', color: '#807972', fontSize: 12.5 }}>Loading…</div>
+              <div style={{ padding: '24px 16px', color: '#807972', fontSize: 12.5 }}>Loading…</div>
             )}
             {!loading && error && (
-              <div style={{ padding: '20px 14px', color: '#B23A2E', fontSize: 12.5 }}>{error}</div>
+              <div style={{ padding: '20px 16px', color: '#B23A2E', fontSize: 12.5 }}>{error}</div>
             )}
             {!loading && !error && content?.binary && (
-              <div style={{ padding: '24px 14px', color: '#807972', fontSize: 12.5 }}>
+              <div style={{ padding: '24px 16px', color: '#807972', fontSize: 12.5 }}>
                 Binary file — not previewable here.
               </div>
             )}
             {!loading && !error && content && !content.binary && (
-              <div style={{ fontFamily: MONO_FONT, fontSize: 12, lineHeight: 1.65, padding: '10px 0' }}>
+              <div style={{ fontFamily: MONO_FONT, fontSize: 12, lineHeight: 1.65, padding: '10px 0 20px' }}>
                 {codeLines.map((text, i) => (
                   <div key={i} style={{
-                    padding: '0 14px 0 44px', position: 'relative',
+                    padding: '0 16px 0 44px', position: 'relative',
                     color: '#1C1A17', whiteSpace: 'pre',
                   }}>
                     <span style={{
@@ -1109,7 +1196,7 @@ function FileContentView({ projectId, path, diff, onBack }) {
                 ))}
                 {content?.truncated && (
                   <div style={{
-                    padding: '14px 14px 4px', color: '#807972',
+                    padding: '14px 16px 4px', color: '#807972',
                     fontSize: 11.5, fontFamily: UI_FONT, fontStyle: 'italic',
                   }}>
                     Showing first {Math.floor(content.content.length / 1024)} KB · file is larger.
@@ -1119,7 +1206,6 @@ function FileContentView({ projectId, path, diff, onBack }) {
             )}
           </>
         )}
-        </div>
       </div>
     </div>
   );
@@ -1130,7 +1216,7 @@ function FileOperationsView({ file, agentsMap, onBack }) {
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
       <div style={{
         padding: '10px 14px', borderBottom: '1px solid #ECE6D5',
-        display: 'flex', alignItems: 'center', gap: 8, background: '#FAF5E8',
+        display: 'flex', alignItems: 'center', gap: 8,
       }}>
         <button
           onClick={onBack}
@@ -1143,7 +1229,7 @@ function FileOperationsView({ file, agentsMap, onBack }) {
             display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
             flexShrink: 0,
           }}
-          onMouseEnter={(e) => { e.currentTarget.style.background = '#F0EAD8'; }}
+          onMouseEnter={(e) => { e.currentTarget.style.background = '#E8E0CC'; }}
           onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
         >
           <svg width="13" height="13" viewBox="0 0 13 13" aria-hidden="true">
@@ -1156,7 +1242,7 @@ function FileOperationsView({ file, agentsMap, onBack }) {
         }} title={file.path}>{file.path}</div>
       </div>
 
-      <div style={{ flex: 1, overflow: 'auto', padding: '14px 14px 20px', background: '#FCFAF1' }}>
+      <div style={{ flex: 1, overflow: 'auto', padding: '14px 14px 20px' }}>
         <div style={{
           fontSize: 10.5, color: '#A89F92', fontWeight: 600, letterSpacing: 0.6,
           textTransform: 'uppercase', marginBottom: 8, fontFamily: UI_FONT,
@@ -1168,11 +1254,11 @@ function FileOperationsView({ file, agentsMap, onBack }) {
             const opBg = op.kind === 'edit' ? '#F4EBC9' : '#E2EBF1';
             return (
               <div key={i} style={{
-                border: '1px solid #ECE6D5', borderRadius: 8, background: '#FFFEF8',
+                border: '1px solid #E4DCCA', borderRadius: 8,
               }}>
                 <div style={{
                   padding: '8px 10px', display: 'flex', alignItems: 'center', gap: 8,
-                  borderBottom: op.output ? '1px solid #ECE6D5' : 'none',
+                  borderBottom: op.output ? '1px solid #E4DCCA' : 'none',
                 }}>
                   {agent && agent.kind === 'agent' && <Avatar agent={agent} size={18} />}
                   <span style={{
@@ -1191,7 +1277,7 @@ function FileOperationsView({ file, agentsMap, onBack }) {
                   <pre style={{
                     margin: 0, padding: '8px 12px',
                     fontFamily: MONO_FONT, fontSize: 12, color: '#5C544B',
-                    background: '#FCFAF1', lineHeight: 1.55,
+                    background: 'rgba(0,0,0,0.03)', lineHeight: 1.55,
                     whiteSpace: 'pre-wrap', wordBreak: 'break-word',
                     maxHeight: 220, overflow: 'auto',
                     borderBottomLeftRadius: 8, borderBottomRightRadius: 8,
@@ -1302,9 +1388,9 @@ function FilesDrawer({ chatId, events, agentsMap, project, onClose }) {
   const [mode, setMode] = React.useState(hasWorkdir ? 'diff' : 'tree');
   const [selectedPath, setSelectedPath] = React.useState(null);
 
-  // Working-tree diff, fetched lazily when the user enters diff mode. Refresh
-  // whenever the chat receives new tool events so the diff doesn't get stale
-  // after the crew edits a file.
+  // Working-tree diff is loaded only while the drawer is open in diff mode.
+  // The header badge stays based on chat-touched files, so visiting a chat
+  // does not need to hit git until the user asks for workspace changes.
   const [gitDiff, setGitDiff] = React.useState([]);
   const [gitLoading, setGitLoading] = React.useState(false);
   const [gitError, setGitError] = React.useState(null);
@@ -1318,13 +1404,10 @@ function FilesDrawer({ chatId, events, agentsMap, project, onClose }) {
   const [projectFilesError, setProjectFilesError] = React.useState(null);
   const [projectFilesFetched, setProjectFilesFetched] = React.useState(false);
 
-  // Bump when tool calls land so we can re-fetch the diff. Cheap counter, not
-  // a dependency on the whole events array (which would re-fire on every
-  // streamed token).
   const toolEventCount = React.useMemo(() => events.filter(e => e.kind === 'tool').length, [events]);
 
   const fetchGitDiff = React.useCallback(() => {
-    if (!projectId) return;
+    if (!projectId || !hasWorkdir) return undefined;
     let cancelled = false;
     setGitLoading(true);
     setGitError(null);
@@ -1341,12 +1424,12 @@ function FilesDrawer({ chatId, events, agentsMap, project, onClose }) {
       })
       .finally(() => { if (!cancelled) setGitLoading(false); });
     return () => { cancelled = true; };
-  }, [projectId]);
+  }, [projectId, hasWorkdir]);
 
   React.useEffect(() => {
-    if (mode !== 'diff' || !projectId) return undefined;
+    if (mode !== 'diff') return undefined;
     return fetchGitDiff();
-  }, [mode, projectId, fetchGitDiff, toolEventCount]);
+  }, [mode, fetchGitDiff, toolEventCount]);
 
   // Fetch the full project file listing when entering tree mode. Capped at
   // 10k entries on the daemon side; that's more than enough for the kinds of
@@ -1378,6 +1461,8 @@ function FilesDrawer({ chatId, events, agentsMap, project, onClose }) {
     setMode(hasWorkdir ? 'diff' : 'tree');
     setSelectedPath(null);
     setGitDiff([]);
+    setGitLoading(false);
+    setGitError(null);
     setGitFetched(false);
     setProjectFiles([]);
     setProjectFilesFetched(false);
@@ -1563,18 +1648,14 @@ function FilesDrawer({ chatId, events, agentsMap, project, onClose }) {
               );
             }
             return (
-              <div style={{
-                border: '1px solid #ECE6D5', borderRadius: 8, background: '#FFFEF8',
-                padding: '8px 6px',
-              }}>
-                <TreeNode
-                  node={tree}
-                  onPick={setSelectedPath}
-                  selectedPath={selectedPath}
-                  filesByPath={filesByPath}
-                  defaultOpenDepth={fromWorkdir ? 1 : Infinity}
-                />
-              </div>
+              <TreeNode
+                node={tree}
+                onPick={setSelectedPath}
+                selectedPath={selectedPath}
+                filesByPath={filesByPath}
+                workdir={workdir}
+                defaultOpenDepth={fromWorkdir ? 1 : Infinity}
+              />
             );
           })()}
         </div>
