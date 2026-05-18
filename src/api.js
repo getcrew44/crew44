@@ -180,6 +180,18 @@ export async function postMessage(chatId, content, targetAgentId, attachments = 
   });
 }
 
+export async function interruptMessage(chatId, content, attachments = []) {
+  return rpc.call('chats.messages.interrupt', {
+    id: chatId,
+    content,
+    attachments,
+  });
+}
+
+export async function cancelPendingSteer(chatId) {
+  return rpc.call('chats.messages.interrupt.cancel', { id: chatId });
+}
+
 export async function cancelChat(chatId) {
   return rpc.call('chats.cancel', { id: chatId });
 }

@@ -76,24 +76,31 @@ export default function ChatScreen() {
   }, [load]);
 
   const send = React.useCallback(async () => {
-    if (!api || !chatId || !chat || !draft.trim() || streaming) return;
+    if (!api || !chatId || !chat || !draft.trim()) return;
     const text = draft.trim();
+    const steeringActiveRun = streaming;
     setDraft("");
-    const optimistic: TimelineItem = {
-      kind: "message",
-      seq: -Date.now(),
-      author: "__human__",
-      role: "user",
-      content: text,
-      time: "now"
-    };
-    setItems(prev => [...prev, optimistic]);
+    if (!steeringActiveRun) {
+      const optimistic: TimelineItem = {
+        kind: "message",
+        seq: -Date.now(),
+        author: "__human__",
+        role: "user",
+        content: text,
+        time: "now"
+      };
+      setItems(prev => [...prev, optimistic]);
+    }
     try {
-      await api.postMessage(chatId, text, chat.current_agent_id || chat.main_agent_id);
-      subscribe(lastSeq.current);
+      if (steeringActiveRun) {
+        await api.interruptMessage(chatId, text);
+      } else {
+        await api.postMessage(chatId, text, chat.current_agent_id || chat.main_agent_id);
+        subscribe(lastSeq.current);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to send message");
-      setStreaming(false);
+      if (!steeringActiveRun) setStreaming(false);
     }
   }, [api, chat, chatId, draft, streaming, subscribe]);
 
@@ -131,19 +138,23 @@ export default function ChatScreen() {
             <TextInput
               value={draft}
               onChangeText={setDraft}
-              editable={!streaming}
               multiline
-              placeholder={streaming ? "Waiting for response..." : "Message the crew"}
+              placeholder={streaming ? "Steer this run" : "Message the crew"}
               placeholderTextColor={colors.muted}
               style={styles.input}
             />
             <Pressable
-              onPress={streaming ? cancel : send}
-              disabled={!streaming && !draft.trim()}
-              style={[styles.sendButton, !streaming && !draft.trim() && styles.disabled]}
+              onPress={send}
+              disabled={!draft.trim()}
+              style={[styles.sendButton, !draft.trim() && styles.disabled]}
             >
-              <Text style={styles.sendText}>{streaming ? "Stop" : "Send"}</Text>
+              <Text style={styles.sendText}>{streaming ? "Steer" : "Send"}</Text>
             </Pressable>
+            {streaming ? (
+              <Pressable onPress={cancel} style={styles.stopButton}>
+                <Text style={styles.stopText}>Stop</Text>
+              </Pressable>
+            ) : null}
           </View>
         </KeyboardAvoidingView>
       )}
@@ -154,9 +165,10 @@ export default function ChatScreen() {
 function TimelineRow({ item }: { item: TimelineItem }) {
   if (item.kind === "message") {
     const mine = item.role === "user";
+    const flag = item.userSteer ? "Steer" : "";
     return (
       <View style={[styles.bubble, mine ? styles.userBubble : styles.agentBubble]}>
-        <Text style={styles.meta}>{mine ? "You" : item.author} · {item.time}</Text>
+        <Text style={styles.meta}>{mine ? "You" : item.author} · {item.time}{flag ? ` · ${flag}` : ""}</Text>
         <Text style={styles.messageText}>{item.content}</Text>
       </View>
     );
@@ -291,6 +303,21 @@ const styles = StyleSheet.create({
   },
   sendText: {
     color: "#FCFBF7",
+    fontSize: 14,
+    fontWeight: "700"
+  },
+  stopButton: {
+    minWidth: 58,
+    minHeight: 42,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: colors.border,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 10
+  },
+  stopText: {
+    color: colors.muted,
     fontSize: 14,
     fontWeight: "700"
   }

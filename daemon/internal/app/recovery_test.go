@@ -27,7 +27,7 @@ func TestReconcileStaleStreamViaGetChat(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Simulate a daemon that crashed mid-stream: stream.status is "streaming"
-	// on disk, but a.cancels has no entry (no live goroutine).
+	// on disk, but a.runs has no entry (no live goroutine).
 	chat.Stream.Status = "streaming"
 	chat.Stream.AgentID = agentID
 	chat.ActiveTurnID = "turn-stuck"
@@ -78,7 +78,7 @@ func TestReconcileStaleStreamViaGetChat(t *testing.T) {
 
 // TestReconcileStaleStreamSkipsActiveGoroutine ensures recovery does NOT touch
 // a chat that genuinely has a live runChat goroutine. Detection signal is
-// "status=streaming AND not in a.cancels"; the converse must be respected.
+// "status=streaming AND not in a.runs"; the converse must be respected.
 func TestReconcileStaleStreamSkipsActiveGoroutine(t *testing.T) {
 	a := newOptimizerTestApp(t)
 	agentID := firstAgentID(t, a)
@@ -96,7 +96,7 @@ func TestReconcileStaleStreamSkipsActiveGoroutine(t *testing.T) {
 		t.Fatal(err)
 	}
 	a.mu.Lock()
-	a.cancels[chat.ID] = func() {}
+	a.runs[chat.ID] = &chatRunController{cancel: func() {}}
 	a.mu.Unlock()
 
 	out, err := a.GetChat(chat.ID)

@@ -9,6 +9,8 @@ import { generateImageThumbnail } from '../thumbnail.js';
 vi.mock('../api.js', () => ({
   getChat: vi.fn(),
   postMessage: vi.fn(),
+  interruptMessage: vi.fn(),
+  cancelPendingSteer: vi.fn(),
   cancelChat: vi.fn(),
   streamChatEvents: vi.fn(),
   listProjectFiles: vi.fn(),
@@ -70,6 +72,8 @@ beforeEach(() => {
   generateImageThumbnail.mockResolvedValue('thumb-base64');
   api.getChat.mockResolvedValue(chat);
   api.postMessage.mockResolvedValue({ ...chat, stream: { status: 'streaming' } });
+  api.interruptMessage.mockResolvedValue({ ...chat, stream: { status: 'streaming' } });
+  api.cancelPendingSteer.mockResolvedValue({ ...chat, stream: { status: 'streaming' } });
   api.cancelChat.mockResolvedValue({});
   api.streamChatEvents.mockImplementation((_chatId, _after, _onEvent, onDone) => {
     onDone?.();
@@ -349,6 +353,40 @@ describe('TaskView', () => {
     fireEvent.click(stop);
 
     await waitFor(() => expect(api.cancelChat).toHaveBeenCalledWith('chat-1'));
+  });
+
+  it('closes the queued steer menu when a pending steer is replaced', async () => {
+    api.getChat.mockResolvedValue({ ...chat, stream: { status: 'streaming' } });
+    api.streamChatEvents.mockImplementation(() => vi.fn());
+    api.interruptMessage.mockImplementation((_chatId, content, attachments = []) => Promise.resolve({
+      ...chat,
+      stream: {
+        status: 'streaming',
+        pending_steer: { content, attachments, queued_at: new Date().toISOString() },
+      },
+    }));
+    api.cancelPendingSteer.mockResolvedValue({ ...chat, stream: { status: 'streaming' } });
+
+    render(<TaskView chatId="chat-1" agentsMap={agentsMap} />);
+
+    const input = await screen.findByTestId('composer-input');
+    await waitFor(() => expect(screen.getByTestId('composer-send')).toHaveTextContent('Steer'));
+
+    fireEvent.change(input, { target: { value: 'first steer' } });
+    fireEvent.click(screen.getByTestId('composer-send'));
+
+    expect(await screen.findByTestId('queued-steer')).toHaveTextContent('first steer');
+    fireEvent.click(screen.getByTestId('queued-steer-menu'));
+    expect(screen.getByTestId('queued-steer-edit')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('queued-steer-cancel'));
+    await waitFor(() => expect(screen.queryByTestId('queued-steer')).not.toBeInTheDocument());
+
+    fireEvent.change(input, { target: { value: 'second steer' } });
+    fireEvent.click(screen.getByTestId('composer-send'));
+
+    expect(await screen.findByTestId('queued-steer')).toHaveTextContent('second steer');
+    expect(screen.queryByTestId('queued-steer-edit')).not.toBeInTheDocument();
   });
 
   it('reconciles a persisted user stream event with the optimistic user message', async () => {

@@ -94,11 +94,18 @@ type LastRuntimeSession struct {
 }
 
 type ChatStreamState struct {
-	Status          string    `json:"status"`
-	AgentID         string    `json:"agent_id,omitempty"`
-	StartedAt       time.Time `json:"started_at,omitempty"`
-	CancelRequested bool      `json:"cancel_requested"`
-	LastError       string    `json:"last_error,omitempty"`
+	Status          string             `json:"status"`
+	AgentID         string             `json:"agent_id,omitempty"`
+	StartedAt       time.Time          `json:"started_at,omitempty"`
+	CancelRequested bool               `json:"cancel_requested"`
+	LastError       string             `json:"last_error,omitempty"`
+	PendingSteer    *PendingSteerState `json:"pending_steer,omitempty"`
+}
+
+type PendingSteerState struct {
+	Content     string              `json:"content"`
+	Attachments []MessageAttachment `json:"attachments,omitempty"`
+	QueuedAt    time.Time           `json:"queued_at"`
 }
 
 type ChatRecord struct {
@@ -156,6 +163,8 @@ type MessagePayload struct {
 	Role        MessageRole         `json:"role"`
 	Content     string              `json:"content"`
 	Attachments []MessageAttachment `json:"attachments,omitempty"`
+	UserSteer   bool                `json:"user_steer,omitempty"`
+	Interrupted bool                `json:"interrupted,omitempty"`
 }
 
 type MessageAttachment struct {

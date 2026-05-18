@@ -48,6 +48,14 @@ export class CrewApi {
     });
   }
 
+  async interruptMessage(chatId: string, content: string, attachments: MessageAttachment[] = []): Promise<unknown> {
+    return this.rpc.call("chats.messages.interrupt", {
+      id: chatId,
+      content,
+      attachments
+    });
+  }
+
   async cancelChat(chatId: string): Promise<unknown> {
     return this.rpc.call("chats.cancel", { id: chatId });
   }
