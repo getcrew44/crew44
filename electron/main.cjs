@@ -349,6 +349,11 @@ ipcMain.handle('paths:info', async (_event, paths) => {
   }));
 });
 
+ipcMain.handle('window:zoom', (_event) => {
+  if (!mainWindow) return;
+  mainWindow.isMaximized() ? mainWindow.unmaximize() : mainWindow.maximize();
+});
+
 app.whenReady().then(async () => {
   await ensureBackend();
   createWindow();

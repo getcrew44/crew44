@@ -638,8 +638,13 @@ function TaskHeader({ chat, events, fileCount, drawerOpen, onToggleDrawer }) {
   if (participantCount > 1) metaItems.push(`${participantCount} agents`);
   if (elapsed) metaItems.push(`elapsed ${elapsed}`);
 
+  function handleDoubleClick(e) {
+    if (e.target.closest('button, a, input, select, textarea')) return;
+    window.electronAPI?.zoomWindow?.();
+  }
+
   return (
-    <div style={{ padding: '20px 36px 16px', borderBottom: '1px solid #ECE6D5', background: '#FAF5E8', WebkitAppRegion: 'drag' }}>
+    <div onDoubleClick={handleDoubleClick} style={{ padding: '20px 36px 16px', borderBottom: '1px solid #ECE6D5', background: '#FAF5E8', WebkitAppRegion: 'drag' }}>
       <div style={{ ...headerColumn, display: 'flex', alignItems: 'flex-start', gap: 12 }}>
         <div style={{ flex: 1, minWidth: 0 }}>
           <h1 style={{
@@ -2729,7 +2734,7 @@ export default function TaskView({ chatId, agentsMap, skills = [], projects = []
     return (projects || []).find(p => p.id === pid) || null;
   }, [chat?.project_id, projects]);
   const fileCount = React.useMemo(
-    () => collectFiles(events, currentProject?.workdir || '').length,
+    () => collectFiles(events, currentProject?.workdir || '').filter(f => f.edits > 0).length,
     [events, currentProject?.workdir],
   );
 

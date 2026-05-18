@@ -11,4 +11,5 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getPathInfo: (paths) => ipcRenderer.invoke('paths:info', paths),
   getComputerName: () => ipcRenderer.invoke('system:computer-name'),
   readFileDataURL: (filePath) => ipcRenderer.invoke('files:read-data-url', filePath),
+  zoomWindow: () => ipcRenderer.invoke('window:zoom'),
 });

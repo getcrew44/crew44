@@ -1201,7 +1201,7 @@ describe('TaskView', () => {
       return captured;
     }
 
-    it('shows a Files button with a count badge of touched files', async () => {
+    it('shows a Files button with a count badge of edited files', async () => {
       const stream = captureStream();
       render(<TaskView chatId="chat-1" agentsMap={agentsMap} />);
       await waitFor(() => expect(stream.onEvent).toBeDefined());
@@ -1222,8 +1222,8 @@ describe('TaskView', () => {
       });
 
       const toggle = await screen.findByTestId('files-drawer-toggle');
-      // Two file-shaped tool_calls (Bash is intentionally skipped).
-      expect(toggle).toHaveTextContent('2');
+      // Only edit_file counts; read_file and Bash are excluded.
+      expect(toggle).toHaveTextContent('1');
     });
 
     it('opens the drawer and shows touched files under their directories in tree mode', async () => {
