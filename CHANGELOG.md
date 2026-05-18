@@ -2,13 +2,25 @@
 
 All notable changes to this project are documented here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.4.1] - 2026-05-18
+## [0.5.0] - 2026-05-18
+
+### Added
+- **Workspace files drawer** — split-panel drawer attached to the chat header's Files button, with two modes: a `git diff HEAD` view for projects with a workdir, and a full project file tree. Click any file to preview its content inline; click again to reveal in Finder. Drag the splitter to resize the conversation/drawer panes. Backed by new `projects.files.read` and `projects.git.diff` RPCs that sandbox to the project workdir.
+- **Background done sound** — agent runs finishing in chats that aren't currently being viewed now play the chime so you know to come back. Gated on actual agent activity so canceled/empty runs stay silent.
+- **Copy button on code blocks** — hover any fenced code block in an agent message to reveal a Copy button (with a brief Copied confirmation).
+- **Double-click chat header to zoom** — double-clicking the chat header maximizes/restores the window via a new `window:zoom` electron IPC.
 
 ### Changed
-- **Mention/skill dropdowns scroll the active item into view** — pressing ArrowUp/Down past the visible window of the suggestion popover (new task composer and chat composer) now keeps the highlighted row on screen instead of leaving you guessing what's selected.
-- **Bounded arrow-key navigation in mention dropdowns** — ArrowDown stops at the last item and ArrowUp stops at the first instead of wrapping around, matching most native menu behavior.
+- **Default Partner agent triages eagerly** — preset Partner prompt now routes to specialists by default instead of answering directly.
+- **Default Coding agent leans on its skills** — preset Coding prompt now defers to its declared skills rather than restating them.
+- **Streaming header reflects the agent that just spoke** — the streaming indicator prefers the last actually-rendered actor over a possibly stale `chat.current_agent_id`, so the header matches what the user just saw.
+- **Files badge counts edited files only** — the Files count in the chat header now ignores read-only and `Bash` tool calls, matching what the drawer surfaces.
+- **Mention/skill dropdowns scroll the active item into view** — pressing ArrowUp/Down past the visible window of the suggestion popover (new task composer and chat composer) now keeps the highlighted row on screen.
+- **Bounded arrow-key navigation in mention dropdowns** — ArrowDown stops at the last item and ArrowUp stops at the first instead of wrapping.
 
 ### Fixed
+- **Symlink TOCTOU in `projects.files.read`** — the file-read RPC now opens the symlink-resolved path so a swap between path validation and Open can't pivot outside the workspace sandbox.
+- **Drawer refetch storm during streaming** — git diff and project file listings now coalesce bursts of tool events into a single refetch (600ms debounce), so an active stream no longer re-runs `git diff HEAD` and walks the workspace on every tool call.
 - **New task composer textarea auto-resizes** — the input now grows with content (up to ~360px) starting from a single row instead of a fixed 5-row height, and the syntax-highlight overlay stays aligned as you scroll inside the textarea.
 
 ## [0.4.0] - 2026-05-15
