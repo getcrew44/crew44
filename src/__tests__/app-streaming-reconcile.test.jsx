@@ -17,6 +17,9 @@ vi.mock('../api.js', () => ({
   postMessage: vi.fn(),
   cancelChat: vi.fn(),
   streamChatEvents: vi.fn(),
+  getProjectGitDiff: vi.fn(),
+  listProjectFiles: vi.fn(),
+  readProjectFile: vi.fn(),
 }));
 
 vi.mock('../audio.js', () => ({
@@ -56,6 +59,9 @@ beforeEach(() => {
   api.getOnboardingStatus.mockResolvedValue({ onboarding_required: false });
   api.getChat.mockResolvedValue(runningChat);
   api.streamChatEvents.mockImplementation(() => vi.fn());
+  api.getProjectGitDiff.mockResolvedValue([]);
+  api.listProjectFiles.mockResolvedValue([]);
+  api.readProjectFile.mockResolvedValue({ path: '', content: '', size: 0, truncated: false, binary: false });
   playDoneSound.mockClear();
 });
 
