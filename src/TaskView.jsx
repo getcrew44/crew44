@@ -940,7 +940,7 @@ function renderEventsWithHandovers({ events, agentsMap }) {
       prevDisplayedActor = actor;
     }
   });
-  return { nodes: out, lastDisplayedActor: prevDisplayedActor };
+  return { nodes: out, lastDisplayedActor: prevDisplayedActor, lastAgentActor: prevAgentActor };
 }
 
 // ─── Composer ─────────────────────────────────────────────────────────────────
@@ -1921,8 +1921,8 @@ export default function TaskView({ chatId, agentsMap, skills = [], projects = []
       >
         <div data-testid="conversation-column" style={conversationColumn}>
           {(() => {
-            const { nodes, lastDisplayedActor } = renderEventsWithHandovers({ events, agentsMap });
-            const streamingAgentId = chat?.current_agent_id;
+            const { nodes, lastDisplayedActor, lastAgentActor } = renderEventsWithHandovers({ events, agentsMap });
+            const streamingAgentId = lastAgentActor || chat?.current_agent_id;
             const showStreamingHeader = lastDisplayedActor !== streamingAgentId;
             return (
               <>

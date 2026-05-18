@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import App from '../App.jsx';
 import * as api from '../api.js';
+import { playDoneSound } from '../audio.js';
 
 vi.mock('../api.js', () => ({
   listProjects: vi.fn(),
@@ -16,6 +17,11 @@ vi.mock('../api.js', () => ({
   postMessage: vi.fn(),
   cancelChat: vi.fn(),
   streamChatEvents: vi.fn(),
+}));
+
+vi.mock('../audio.js', () => ({
+  primeAudioContext: vi.fn(),
+  playDoneSound: vi.fn(),
 }));
 
 const project = {
@@ -50,6 +56,7 @@ beforeEach(() => {
   api.getOnboardingStatus.mockResolvedValue({ onboarding_required: false });
   api.getChat.mockResolvedValue(runningChat);
   api.streamChatEvents.mockImplementation(() => vi.fn());
+  playDoneSound.mockClear();
 });
 
 describe('App streaming reconciliation', () => {
@@ -99,6 +106,38 @@ describe('App streaming reconciliation', () => {
         const item = screen.getByTestId('chat-chat-running');
         expect(item.querySelector('svg')).toBeFalsy();
       });
+    } finally {
+      intervalSpy.mockRestore();
+    }
+  });
+
+  it('plays the done sound when a background running chat finishes', async () => {
+    const realSetInterval = global.setInterval;
+    const reconcileCallbacks = [];
+    const intervalSpy = vi.spyOn(global, 'setInterval').mockImplementation((cb, delay) => {
+      if (delay === 5000) {
+        reconcileCallbacks.push(cb);
+        return -1;
+      }
+      return realSetInterval(cb, delay);
+    });
+
+    try {
+      render(<App />);
+
+      const chatItem = await screen.findByTestId('chat-chat-running');
+      fireEvent.click(chatItem);
+
+      await waitFor(() => expect(reconcileCallbacks.length).toBeGreaterThan(0));
+      fireEvent.click(screen.getByText(/New task/i));
+
+      api.getChat.mockResolvedValue({ ...runningChat, stream: { status: 'idle' } });
+
+      await act(async () => {
+        await Promise.all(reconcileCallbacks.map(cb => cb()));
+      });
+
+      expect(playDoneSound).toHaveBeenCalledOnce();
     } finally {
       intervalSpy.mockRestore();
     }

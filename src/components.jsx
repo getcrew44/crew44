@@ -113,6 +113,46 @@ const CODE_BLOCK_STYLE = {
   overflowX: 'auto',
 };
 
+function CodeBlock({ lines, margin }) {
+  const [copied, setCopied] = React.useState(false);
+  const [hovered, setHovered] = React.useState(false);
+  const text = lines.join('\n');
+  const copy = React.useCallback(() => {
+    if (!navigator.clipboard) return;
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    }).catch(() => {});
+  }, [text]);
+  return (
+    <div
+      style={{ position: 'relative', margin }}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+    >
+      <pre style={CODE_BLOCK_STYLE}>{text}</pre>
+      {(hovered || copied) && (
+        <button
+          type="button"
+          onClick={copy}
+          style={{
+            position: 'absolute', top: 6, right: 6,
+            padding: '2px 8px', borderRadius: 4,
+            background: copied ? '#6E9E5B' : 'rgba(244,239,224,0.95)',
+            color: copied ? '#FCFBF7' : '#5C544B',
+            border: '1px solid ' + (copied ? '#6E9E5B' : '#DCD3BC'),
+            cursor: 'pointer',
+            fontFamily: UI_FONT, fontSize: 11, fontWeight: 500,
+            lineHeight: 1.4,
+          }}
+        >
+          {copied ? 'Copied' : 'Copy'}
+        </button>
+      )}
+    </div>
+  );
+}
+
 // Render an inline paragraph's lines, preserving single newlines as <br>.
 function renderParagraphLines(lines, keyPrefix) {
   return lines.map((line, idx) => (
@@ -215,10 +255,7 @@ export function RichText({ text }) {
           }} />
         );
         if (b.kind === 'code') return (
-          <pre key={i} style={{
-            ...CODE_BLOCK_STYLE,
-            margin: i === 0 ? '0 0 8px' : '8px 0',
-          }}>{b.lines.join('\n')}</pre>
+          <CodeBlock key={i} lines={b.lines} margin={i === 0 ? '0 0 8px' : '8px 0'} />
         );
         if (b.kind === 'p') return (
           <p key={i} style={{ margin: i === 0 ? '0 0 8px' : '8px 0' }}>
