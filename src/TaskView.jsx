@@ -2745,29 +2745,30 @@ export default function TaskView({ chatId, agentsMap, skills = [], projects = []
     [events, currentProject?.workdir],
   );
   const headerToolEventCount = React.useMemo(() => events.filter(e => e.kind === 'tool').length, [events]);
-  const [workingTreeFileCount, setWorkingTreeFileCount] = React.useState(null);
+  const [workingTreeFileCount, setWorkingTreeFileCount] = React.useState({ projectId: '', count: null });
   const currentProjectId = currentProject?.id || '';
   const hasCurrentWorkdir = Boolean(currentProject?.workdir);
 
   React.useEffect(() => {
     if (!currentProjectId || !hasCurrentWorkdir) {
-      setWorkingTreeFileCount(null);
+      setWorkingTreeFileCount({ projectId: '', count: null });
       return undefined;
     }
     let cancelled = false;
-    setWorkingTreeFileCount(null);
     api.getProjectGitDiff(currentProjectId)
       .then(items => {
-        if (!cancelled) setWorkingTreeFileCount((items || []).length);
+        if (!cancelled) setWorkingTreeFileCount({ projectId: currentProjectId, count: (items || []).length });
       })
       .catch(() => {
-        if (!cancelled) setWorkingTreeFileCount(null);
+        if (!cancelled) setWorkingTreeFileCount({ projectId: currentProjectId, count: null });
       });
     return () => { cancelled = true; };
   }, [currentProjectId, hasCurrentWorkdir, headerToolEventCount]);
 
-  const fileCount = hasCurrentWorkdir && workingTreeFileCount !== null
-    ? workingTreeFileCount
+  const fileCount = hasCurrentWorkdir &&
+    workingTreeFileCount.projectId === currentProjectId &&
+    workingTreeFileCount.count !== null
+    ? workingTreeFileCount.count
     : editedEventFileCount;
 
   const onSplitDragStart = React.useCallback((e) => {

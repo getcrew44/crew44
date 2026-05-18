@@ -1226,6 +1226,37 @@ describe('TaskView', () => {
       expect(toggle).toHaveTextContent('1');
     });
 
+    it('uses the project working-tree changed file count for the Files badge', async () => {
+      const stream = captureStream();
+      api.getChat.mockResolvedValue({ ...chat, project_id: 'proj-1' });
+      api.getProjectGitDiff.mockResolvedValue([
+        { path: 'src/one.js', status: 'M', added: 1, removed: 0, diff: [] },
+        { path: 'src/two.js', status: 'M', added: 1, removed: 0, diff: [] },
+        { path: 'src/three.js', status: 'M', added: 1, removed: 0, diff: [] },
+        { path: 'src/four.js', status: 'M', added: 1, removed: 0, diff: [] },
+        { path: 'src/five.js', status: '?', added: 0, removed: 0, diff: [] },
+      ]);
+      const projects = [{ id: 'proj-1', name: 'demo', workdir: '/tmp/demo' }];
+
+      render(<TaskView chatId="chat-1" agentsMap={agentsMap} projects={projects} />);
+      await waitFor(() => expect(stream.onEvent).toBeDefined());
+
+      await act(async () => {
+        stream.onEvent({
+          seq: 1, ts: '2026-05-12T10:00:01Z', type: 'tool_call', actor_agent_id: 'agent-1',
+          tool_call: { name: 'edit_file', input: { file_path: 'src/one.js' } },
+        });
+        stream.onEvent({
+          seq: 2, ts: '2026-05-12T10:00:02Z', type: 'tool_call', actor_agent_id: 'agent-1',
+          tool_call: { name: 'edit_file', input: { file_path: 'src/two.js' } },
+        });
+      });
+
+      const toggle = await screen.findByTestId('files-drawer-toggle');
+      await waitFor(() => expect(toggle).toHaveTextContent('5'));
+      expect(api.getProjectGitDiff).toHaveBeenCalledWith('proj-1');
+    });
+
     it('opens the drawer and shows touched files under their directories in tree mode', async () => {
       const stream = captureStream();
       render(<TaskView chatId="chat-1" agentsMap={agentsMap} />);
