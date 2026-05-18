@@ -1,5 +1,5 @@
 import React from 'react';
-import { Avatar, Icon, RichText, UI_FONT, MONO_FONT } from './components.jsx';
+import { Avatar, RichText, UI_FONT, MONO_FONT } from './components.jsx';
 import { mapBackendEvent, mergeToolResults, relativeTime, formatTime, HUMAN_USER, resolveAuthor } from './utils.js';
 import * as api from './api.js';
 import { clearComposerDraft, readComposerDraft, writeComposerDraft } from './draftStore.js';
@@ -36,29 +36,36 @@ function DeletedTag() {
   );
 }
 
-function TurnDownRightIcon({ size = 12 }) {
+function SteerTrendIcon({ size = 11 }) {
   return (
     <svg
       aria-hidden="true"
       width={size}
       height={size}
-      viewBox="0 0 12 12"
+      viewBox="0 0 11 11"
       fill="none"
       style={{ flex: '0 0 auto' }}
     >
       <path
-        d="M3.25 2.25v3.1c0 1.1.9 2 2 2h3.7"
+        d="M2 7.5 5 4.5l2 2 2.5-3M7 3.5h2.5V6"
         stroke="currentColor"
-        strokeWidth="1.35"
+        strokeWidth="1.2"
         strokeLinecap="round"
         strokeLinejoin="round"
       />
+    </svg>
+  );
+}
+
+function QueueClockIcon({ size = 10 }) {
+  return (
+    <svg aria-hidden="true" width={size} height={size} viewBox="0 0 10 10" fill="none" style={{ flex: '0 0 auto' }}>
+      <circle cx="5" cy="5" r="4" stroke="currentColor" strokeWidth="1" />
       <path
-        d="M7.65 5.95 9.05 7.35 7.65 8.75"
+        d="M5 2.6V5l1.7 1"
         stroke="currentColor"
-        strokeWidth="1.35"
+        strokeWidth="1"
         strokeLinecap="round"
-        strokeLinejoin="round"
       />
     </svg>
   );
@@ -127,35 +134,41 @@ function MessageEvent({ event, agentsMap, thought, showHeader = true }) {
   const isUser = agent.kind === 'human';
 
   if (isUser) {
+    const steeredAgent = event.steerAgentId ? agentsMap?.[event.steerAgentId] : null;
     return (
-      <div style={{ display: 'flex', justifyContent: 'flex-end', padding: '14px 0' }}>
-        <div style={{ maxWidth: '72%', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 5 }}>
-          {event.userSteer && (
-            <div style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 5,
-              fontSize: 11.5,
-              color: '#A89F92',
-              fontFamily: UI_FONT,
-              paddingRight: 8,
-            }}>
-              <TurnDownRightIcon size={11} />
-              You steered the conversation
-            </div>
-          )}
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', padding: '14px 0' }}>
+        <div style={{
+          maxWidth: '72%',
+          background: '#EFE9D8',
+          color: '#1C1A17',
+          fontSize: 14, lineHeight: 1.55,
+          padding: '10px 16px',
+          borderRadius: 18,
+          fontFamily: UI_FONT,
+        }}>
+          <RichText text={event.body} />
+          <AttachmentTray attachments={event.attachments} />
+        </div>
+        {event.userSteer && (
           <div style={{
-            background: '#EFE9D8',
-            color: '#1C1A17',
-            fontSize: 14, lineHeight: 1.55,
-            padding: '10px 16px',
-            borderRadius: 18,
+            marginTop: 6,
+            padding: '0 4px',
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 6,
+            fontSize: 11.5,
+            color: '#807972',
             fontFamily: UI_FONT,
           }}>
-            <RichText text={event.body} />
-            <AttachmentTray attachments={event.attachments} />
+            <span style={{ color: '#C4644A', display: 'inline-flex' }}><SteerTrendIcon size={11} /></span>
+            <span>
+              Steered <span style={{ color: '#5C544B', fontWeight: 500 }}>
+                {steeredAgent ? steeredAgent.name : 'the crew'}
+              </span>
+              <span style={{ color: '#A89F92' }}> mid-run</span>
+            </span>
           </div>
-        </div>
+        )}
       </div>
     );
   }
@@ -938,6 +951,24 @@ const chip = {
   cursor: 'pointer', fontFamily: UI_FONT,
 };
 
+const miniBtn = {
+  background: 'transparent', border: '1px solid #DCD3BC',
+  color: '#5C544B', fontSize: 11.5, fontFamily: UI_FONT,
+  padding: '2px 8px', borderRadius: 999, cursor: 'pointer',
+};
+
+const miniBtnPrimary = {
+  background: '#1C1A17', border: '1px solid #1C1A17',
+  color: '#FCFBF7', fontSize: 11.5, fontFamily: UI_FONT, fontWeight: 500,
+  padding: '2px 10px', borderRadius: 999, cursor: 'pointer',
+};
+
+const miniBtnIcon = {
+  background: 'transparent', border: '1px solid transparent',
+  color: '#807972', padding: '2px 4px', borderRadius: 999, cursor: 'pointer',
+  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+};
+
 function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
@@ -1192,14 +1223,63 @@ function SuggestionRow({ option, active, onSelect }) {
   return null;
 }
 
-function Composer({ onSend, isStreaming, onCancel, pendingSteer, onCancelSteer, agentsMap, skills = [], projects = [], chatId, projectId, defaultTargetAgentId, targetAgentId, onChangeTargetAgent }) {
+function QueuedSteerCard({ item, isLast, queueCount, onCancel, onEdit, onDeliverAll }) {
+  return (
+    <div style={{ display: 'flex', justifyContent: 'flex-start', padding: '2px 0' }}>
+      <div style={{ maxWidth: '72%', display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 4 }}>
+        <div
+          data-testid="queued-steer-card"
+          onClick={onEdit}
+          title="Click to edit"
+          style={{
+            background: 'repeating-linear-gradient(45deg, #FCFAF1 0 8px, #F6F0DC 8px 16px)',
+            border: '1px dashed #C9BFA3',
+            color: '#1C1A17',
+            fontSize: 13,
+            lineHeight: 1.45,
+            padding: '6px 12px',
+            borderRadius: 14,
+            fontFamily: UI_FONT,
+            cursor: 'pointer',
+            whiteSpace: 'pre-wrap',
+            overflowWrap: 'break-word',
+          }}
+        >
+          {item.content}
+        </div>
+        <div style={{
+          display: 'inline-flex', alignItems: 'center', gap: 8,
+          fontSize: 11.5, color: '#807972', padding: '0 4px',
+        }}>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+            <span style={{ color: '#C4644A', display: 'inline-flex' }}><QueueClockIcon size={10} /></span>
+            <span>Queued</span>
+          </span>
+          <span style={{ color: '#D6CDB6' }}>·</span>
+          <button type="button" onClick={onEdit} style={miniBtn}>Edit</button>
+          {isLast && (
+            <button type="button" data-testid="queued-steer-deliver" onClick={onDeliverAll} style={miniBtnPrimary}>
+              {queueCount > 1 ? `Deliver all ${queueCount} now` : 'Deliver now'}
+            </button>
+          )}
+          <button type="button" onClick={onCancel} title="Discard" style={miniBtnIcon}>
+            <svg width="9" height="9" viewBox="0 0 9 9" aria-hidden="true">
+              <path d="M2 2l5 5M7 2l-5 5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+            </svg>
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Composer({ onSend, isStreaming, onCancel, pendingSteers = [], onCancelSteer, onEditSteer, onDeliverSteers, agentsMap, skills = [], projects = [], chatId, projectId, defaultTargetAgentId, targetAgentId, onChangeTargetAgent }) {
   const [val, setVal] = React.useState(() => readComposerDraft(projectId, chatId).text || '');
   const [attachments, setAttachments] = React.useState([]);
   const [cursor, setCursor] = React.useState(0);
   const [activeSuggestion, setActiveSuggestion] = React.useState(0);
   const [fileMatches, setFileMatches] = React.useState([]);
   const [scrollTop, setScrollTop] = React.useState(0);
-  const [steerMenuOpen, setSteerMenuOpen] = React.useState(false);
   const ta = React.useRef(null);
   const canAttach = attachmentsSupported();
   const agents = React.useMemo(() => (
@@ -1223,10 +1303,6 @@ function Composer({ onSend, isStreaming, onCancel, pendingSteer, onCancelSteer, 
     if (!projectId) return false;
     return Boolean((projects || []).find(p => p.id === projectId)?.workdir);
   }, [projects, projectId]);
-  const pendingSteerKey = pendingSteer
-    ? `${pendingSteer.queued_at || ''}:${pendingSteer.content || ''}`
-    : '';
-
   React.useEffect(() => {
     if (!ta.current) return;
     const prevScrollTop = ta.current.scrollTop;
@@ -1251,10 +1327,6 @@ function Composer({ onSend, isStreaming, onCancel, pendingSteer, onCancelSteer, 
       targetAgentId: targetAgentId && targetAgentId !== defaultTargetAgentId ? targetAgentId : '',
     });
   }, [chatId, projectId, defaultTargetAgentId, targetAgentId, val]);
-
-  React.useLayoutEffect(() => {
-    setSteerMenuOpen(false);
-  }, [pendingSteerKey]);
 
   const activeToken = React.useMemo(() => suggestionBounds(val, cursor), [val, cursor]);
 
@@ -1345,7 +1417,7 @@ function Composer({ onSend, isStreaming, onCancel, pendingSteer, onCancelSteer, 
 
   const send = () => {
     const text = val.trim();
-    if ((!text && attachments.length === 0) || pendingSteer) return;
+    if (!text && attachments.length === 0) return;
     const outgoingAttachments = attachments;
     setVal('');
     setAttachments([]);
@@ -1353,12 +1425,11 @@ function Composer({ onSend, isStreaming, onCancel, pendingSteer, onCancelSteer, 
     onSend(text, outgoingAttachments);
   };
 
-  const editPendingSteer = async () => {
-    if (!pendingSteer) return;
-    const text = pendingSteer.content || '';
-    const queuedAttachments = pendingSteer.attachments || [];
-    setSteerMenuOpen(false);
-    await onCancelSteer?.();
+  const editPendingSteer = async (item) => {
+    if (!item) return;
+    const text = item.content || '';
+    const queuedAttachments = item.attachments || [];
+    await onEditSteer?.(item.id);
     setVal(text);
     setAttachments(queuedAttachments);
     window.requestAnimationFrame?.(() => {
@@ -1412,10 +1483,29 @@ function Composer({ onSend, isStreaming, onCancel, pendingSteer, onCancelSteer, 
     if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); send(); }
   };
 
-  const canSend = (Boolean(val.trim()) || attachments.length > 0) && !pendingSteer;
+  const canSend = Boolean(val.trim()) || attachments.length > 0;
 
   return (
-    <div style={{ background: '#FAF5E8', padding: '0 36px 16px' }}>
+    <div style={{
+      borderTop: '1px solid #ECE6D5',
+      background: '#FCFAF1',
+      padding: '10px 36px 14px',
+    }}>
+      {pendingSteers.length > 0 && (
+        <div style={{ ...conversationColumn, marginBottom: 8, display: 'flex', flexDirection: 'column', gap: 2 }}>
+          {pendingSteers.map((item, index) => (
+            <QueuedSteerCard
+              key={item.id || `${item.queued_at}:${index}`}
+              item={item}
+              isLast={index === pendingSteers.length - 1}
+              queueCount={pendingSteers.length}
+              onCancel={() => onCancelSteer?.(item.id)}
+              onEdit={() => editPendingSteer(item)}
+              onDeliverAll={() => onDeliverSteers?.(pendingSteers.map(steer => steer.id))}
+            />
+          ))}
+        </div>
+      )}
       <div
         data-testid="composer-column"
         onDragOver={(e) => {
@@ -1430,111 +1520,6 @@ function Composer({ onSend, isStreaming, onCancel, pendingSteer, onCancelSteer, 
           padding: '10px 12px 8px', boxShadow: '0 1px 0 rgba(0,0,0,0.02)',
         }}
       >
-        {pendingSteer && (
-          <div
-            data-testid="queued-steer"
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'minmax(0, 1fr) auto auto',
-              alignItems: 'center',
-              gap: 10,
-              padding: '4px 8px 5px',
-              marginBottom: 8,
-              borderBottom: '1px solid #ECE6D5',
-            }}
-          >
-            <div style={{ minWidth: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span style={{ color: '#A89F92', display: 'inline-flex' }}><TurnDownRightIcon size={12} /></span>
-              <div style={{
-                minWidth: 0,
-                color: '#5C544B',
-                fontSize: 13.5,
-                whiteSpace: 'nowrap',
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-              }}>{pendingSteer.content}</div>
-            </div>
-            <div style={{
-              maxWidth: 130,
-              color: '#A89F92',
-              fontSize: 11.5,
-              lineHeight: 1.25,
-              textAlign: 'right',
-            }}>
-              会在合适时机触发
-            </div>
-            <div style={{ position: 'relative', display: 'flex', gap: 4 }}>
-              <button
-                type="button"
-                data-testid="queued-steer-cancel"
-                title="Cancel steer"
-                onClick={() => {
-                  setSteerMenuOpen(false);
-                  onCancelSteer?.();
-                }}
-                style={{
-                  width: 26, height: 26,
-                  border: 'none',
-                  borderRadius: 6,
-                  background: 'transparent',
-                  color: '#A89F92',
-                  cursor: 'pointer',
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                }}
-              ><Icon name="trash" size={13} /></button>
-              <button
-                type="button"
-                data-testid="queued-steer-menu"
-                title="More"
-                onClick={() => setSteerMenuOpen(open => !open)}
-                style={{
-                  width: 26, height: 26,
-                  border: 'none',
-                  borderRadius: 6,
-                  background: 'transparent',
-                  color: '#A89F92',
-                  cursor: 'pointer',
-                  fontSize: 18,
-                  lineHeight: '22px',
-                }}
-              >…</button>
-              {steerMenuOpen && (
-                <div style={{
-                  position: 'absolute',
-                  right: 0,
-                  bottom: 'calc(100% + 6px)',
-                  zIndex: 8,
-                  minWidth: 118,
-                  background: '#FFFEF8',
-                  border: '1px solid #DCD3BC',
-                  borderRadius: 8,
-                  boxShadow: '0 8px 24px rgba(28,26,23,0.14)',
-                  padding: 4,
-                }}>
-                  <button
-                    type="button"
-                    data-testid="queued-steer-edit"
-                    onClick={editPendingSteer}
-                    style={{
-                      width: '100%',
-                      border: 'none',
-                      background: 'transparent',
-                      color: '#1C1A17',
-                      fontFamily: UI_FONT,
-                      fontSize: 12.5,
-                      textAlign: 'left',
-                      padding: '6px 8px',
-                      borderRadius: 6,
-                      cursor: 'pointer',
-                    }}
-                  >编辑消息</button>
-                </div>
-              )}
-            </div>
-          </div>
-        )}
         <AttachmentTray attachments={attachments} onRemove={removeAttachment} />
         <div style={{ position: 'relative' }}>
           {suggestionOptions.length > 0 && (
@@ -1678,7 +1663,7 @@ export default function TaskView({ chatId, agentsMap, skills = [], projects = []
   const [isStreaming, setIsStreaming] = React.useState(false);
   const [error, setError] = React.useState(null);
   const [targetAgentId, setTargetAgentId] = React.useState(null);
-  const [pendingSteer, setPendingSteer] = React.useState(null);
+  const [pendingSteers, setPendingSteers] = React.useState([]);
   const timelineRef = React.useRef(null);
   const lastSeqRef = React.useRef(0);
   const streamCleanupRef = React.useRef(() => {});
@@ -1723,7 +1708,12 @@ export default function TaskView({ chatId, agentsMap, skills = [], projects = []
           lastSeqRef.current = Math.max(lastSeqRef.current, event.seq);
 
           if (mapped.kind === 'message' && mapped.author === '__human__') {
-            if (mapped.userSteer) setPendingSteer(null);
+            if (mapped.userSteer) {
+              api.getChat(id).then(c => {
+                setChat(c);
+                setPendingSteers(c.stream?.pending_steers || []);
+              }).catch(() => {});
+            }
             const optimisticIndex = prev.findIndex(e =>
               e._optimistic &&
               e.kind === 'message' &&
@@ -1761,7 +1751,7 @@ export default function TaskView({ chatId, agentsMap, skills = [], projects = []
         if (waitingForAgentRef.current && !agentActivitySinceSendRef.current) {
           api.getChat(id).then(c => {
             setChat(c);
-            setPendingSteer(c.stream?.pending_steer || null);
+            setPendingSteers(c.stream?.pending_steers || []);
             setIsStreaming(c.stream?.status === 'streaming');
           }).catch(() => {});
           return;
@@ -1775,7 +1765,7 @@ export default function TaskView({ chatId, agentsMap, skills = [], projects = []
         // Refresh chat metadata
         api.getChat(id).then(c => {
           setChat(c);
-          setPendingSteer(c.stream?.pending_steer || null);
+          setPendingSteers(c.stream?.pending_steers || []);
         }).catch(() => {});
       },
       (err) => {
@@ -1793,7 +1783,7 @@ export default function TaskView({ chatId, agentsMap, skills = [], projects = []
     setChat(null);
     setEvents([]);
     setError(null);
-    setPendingSteer(null);
+    setPendingSteers([]);
     lastSeqRef.current = 0;
     waitingForAgentRef.current = false;
     waitingAfterSeqRef.current = 0;
@@ -1802,7 +1792,7 @@ export default function TaskView({ chatId, agentsMap, skills = [], projects = []
     api.getChat(chatId)
       .then(c => {
         setChat(c);
-        setPendingSteer(c.stream?.pending_steer || null);
+        setPendingSteers(c.stream?.pending_steers || []);
         if (c.stream?.status === 'streaming') {
           waitingForAgentRef.current = true;
         }
@@ -1855,11 +1845,7 @@ export default function TaskView({ chatId, agentsMap, skills = [], projects = []
       if (steeringActiveRun) {
         const updatedChat = await api.interruptMessage(chatId, text, attachments);
         setChat(updatedChat);
-        setPendingSteer(updatedChat?.stream?.pending_steer || {
-          content: text,
-          attachments,
-          queued_at: new Date().toISOString(),
-        });
+        setPendingSteers(updatedChat?.stream?.pending_steers || []);
       } else {
         // target_agent_id is required by the backend — prefer user-selected, fall back to current/lead
         const effectiveTarget = targetAgentId || chat?.current_agent_id || chat?.main_agent_id;
@@ -1873,16 +1859,27 @@ export default function TaskView({ chatId, agentsMap, skills = [], projects = []
     }
   }, [chatId, chat, connectEventStream, isStreaming, targetAgentId]);
 
-  const handleCancelSteer = React.useCallback(async () => {
-    if (!chatId || !pendingSteer) return;
+  const handleCancelSteer = React.useCallback(async (steerId) => {
+    if (!chatId || !steerId) return;
     try {
-      const updatedChat = await api.cancelPendingSteer(chatId);
+      const updatedChat = await api.cancelPendingSteer(chatId, steerId);
       setChat(updatedChat);
-      setPendingSteer(null);
+      setPendingSteers(updatedChat?.stream?.pending_steers || []);
     } catch (err) {
       console.error('Cancel steer failed:', err);
     }
-  }, [chatId, pendingSteer]);
+  }, [chatId]);
+
+  const handleDeliverSteers = React.useCallback(async (steerIds) => {
+    if (!chatId || !steerIds?.length) return;
+    try {
+      const updatedChat = await api.deliverPendingSteers(chatId, steerIds);
+      setChat(updatedChat);
+      setPendingSteers(updatedChat?.stream?.pending_steers || []);
+    } catch (err) {
+      console.error('Deliver steer failed:', err);
+    }
+  }, [chatId]);
 
   const handleCancel = React.useCallback(async () => {
     if (!chatId) return;
@@ -1892,7 +1889,7 @@ export default function TaskView({ chatId, agentsMap, skills = [], projects = []
       agentActivitySinceSendRef.current = false;
       streamCleanupRef.current();
       setIsStreaming(false);
-      setPendingSteer(null);
+      setPendingSteers([]);
     } catch (err) {
       console.error('Cancel failed:', err);
     }
@@ -1939,8 +1936,10 @@ export default function TaskView({ chatId, agentsMap, skills = [], projects = []
         onSend={handleSend}
         isStreaming={isStreaming}
         onCancel={handleCancel}
-        pendingSteer={pendingSteer}
+        pendingSteers={pendingSteers}
         onCancelSteer={handleCancelSteer}
+        onEditSteer={handleCancelSteer}
+        onDeliverSteers={handleDeliverSteers}
         agentsMap={agentsMap}
         skills={skills}
         projects={projects}

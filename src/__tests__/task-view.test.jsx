@@ -11,6 +11,7 @@ vi.mock('../api.js', () => ({
   postMessage: vi.fn(),
   interruptMessage: vi.fn(),
   cancelPendingSteer: vi.fn(),
+  deliverPendingSteers: vi.fn(),
   cancelChat: vi.fn(),
   streamChatEvents: vi.fn(),
   listProjectFiles: vi.fn(),
@@ -74,6 +75,7 @@ beforeEach(() => {
   api.postMessage.mockResolvedValue({ ...chat, stream: { status: 'streaming' } });
   api.interruptMessage.mockResolvedValue({ ...chat, stream: { status: 'streaming' } });
   api.cancelPendingSteer.mockResolvedValue({ ...chat, stream: { status: 'streaming' } });
+  api.deliverPendingSteers.mockResolvedValue({ ...chat, stream: { status: 'streaming' } });
   api.cancelChat.mockResolvedValue({});
   api.streamChatEvents.mockImplementation((_chatId, _after, _onEvent, onDone) => {
     onDone?.();
@@ -355,17 +357,19 @@ describe('TaskView', () => {
     await waitFor(() => expect(api.cancelChat).toHaveBeenCalledWith('chat-1'));
   });
 
-  it('closes the queued steer menu when a pending steer is replaced', async () => {
+  it('renders multiple queued steer cards and delivers them from the final card', async () => {
     api.getChat.mockResolvedValue({ ...chat, stream: { status: 'streaming' } });
     api.streamChatEvents.mockImplementation(() => vi.fn());
-    api.interruptMessage.mockImplementation((_chatId, content, attachments = []) => Promise.resolve({
-      ...chat,
-      stream: {
-        status: 'streaming',
-        pending_steer: { content, attachments, queued_at: new Date().toISOString() },
-      },
-    }));
-    api.cancelPendingSteer.mockResolvedValue({ ...chat, stream: { status: 'streaming' } });
+    const queued = [];
+    api.interruptMessage.mockImplementation((_chatId, content, attachments = []) => {
+      queued.push({ id: `steer-${queued.length + 1}`, content, attachments, queued_at: new Date().toISOString() });
+      return Promise.resolve({ ...chat, stream: { status: 'streaming', pending_steers: [...queued] } });
+    });
+    api.deliverPendingSteers.mockImplementation((_chatId, ids) => {
+      const remaining = queued.filter(item => !ids.includes(item.id));
+      queued.splice(0, queued.length, ...remaining);
+      return Promise.resolve({ ...chat, stream: { status: 'streaming', pending_steers: [...queued] } });
+    });
 
     render(<TaskView chatId="chat-1" agentsMap={agentsMap} />);
 
@@ -375,18 +379,19 @@ describe('TaskView', () => {
     fireEvent.change(input, { target: { value: 'first steer' } });
     fireEvent.click(screen.getByTestId('composer-send'));
 
-    expect(await screen.findByTestId('queued-steer')).toHaveTextContent('first steer');
-    fireEvent.click(screen.getByTestId('queued-steer-menu'));
-    expect(screen.getByTestId('queued-steer-edit')).toBeInTheDocument();
-
-    fireEvent.click(screen.getByTestId('queued-steer-cancel'));
-    await waitFor(() => expect(screen.queryByTestId('queued-steer')).not.toBeInTheDocument());
+    expect(await screen.findByTestId('queued-steer-card')).toHaveTextContent('first steer');
 
     fireEvent.change(input, { target: { value: 'second steer' } });
     fireEvent.click(screen.getByTestId('composer-send'));
 
-    expect(await screen.findByTestId('queued-steer')).toHaveTextContent('second steer');
-    expect(screen.queryByTestId('queued-steer-edit')).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.getAllByTestId('queued-steer-card')).toHaveLength(2));
+    expect(screen.getByText('Deliver all 2 now')).toBeInTheDocument();
+    expect(screen.queryByText('Deliver now')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByText('Deliver all 2 now'));
+
+    await waitFor(() => expect(api.deliverPendingSteers).toHaveBeenCalledWith('chat-1', ['steer-1', 'steer-2']));
+    await waitFor(() => expect(screen.queryByTestId('queued-steer-card')).not.toBeInTheDocument());
   });
 
   it('reconciles a persisted user stream event with the optimistic user message', async () => {

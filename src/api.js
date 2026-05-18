@@ -188,8 +188,12 @@ export async function interruptMessage(chatId, content, attachments = []) {
   });
 }
 
-export async function cancelPendingSteer(chatId) {
-  return rpc.call('chats.messages.interrupt.cancel', { id: chatId });
+export async function cancelPendingSteer(chatId, steerId) {
+  return rpc.call('chats.messages.interrupt.cancel', { id: chatId, steer_id: steerId });
+}
+
+export async function deliverPendingSteers(chatId, steerIds) {
+  return rpc.call('chats.messages.interrupt.deliver', { id: chatId, steer_ids: steerIds });
 }
 
 export async function cancelChat(chatId) {
