@@ -15,6 +15,8 @@ vi.mock('../api.js', () => ({
   cancelChat: vi.fn(),
   streamChatEvents: vi.fn(),
   listProjectFiles: vi.fn(),
+  readProjectFile: vi.fn(),
+  getProjectGitDiff: vi.fn(),
 }));
 
 vi.mock('../thumbnail.js', () => ({
@@ -82,6 +84,8 @@ beforeEach(() => {
     return vi.fn();
   });
   api.listProjectFiles.mockResolvedValue([]);
+  api.readProjectFile.mockResolvedValue({ path: '', content: '', size: 0, truncated: false, binary: false });
+  api.getProjectGitDiff.mockResolvedValue([]);
 });
 
 function emitEvent(stream, event) {
@@ -1182,6 +1186,207 @@ describe('TaskView', () => {
       const labels = highlights.map(h => h.textContent);
       expect(labels).toContain('@Aria');
       expect(labels).toContain('/review');
+    });
+  });
+
+  describe('Files drawer', () => {
+    function captureStream() {
+      const captured = {};
+      api.streamChatEvents.mockImplementation((_chatId, _after, onEvent, onDone, onError) => {
+        captured.onEvent = onEvent;
+        captured.onDone = onDone;
+        captured.onError = onError;
+        return vi.fn();
+      });
+      return captured;
+    }
+
+    it('shows a Files button with a count badge of touched files', async () => {
+      const stream = captureStream();
+      render(<TaskView chatId="chat-1" agentsMap={agentsMap} />);
+      await waitFor(() => expect(stream.onEvent).toBeDefined());
+
+      await act(async () => {
+        stream.onEvent({
+          seq: 1, ts: '2026-05-12T10:00:01Z', type: 'tool_call', actor_agent_id: 'agent-1',
+          tool_call: { name: 'edit_file', input: { file_path: 'src/foo.js' } },
+        });
+        stream.onEvent({
+          seq: 2, ts: '2026-05-12T10:00:02Z', type: 'tool_call', actor_agent_id: 'agent-1',
+          tool_call: { name: 'read_file', input: { path: 'src/bar.js' } },
+        });
+        stream.onEvent({
+          seq: 3, ts: '2026-05-12T10:00:03Z', type: 'tool_call', actor_agent_id: 'agent-1',
+          tool_call: { name: 'Bash', input: { command: 'ls' } },
+        });
+      });
+
+      const toggle = await screen.findByTestId('files-drawer-toggle');
+      // Two file-shaped tool_calls (Bash is intentionally skipped).
+      expect(toggle).toHaveTextContent('2');
+    });
+
+    it('opens the drawer and shows touched files under their directories in tree mode', async () => {
+      const stream = captureStream();
+      render(<TaskView chatId="chat-1" agentsMap={agentsMap} />);
+      await waitFor(() => expect(stream.onEvent).toBeDefined());
+
+      await act(async () => {
+        stream.onEvent({
+          seq: 1, ts: '2026-05-12T10:00:01Z', type: 'tool_call', actor_agent_id: 'agent-1',
+          tool_call: { name: 'edit_file', input: { file_path: 'src/foo.js' } },
+        });
+        stream.onEvent({
+          seq: 2, ts: '2026-05-12T10:00:02Z', type: 'tool_call', actor_agent_id: 'agent-1',
+          tool_call: { name: 'read_file', input: { path: 'src/bar.js' } },
+        });
+      });
+
+      fireEvent.click(await screen.findByTestId('files-drawer-toggle'));
+      // No workdir → tree mode is the default. Both files should render under
+      // the src/ folder.
+      expect(screen.getByText('src/')).toBeInTheDocument();
+      expect(screen.getByText('foo.js')).toBeInTheDocument();
+      expect(screen.getByText('bar.js')).toBeInTheDocument();
+      // The edit count surfaces in the header subtitle and on the changed leaf.
+      const edits = await screen.findAllByText(/1 edit/);
+      expect(edits.length).toBeGreaterThan(0);
+    });
+
+    it('fetches and shows the file content when a tree leaf is clicked', async () => {
+      const stream = captureStream();
+      api.getChat.mockResolvedValue({ ...chat, project_id: 'proj-1' });
+      api.readProjectFile.mockResolvedValue({
+        path: 'src/foo.js',
+        content: 'const x = 1;\nconst y = 2;\n',
+        size: 24, truncated: false, binary: false,
+      });
+      // No workdir → tree mode is the default.
+      const projects = [{ id: 'proj-1', name: 'demo' }];
+
+      render(<TaskView chatId="chat-1" agentsMap={agentsMap} projects={projects} />);
+      await waitFor(() => expect(stream.onEvent).toBeDefined());
+
+      await act(async () => {
+        stream.onEvent({
+          seq: 1, ts: '2026-05-12T10:00:01Z', type: 'tool_call', actor_agent_id: 'agent-1',
+          tool_call: { name: 'write_file', input: { file_path: 'src/foo.js' } },
+        });
+      });
+
+      fireEvent.click(await screen.findByTestId('files-drawer-toggle'));
+      fireEvent.click(await screen.findByText('foo.js'));
+
+      await waitFor(() => expect(api.readProjectFile).toHaveBeenCalledWith('proj-1', 'src/foo.js'));
+      expect(await screen.findByText('const x = 1;')).toBeInTheDocument();
+      expect(screen.getByText('const y = 2;')).toBeInTheDocument();
+    });
+
+    it('shows working-tree diffs in diff mode when the project has a workdir', async () => {
+      const stream = captureStream();
+      api.getChat.mockResolvedValue({ ...chat, project_id: 'proj-1' });
+      api.getProjectGitDiff.mockResolvedValue([
+        {
+          path: 'src/foo.js', status: 'M', added: 2, removed: 1,
+          diff: [
+            { kind: 'hunk', text: '@@ -1,2 +1,3 @@' },
+            { kind: 'ctx', text: 'const x = 1;' },
+            { kind: 'del', text: 'const y = 2;' },
+            { kind: 'add', text: 'const y = 22;' },
+            { kind: 'add', text: 'const z = 3;' },
+          ],
+        },
+        { path: 'NEW.md', status: '?', added: 0, removed: 0, diff: [] },
+      ]);
+      const projects = [{ id: 'proj-1', name: 'demo', workdir: '/tmp/demo' }];
+
+      render(<TaskView chatId="chat-1" agentsMap={agentsMap} projects={projects} />);
+      await waitFor(() => expect(stream.onEvent).toBeDefined());
+
+      fireEvent.click(await screen.findByTestId('files-drawer-toggle'));
+      // Diff mode is the default with a workdir, but click to be explicit.
+      fireEvent.click(screen.getByTestId('files-drawer-mode-diff'));
+
+      const rows = await screen.findAllByTestId('git-diff-row');
+      expect(rows).toHaveLength(2);
+      expect(rows[0]).toHaveTextContent('src/foo.js');
+      expect(rows[0]).toHaveTextContent('+2');
+      expect(rows[0]).toHaveTextContent('−1');
+      expect(rows[1]).toHaveTextContent('NEW.md');
+    });
+
+    it('clicking a diff row opens the file with the diff toggle and unified diff visible', async () => {
+      const stream = captureStream();
+      api.getChat.mockResolvedValue({ ...chat, project_id: 'proj-1' });
+      api.getProjectGitDiff.mockResolvedValue([
+        {
+          path: 'src/foo.js', status: 'M', added: 1, removed: 1,
+          diff: [
+            { kind: 'hunk', text: '@@ -1,1 +1,1 @@' },
+            { kind: 'del', text: 'const y = 2;' },
+            { kind: 'add', text: 'const y = 22;' },
+          ],
+        },
+      ]);
+      api.readProjectFile.mockResolvedValue({
+        path: 'src/foo.js', content: 'const y = 22;\n', size: 14, truncated: false, binary: false,
+      });
+      const projects = [{ id: 'proj-1', name: 'demo', workdir: '/tmp/demo' }];
+
+      render(<TaskView chatId="chat-1" agentsMap={agentsMap} projects={projects} />);
+      await waitFor(() => expect(stream.onEvent).toBeDefined());
+
+      fireEvent.click(await screen.findByTestId('files-drawer-toggle'));
+      const row = await screen.findByTestId('git-diff-row');
+      fireEvent.click(row);
+
+      // Diff view is the default when a diff payload is present.
+      expect(await screen.findByText('const y = 2;')).toBeInTheDocument();
+      expect(screen.getByText('const y = 22;')).toBeInTheDocument();
+    });
+
+    it('disables the diff toggle and defaults to tree when the project has no workdir', async () => {
+      const stream = captureStream();
+      render(<TaskView chatId="chat-1" agentsMap={agentsMap} />);
+      await waitFor(() => expect(stream.onEvent).toBeDefined());
+
+      await act(async () => {
+        stream.onEvent({
+          seq: 1, ts: '2026-05-12T10:00:01Z', type: 'tool_call', actor_agent_id: 'agent-1',
+          tool_call: { name: 'edit_file', input: { file_path: 'src/foo.js' } },
+        });
+      });
+
+      fireEvent.click(await screen.findByTestId('files-drawer-toggle'));
+      expect(screen.getByTestId('files-drawer-mode-diff')).toBeDisabled();
+      // Tree mode shows the touched file under src/.
+      expect(screen.getByText('src/')).toBeInTheDocument();
+      expect(screen.getByText('foo.js')).toBeInTheDocument();
+    });
+
+    it('closes the drawer when the close button is clicked', async () => {
+      const stream = captureStream();
+      render(<TaskView chatId="chat-1" agentsMap={agentsMap} />);
+      await waitFor(() => expect(stream.onEvent).toBeDefined());
+
+      await act(async () => {
+        stream.onEvent({
+          seq: 1, ts: '2026-05-12T10:00:01Z', type: 'tool_call', actor_agent_id: 'agent-1',
+          tool_call: { name: 'edit_file', input: { file_path: 'src/foo.js' } },
+        });
+      });
+
+      fireEvent.click(await screen.findByTestId('files-drawer-toggle'));
+      fireEvent.click(await screen.findByTestId('files-drawer-close'));
+
+      // The toggle button reappears immediately because the drawer's intent
+      // flips to closed; the drawer itself stays mounted briefly for the
+      // slide-out animation, so wait it out before asserting unmount.
+      expect(await screen.findByTestId('files-drawer-toggle')).toBeInTheDocument();
+      await waitFor(
+        () => expect(screen.queryByTestId('files-drawer-close')).not.toBeInTheDocument(),
+        { timeout: 1000 },
+      );
     });
   });
 });

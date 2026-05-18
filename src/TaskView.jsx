@@ -1,5 +1,5 @@
 import React from 'react';
-import { Avatar, RichText, UI_FONT, MONO_FONT } from './components.jsx';
+import { Avatar, RichText, UI_FONT, MONO_FONT, HeadingTooltip } from './components.jsx';
 import { mapBackendEvent, mergeToolResults, relativeTime, formatTime, HUMAN_USER, resolveAuthor } from './utils.js';
 import * as api from './api.js';
 import { clearComposerDraft, readComposerDraft, writeComposerDraft } from './draftStore.js';
@@ -582,6 +582,13 @@ const headerColumn = {
   margin: '0 auto',
 };
 
+// Minimum widths the split layout will honor when the drawer is open. The
+// conversation column stops shrinking at MIN_CONVERSATION_PX so messages and
+// the composer stay legible; the drawer stops shrinking at MIN_DRAWER_PX so
+// the file list and diff cards have room to render.
+const MIN_CONVERSATION_PX = 480;
+const MIN_DRAWER_PX = 280;
+
 function elapsedText(start, end) {
   if (!start) return '';
   const startMs = new Date(start).getTime();
@@ -599,7 +606,7 @@ function elapsedText(start, end) {
   return parts.join(' ');
 }
 
-function TaskHeader({ chat, events }) {
+function TaskHeader({ chat, events, fileCount, drawerOpen, onToggleDrawer }) {
   // Find the most recent error event — when an agent runtime errors out, the
   // SSE stream stays open but no useful work is happening, so freeze the
   // elapsed counter at the error's timestamp.
@@ -633,26 +640,945 @@ function TaskHeader({ chat, events }) {
 
   return (
     <div style={{ padding: '20px 36px 16px', borderBottom: '1px solid #ECE6D5', background: '#FAF5E8', WebkitAppRegion: 'drag' }}>
-      <div style={headerColumn}>
-        <h1 style={{
-          margin: 0, fontSize: 22, fontWeight: 600,
-          color: '#1C1A17', letterSpacing: -0.2, lineHeight: 1.2,
-        }}>{chat.title || 'Untitled chat'}</h1>
+      <div style={{ ...headerColumn, display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <h1 style={{
+            margin: 0, fontSize: 22, fontWeight: 600,
+            color: '#1C1A17', letterSpacing: -0.2, lineHeight: 1.2,
+          }}>{chat.title || 'Untitled chat'}</h1>
+          <div style={{
+            display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 10,
+            fontSize: 12.5, color: '#A89F92', marginTop: 8,
+          }}>
+            <span style={{ fontFamily: MONO_FONT, color: '#5C544B' }}>{chat.id?.slice(0, 8)}</span>
+            <span style={{ color: '#D6CDB6' }}>·</span>
+            <span>opened {age}</span>
+            {metaItems.map((m, i) => (
+              <React.Fragment key={i}>
+                <span style={{ color: '#D6CDB6' }}>·</span>
+                <span>{m}</span>
+              </React.Fragment>
+            ))}
+          </div>
+        </div>
+        {!drawerOpen && onToggleDrawer && (
+          <button
+            type="button"
+            data-testid="files-drawer-toggle"
+            onClick={onToggleDrawer}
+            title="Workspace files"
+            style={{
+              WebkitAppRegion: 'no-drag',
+              padding: '5px 10px 5px 8px', borderRadius: 6, fontSize: 12.5, fontWeight: 500,
+              border: '1px solid #DCD3BC', background: '#FCFAF1', color: '#1C1A17',
+              cursor: 'pointer', fontFamily: UI_FONT,
+              display: 'inline-flex', alignItems: 'center', gap: 6, flexShrink: 0,
+            }}
+          >
+            <svg width="14" height="14" viewBox="0 0 16 16" style={{ color: '#5C544B', display: 'block' }} aria-hidden="true">
+              <rect x="1.5" y="2.5" width="13" height="11" rx="1.6" fill="none" stroke="currentColor" strokeWidth="1.2"/>
+              <line x1="10" y1="2.5" x2="10" y2="13.5" stroke="currentColor" strokeWidth="1.2"/>
+              <line x1="11.5" y1="5.5" x2="13" y2="5.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
+              <line x1="11.5" y1="8" x2="13" y2="8" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
+              <line x1="11.5" y1="10.5" x2="13" y2="10.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
+            </svg>
+            <span>Files</span>
+            {fileCount > 0 && (
+              <span style={{
+                fontSize: 11, fontWeight: 500, color: '#807972',
+                background: '#F0EAD8', padding: '1px 6px', borderRadius: 999,
+                marginLeft: 1,
+              }}>{fileCount}</span>
+            )}
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── Files drawer ─────────────────────────────────────────────────────────────
+
+// Pluck the most likely file-path field off a tool call's input. We only
+// surface a path when it's clearly a filesystem reference — bash commands,
+// search queries, etc. are intentionally skipped so the drawer stays clean.
+const FILE_PATH_KEYS = ['file_path', 'path', 'target_file', 'filepath'];
+
+function extractFilePath(input) {
+  if (!input || typeof input !== 'object') return null;
+  for (const key of FILE_PATH_KEYS) {
+    const v = input[key];
+    if (typeof v === 'string' && v.trim()) return v.trim();
+  }
+  return null;
+}
+
+// Tools that read but don't modify. Used to decide whether a file got "touched"
+// (read) versus "changed" (write/edit/create).
+const READ_ONLY_TOOLS = new Set([
+  'Read', 'read_file', 'read', 'view', 'cat', 'view_file', 'open',
+]);
+
+function operationKind(toolName) {
+  if (READ_ONLY_TOOLS.has(toolName)) return 'read';
+  return 'edit';
+}
+
+// Strip a workdir prefix from an absolute path so the drawer can show clean
+// project-relative paths. Returns the original path if it doesn't live under
+// workdir or if workdir is empty.
+function relativizePath(path, workdir) {
+  if (!path || !workdir) return path;
+  const norm = (s) => s.replace(/\/+$/, '');
+  const w = norm(workdir);
+  if (path === w) return '';
+  if (path.startsWith(w + '/')) return path.slice(w.length + 1);
+  return path;
+}
+
+function collectFiles(events, workdir) {
+  const map = new Map();
+  for (const e of events || []) {
+    if (e.kind !== 'tool') continue;
+    const raw = extractFilePath(e.input);
+    if (!raw) continue;
+    const path = relativizePath(raw, workdir);
+    if (!path) continue;
+    if (!map.has(path)) {
+      map.set(path, {
+        path,
+        operations: [],
+        edits: 0,
+        reads: 0,
+        lastAuthor: e.author,
+        lastTool: e.tool,
+        lastTime: e.time,
+        firstSeq: e._seq ?? 0,
+      });
+    }
+    const f = map.get(path);
+    const kind = operationKind(e.tool);
+    f.operations.push({
+      tool: e.tool,
+      kind,
+      author: e.author,
+      time: e.time,
+      result: e.result,
+      output: e.output || '',
+      seq: e._seq ?? 0,
+    });
+    if (kind === 'read') f.reads += 1;
+    else f.edits += 1;
+    f.lastAuthor = e.author;
+    f.lastTool = e.tool;
+    f.lastTime = e.time;
+  }
+  return [...map.values()].sort((a, b) => {
+    // Edited files float above read-only ones; within each, most recently
+    // touched first.
+    if ((a.edits > 0) !== (b.edits > 0)) return a.edits > 0 ? -1 : 1;
+    return b.firstSeq - a.firstSeq;
+  });
+}
+
+function buildFileTree(paths) {
+  const root = { name: '', isFile: false, children: new Map(), path: '' };
+  for (const p of paths) {
+    const parts = p.split('/').filter(Boolean);
+    let node = root;
+    for (let i = 0; i < parts.length; i++) {
+      const name = parts[i];
+      const isFile = i === parts.length - 1;
+      if (!node.children.has(name)) {
+        node.children.set(name, {
+          name,
+          isFile,
+          children: new Map(),
+          path: parts.slice(0, i + 1).join('/'),
+        });
+      }
+      node = node.children.get(name);
+    }
+  }
+  return root;
+}
+
+function TreeNode({ node, depth = 0, onPick, selectedPath, filesByPath, defaultOpenDepth = Infinity }) {
+  // Folders auto-open while depth is below the cap. For the touched-files tree
+  // this stays Infinity (everything open, since there are few entries); the
+  // full project tree passes a small value so deep folders start collapsed.
+  const [open, setOpen] = React.useState(depth < defaultOpenDepth);
+  const kids = [...node.children.values()].sort((a, b) => {
+    if (a.isFile !== b.isFile) return a.isFile ? 1 : -1;
+    return a.name.localeCompare(b.name);
+  });
+
+  if (node.isFile) {
+    const meta = filesByPath?.get(node.path);
+    const isSelected = selectedPath === node.path;
+    return (
+      <div
+        onClick={() => onPick && onPick(node.path)}
+        style={{
+          padding: '3px 8px 3px ' + (depth * 14 + 10) + 'px',
+          fontSize: 12.5, color: '#1C1A17', fontFamily: MONO_FONT,
+          display: 'flex', alignItems: 'center', gap: 6,
+          cursor: onPick ? 'pointer' : 'default', borderRadius: 5,
+          background: isSelected ? '#F4ECD7' : 'transparent',
+        }}
+        onMouseEnter={(e) => { if (onPick && !isSelected) e.currentTarget.style.background = '#F7EFDD'; }}
+        onMouseLeave={(e) => { if (onPick && !isSelected) e.currentTarget.style.background = 'transparent'; }}
+      >
+        <svg width="11" height="12" viewBox="0 0 11 12" style={{ color: '#A89F92', flexShrink: 0 }} aria-hidden="true">
+          <path d="M2 1h4.5L9 3.5V11H2V1z" fill="none" stroke="currentColor" strokeWidth="0.9"/>
+          <path d="M6.5 1v2.5H9" fill="none" stroke="currentColor" strokeWidth="0.9"/>
+        </svg>
+        <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{node.name}</span>
+        {meta && meta.edits > 0 && (
+          <span style={{ fontSize: 10.5, color: '#8A6E2F', fontFamily: UI_FONT, fontWeight: 500 }}>
+            {meta.edits} edit{meta.edits === 1 ? '' : 's'}
+          </span>
+        )}
+      </div>
+    );
+  }
+  return (
+    <div>
+      {node.name && (
+        <div
+          onClick={() => setOpen(!open)}
+          style={{
+            padding: '3px 0 3px ' + (depth * 14 + 6) + 'px',
+            fontSize: 12.5, color: '#5C544B', fontFamily: MONO_FONT,
+            cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4,
+            userSelect: 'none',
+          }}
+        >
+          <svg width="9" height="9" viewBox="0 0 9 9" style={{
+            color: '#A89F92', flexShrink: 0,
+            transform: open ? 'rotate(90deg)' : 'rotate(0deg)',
+            transition: 'transform 100ms ease',
+          }} aria-hidden="true">
+            <path d="M3 2l3 2.5L3 7" stroke="currentColor" strokeWidth="1.1" fill="none" strokeLinecap="round" strokeLinejoin="round"/>
+          </svg>
+          <span>{node.name}/</span>
+        </div>
+      )}
+      {open && kids.map(k => (
+        <TreeNode
+          key={k.path || k.name}
+          node={k}
+          depth={node.name ? depth + 1 : depth}
+          onPick={onPick}
+          selectedPath={selectedPath}
+          filesByPath={filesByPath}
+          defaultOpenDepth={defaultOpenDepth}
+        />
+      ))}
+    </div>
+  );
+}
+
+// Diff mode glyph: + and − side by side. Active state colors them in the
+// usual add/remove hues; inactive state keeps both neutral so the toolbar
+// reads as quiet chrome until the user clicks.
+function FileDiffIcon({ active }) {
+  const addC = active ? '#3E7A4A' : '#807972';
+  const delC = active ? '#B0413E' : '#807972';
+  return (
+    <svg width="16" height="14" viewBox="0 0 16 14" aria-hidden="true">
+      {/* plus (left) */}
+      <line x1="1.6" y1="7" x2="6.4" y2="7" stroke={addC} strokeWidth="1.5" strokeLinecap="round"/>
+      <line x1="4"   y1="4.6" x2="4"   y2="9.4" stroke={addC} strokeWidth="1.5" strokeLinecap="round"/>
+      {/* minus (right) */}
+      <line x1="9.6" y1="7" x2="14.4" y2="7" stroke={delC} strokeWidth="1.5" strokeLinecap="round"/>
+    </svg>
+  );
+}
+
+// Directory mode glyph: a folder with a small tab. Filled when active.
+function FileTreeIcon({ active }) {
+  const c = active ? '#1C1A17' : '#807972';
+  const fill = active ? '#F7EFDD' : 'transparent';
+  return (
+    <svg width="16" height="14" viewBox="0 0 16 14" aria-hidden="true">
+      <path
+        d="M1.6 4.2 a1 1 0 0 1 1-1 H6 l1.4 1.5 H13.4 a1 1 0 0 1 1 1 V11.6 a1 1 0 0 1 -1 1 H2.6 a1 1 0 0 1 -1 -1 V4.2 z"
+        fill={fill} stroke={c} strokeWidth="1.1" strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+// Working-tree diff card: status badge + path + +/- line counts. Click opens
+// the file content view, where the user can flip between code and diff modes.
+function GitDiffCard({ file, onOpen }) {
+  const statusInfo = {
+    'A': { color: '#3E7A4A', bg: '#E6F1DA' },
+    'M': { color: '#8A6E2F', bg: '#F2E9D2' },
+    'D': { color: '#B0413E', bg: '#F5DDD4' },
+    'R': { color: '#5C7A8C', bg: '#E2EBF1' },
+    'C': { color: '#5C7A8C', bg: '#E2EBF1' },
+    '?': { color: '#5C7A8C', bg: '#E2EBF1' },
+  }[file.status] || { color: '#8A6E2F', bg: '#F2E9D2' };
+  return (
+    <div
+      onClick={onOpen}
+      data-testid="git-diff-row"
+      style={{
+        border: '1px solid #ECE6D5', borderRadius: 8, background: '#FFFEF8',
+        marginBottom: 6, cursor: 'pointer',
+        transition: 'background 100ms ease, border-color 100ms ease',
+      }}
+      onMouseEnter={(e) => { e.currentTarget.style.background = '#FAF5E8'; e.currentTarget.style.borderColor = '#DCD3BC'; }}
+      onMouseLeave={(e) => { e.currentTarget.style.background = '#FFFEF8'; e.currentTarget.style.borderColor = '#ECE6D5'; }}
+    >
+      <div style={{ padding: '8px 10px', display: 'flex', alignItems: 'center', gap: 8 }}>
+        <span style={{
+          width: 16, height: 16, borderRadius: 3,
+          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+          fontSize: 10, fontWeight: 700, color: statusInfo.color,
+          background: statusInfo.bg, fontFamily: MONO_FONT, flexShrink: 0,
+        }}>{file.status}</span>
         <div style={{
-          display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 10,
-          fontSize: 12.5, color: '#A89F92', marginTop: 8,
+          flex: 1, minWidth: 0,
+          fontFamily: MONO_FONT, fontSize: 12, color: '#1C1A17',
+          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+        }} title={file.path}>{file.path}</div>
+        {(file.added > 0 || file.removed > 0) && (
+          <div style={{ display: 'flex', gap: 4, flexShrink: 0, fontFamily: MONO_FONT, fontSize: 11 }}>
+            {file.added > 0 && <span style={{ color: '#3E7A4A' }}>+{file.added}</span>}
+            {file.removed > 0 && <span style={{ color: '#B0413E' }}>−{file.removed}</span>}
+          </div>
+        )}
+        {file.binary && (
+          <span style={{ fontSize: 10, color: '#807972', fontFamily: UI_FONT }}>binary</span>
+        )}
+        <svg width="10" height="10" viewBox="0 0 10 10" style={{ color: '#A89F92', flexShrink: 0 }} aria-hidden="true">
+          <path d="M3.5 2l3 3-3 3" stroke="currentColor" strokeWidth="1.2" fill="none" strokeLinecap="round" strokeLinejoin="round"/>
+        </svg>
+      </div>
+    </div>
+  );
+}
+
+function DiffLines({ lines }) {
+  return (
+    <div style={{ fontFamily: MONO_FONT, fontSize: 12, lineHeight: 1.65, padding: '10px 0' }}>
+      {lines.map((line, i) => (
+        <div key={i} style={{
+          padding: '0 14px 0 26px', position: 'relative',
+          background:
+            line.kind === 'add'  ? 'rgba(132, 175, 95, 0.16)' :
+            line.kind === 'del'  ? 'rgba(176, 65, 62, 0.12)' :
+            line.kind === 'hunk' ? '#F4ECD7' : 'transparent',
+          color:
+            line.kind === 'ctx'  ? '#807972' :
+            line.kind === 'hunk' ? '#5C544B' : '#1C1A17',
+          whiteSpace: 'pre',
+          fontStyle: line.kind === 'hunk' ? 'italic' : 'normal',
         }}>
-          <span style={{ fontFamily: MONO_FONT, color: '#5C544B' }}>{chat.id?.slice(0, 8)}</span>
-          <span style={{ color: '#D6CDB6' }}>·</span>
-          <span>opened {age}</span>
-          {metaItems.map((m, i) => (
-            <React.Fragment key={i}>
-              <span style={{ color: '#D6CDB6' }}>·</span>
-              <span>{m}</span>
-            </React.Fragment>
-          ))}
+          {line.kind !== 'hunk' && (
+            <span style={{
+              position: 'absolute', left: 10, fontWeight: 500,
+              color: line.kind === 'add' ? '#3E7A4A' : line.kind === 'del' ? '#B0413E' : '#C2B89F',
+            }}>{line.kind === 'add' ? '+' : line.kind === 'del' ? '−' : ' '}</span>
+          )}
+          {line.text}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// File content view: fetches the file from the daemon and renders it. For
+// files that show up in `gitDiff`, offers a File/Diff toggle so the user can
+// flip between the full content and just the working-tree changes. Falls back
+// to a human-readable message when the file is binary, missing, or unreadable.
+function FileContentView({ projectId, path, diff, onBack }) {
+  const [content, setContent] = React.useState(null);
+  const [loading, setLoading] = React.useState(true);
+  const [error, setError] = React.useState(null);
+  const hasDiff = Boolean(diff && diff.length > 0);
+  const [view, setView] = React.useState(hasDiff ? 'diff' : 'file');
+
+  React.useEffect(() => {
+    if (!projectId || !path) return undefined;
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    setContent(null);
+    api.readProjectFile(projectId, path).then(res => {
+      if (cancelled) return;
+      setContent(res);
+      setLoading(false);
+    }).catch(err => {
+      if (cancelled) return;
+      setError(err?.message || 'Failed to read file');
+      setLoading(false);
+    });
+    return () => { cancelled = true; };
+  }, [projectId, path]);
+
+  const codeLines = React.useMemo(() => {
+    if (!content?.content) return [];
+    return content.content.split('\n');
+  }, [content]);
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
+      <div style={{
+        padding: '10px 14px', borderBottom: '1px solid #ECE6D5',
+        display: 'flex', alignItems: 'center', gap: 8, background: '#FAF5E8',
+      }}>
+        <button
+          onClick={onBack}
+          title="Back"
+          aria-label="Back to file list"
+          style={{
+            width: 24, height: 24, borderRadius: 5,
+            border: '1px solid transparent', background: 'transparent',
+            cursor: 'pointer', color: '#5C544B',
+            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+            flexShrink: 0,
+          }}
+          onMouseEnter={(e) => { e.currentTarget.style.background = '#F0EAD8'; }}
+          onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+        >
+          <svg width="13" height="13" viewBox="0 0 13 13" aria-hidden="true">
+            <path d="M8 2.5L3.5 6.5L8 10.5" stroke="currentColor" strokeWidth="1.4" fill="none" strokeLinecap="round" strokeLinejoin="round"/>
+          </svg>
+        </button>
+        <div style={{
+          flex: 1, minWidth: 0, fontFamily: MONO_FONT, fontSize: 12, color: '#1C1A17',
+          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+        }} title={content?.path || path}>{content?.path || path}</div>
+        {hasDiff && (
+          <div style={{
+            display: 'inline-flex', background: '#F0EAD8', borderRadius: 6,
+            padding: 2, border: '1px solid #DCD3BC', flexShrink: 0,
+          }}>
+            {['file', 'diff'].map(v => (
+              <button key={v}
+                onClick={() => setView(v)}
+                style={{
+                  padding: '3px 9px', borderRadius: 4, fontSize: 11.5, fontWeight: 500,
+                  background: view === v ? '#FCFAF1' : 'transparent',
+                  color: view === v ? '#1C1A17' : '#807972',
+                  border: 'none', cursor: 'pointer', fontFamily: UI_FONT,
+                  boxShadow: view === v ? '0 1px 2px rgba(0,0,0,0.06)' : 'none',
+                }}
+              >{v === 'file' ? 'File' : 'Diff'}</button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div style={{ flex: 1, overflow: 'auto', padding: '12px 14px 20px' }}>
+        <div style={{
+          border: '1px solid #ECE6D5', borderRadius: 8, background: '#FFFEF8',
+          overflow: 'hidden',
+        }}>
+        {view === 'diff' && hasDiff && <DiffLines lines={diff} />}
+        {view === 'file' && (
+          <>
+            {loading && (
+              <div style={{ padding: '24px 14px', color: '#807972', fontSize: 12.5 }}>Loading…</div>
+            )}
+            {!loading && error && (
+              <div style={{ padding: '20px 14px', color: '#B23A2E', fontSize: 12.5 }}>{error}</div>
+            )}
+            {!loading && !error && content?.binary && (
+              <div style={{ padding: '24px 14px', color: '#807972', fontSize: 12.5 }}>
+                Binary file — not previewable here.
+              </div>
+            )}
+            {!loading && !error && content && !content.binary && (
+              <div style={{ fontFamily: MONO_FONT, fontSize: 12, lineHeight: 1.65, padding: '10px 0' }}>
+                {codeLines.map((text, i) => (
+                  <div key={i} style={{
+                    padding: '0 14px 0 44px', position: 'relative',
+                    color: '#1C1A17', whiteSpace: 'pre',
+                  }}>
+                    <span style={{
+                      position: 'absolute', left: 0, width: 36, textAlign: 'right',
+                      color: '#C2B89F', userSelect: 'none', fontSize: 11,
+                    }}>{i + 1}</span>
+                    {text || ' '}
+                  </div>
+                ))}
+                {content?.truncated && (
+                  <div style={{
+                    padding: '14px 14px 4px', color: '#807972',
+                    fontSize: 11.5, fontFamily: UI_FONT, fontStyle: 'italic',
+                  }}>
+                    Showing first {Math.floor(content.content.length / 1024)} KB · file is larger.
+                  </div>
+                )}
+              </div>
+            )}
+          </>
+        )}
         </div>
       </div>
+    </div>
+  );
+}
+
+function FileOperationsView({ file, agentsMap, onBack }) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
+      <div style={{
+        padding: '10px 14px', borderBottom: '1px solid #ECE6D5',
+        display: 'flex', alignItems: 'center', gap: 8, background: '#FAF5E8',
+      }}>
+        <button
+          onClick={onBack}
+          title="Back"
+          aria-label="Back to file list"
+          style={{
+            width: 24, height: 24, borderRadius: 5,
+            border: '1px solid transparent', background: 'transparent',
+            cursor: 'pointer', color: '#5C544B',
+            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+            flexShrink: 0,
+          }}
+          onMouseEnter={(e) => { e.currentTarget.style.background = '#F0EAD8'; }}
+          onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+        >
+          <svg width="13" height="13" viewBox="0 0 13 13" aria-hidden="true">
+            <path d="M8 2.5L3.5 6.5L8 10.5" stroke="currentColor" strokeWidth="1.4" fill="none" strokeLinecap="round" strokeLinejoin="round"/>
+          </svg>
+        </button>
+        <div style={{
+          flex: 1, minWidth: 0, fontFamily: MONO_FONT, fontSize: 12, color: '#1C1A17',
+          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+        }} title={file.path}>{file.path}</div>
+      </div>
+
+      <div style={{ flex: 1, overflow: 'auto', padding: '14px 14px 20px', background: '#FCFAF1' }}>
+        <div style={{
+          fontSize: 10.5, color: '#A89F92', fontWeight: 600, letterSpacing: 0.6,
+          textTransform: 'uppercase', marginBottom: 8, fontFamily: UI_FONT,
+        }}>Operations · {file.operations.length}</div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          {file.operations.map((op, i) => {
+            const agent = resolveAuthor(op.author, agentsMap);
+            const opColor = op.kind === 'edit' ? '#8A6E2F' : '#5C7A8C';
+            const opBg = op.kind === 'edit' ? '#F4EBC9' : '#E2EBF1';
+            return (
+              <div key={i} style={{
+                border: '1px solid #ECE6D5', borderRadius: 8, background: '#FFFEF8',
+              }}>
+                <div style={{
+                  padding: '8px 10px', display: 'flex', alignItems: 'center', gap: 8,
+                  borderBottom: op.output ? '1px solid #ECE6D5' : 'none',
+                }}>
+                  {agent && agent.kind === 'agent' && <Avatar agent={agent} size={18} />}
+                  <span style={{
+                    fontFamily: MONO_FONT, fontSize: 12, color: '#1C1A17', fontWeight: 500,
+                  }}>{op.tool}</span>
+                  <span style={{
+                    fontSize: 10, padding: '1px 6px', borderRadius: 999,
+                    background: opBg, color: opColor, fontWeight: 600,
+                    letterSpacing: 0.3, textTransform: 'uppercase', fontFamily: UI_FONT,
+                  }}>{op.kind}</span>
+                  <div style={{ flex: 1 }} />
+                  <ToolStatusChip result={op.result} />
+                  <span style={{ fontSize: 11, color: '#A89F92', fontFamily: UI_FONT }}>{op.time}</span>
+                </div>
+                {op.output && (
+                  <pre style={{
+                    margin: 0, padding: '8px 12px',
+                    fontFamily: MONO_FONT, fontSize: 12, color: '#5C544B',
+                    background: '#FCFAF1', lineHeight: 1.55,
+                    whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+                    maxHeight: 220, overflow: 'auto',
+                    borderBottomLeftRadius: 8, borderBottomRightRadius: 8,
+                  }}>{op.output.length > 1200 ? op.output.slice(0, 1200) + '\n…' : op.output}</pre>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Segmented mode toggle with sidebar-style tooltips on hover. Each button
+// gets its own ref so HeadingTooltip can anchor against it.
+function ModeToggleGroup({ modes, activeMode, onChange }) {
+  const [hovered, setHovered] = React.useState(null);
+  const refs = React.useRef({});
+  const getRef = (key) => {
+    if (!refs.current[key]) refs.current[key] = React.createRef();
+    return refs.current[key];
+  };
+  return (
+    <div style={{
+      display: 'inline-flex', background: '#F0EAD8', borderRadius: 7,
+      padding: 2, border: '1px solid #DCD3BC', flexShrink: 0, marginTop: 2,
+    }}>
+      {modes.map(({ key, Icon, title, enabled }) => {
+        const buttonRef = getRef(key);
+        return (
+          <React.Fragment key={key}>
+            <button
+              ref={buttonRef}
+              type="button"
+              onClick={() => enabled && onChange(key)}
+              onMouseEnter={() => setHovered(key)}
+              onMouseLeave={() => setHovered(h => (h === key ? null : h))}
+              aria-label={title}
+              aria-pressed={activeMode === key}
+              disabled={!enabled}
+              data-testid={`files-drawer-mode-${key}`}
+              style={{
+                width: 28, height: 24, borderRadius: 5,
+                background: activeMode === key ? '#FCFAF1' : 'transparent',
+                border: 'none',
+                cursor: enabled ? 'pointer' : 'not-allowed',
+                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                boxShadow: activeMode === key ? '0 1px 2px rgba(0,0,0,0.06)' : 'none',
+                opacity: enabled ? 1 : 0.4,
+                padding: 0,
+              }}
+            ><Icon active={activeMode === key} /></button>
+            <HeadingTooltip
+              text={title}
+              anchorRef={buttonRef}
+              visible={hovered === key}
+            />
+          </React.Fragment>
+        );
+      })}
+    </div>
+  );
+}
+
+function CloseDrawerButton({ onClick }) {
+  const [hover, setHover] = React.useState(false);
+  const ref = React.useRef(null);
+  return (
+    <>
+      <button
+        ref={ref}
+        type="button"
+        onClick={onClick}
+        onMouseEnter={(e) => { setHover(true); e.currentTarget.style.background = '#F0EAD8'; }}
+        onMouseLeave={(e) => { setHover(false); e.currentTarget.style.background = 'transparent'; }}
+        aria-label="Close files drawer"
+        data-testid="files-drawer-close"
+        style={{
+          width: 26, height: 26, borderRadius: 6,
+          border: '1px solid transparent', background: 'transparent',
+          cursor: 'pointer', color: '#807972',
+          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+          flexShrink: 0,
+        }}
+      >
+        <svg width="13" height="13" viewBox="0 0 13 13" aria-hidden="true">
+          <path d="M3 3l7 7M10 3l-7 7" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
+        </svg>
+      </button>
+      <HeadingTooltip text="Close" anchorRef={ref} visible={hover} />
+    </>
+  );
+}
+
+function FilesDrawer({ chatId, events, agentsMap, project, onClose }) {
+  const workdir = project?.workdir || '';
+  const files = React.useMemo(() => collectFiles(events, workdir), [events, workdir]);
+  const filesByPath = React.useMemo(() => {
+    const m = new Map();
+    for (const f of files) m.set(f.path, f);
+    return m;
+  }, [files]);
+  const totalEdits = files.reduce((s, f) => s + f.edits, 0);
+  const projectId = project?.id || '';
+  const hasWorkdir = Boolean(project?.workdir);
+
+  const [mode, setMode] = React.useState(hasWorkdir ? 'diff' : 'tree');
+  const [selectedPath, setSelectedPath] = React.useState(null);
+
+  // Working-tree diff, fetched lazily when the user enters diff mode. Refresh
+  // whenever the chat receives new tool events so the diff doesn't get stale
+  // after the crew edits a file.
+  const [gitDiff, setGitDiff] = React.useState([]);
+  const [gitLoading, setGitLoading] = React.useState(false);
+  const [gitError, setGitError] = React.useState(null);
+  const [gitFetched, setGitFetched] = React.useState(false);
+
+  // Full project file listing — drives the directory tree when the project has
+  // a workdir, so the tree shows everything in the workspace and not just the
+  // files the crew has touched in this chat.
+  const [projectFiles, setProjectFiles] = React.useState([]);
+  const [projectFilesLoading, setProjectFilesLoading] = React.useState(false);
+  const [projectFilesError, setProjectFilesError] = React.useState(null);
+  const [projectFilesFetched, setProjectFilesFetched] = React.useState(false);
+
+  // Bump when tool calls land so we can re-fetch the diff. Cheap counter, not
+  // a dependency on the whole events array (which would re-fire on every
+  // streamed token).
+  const toolEventCount = React.useMemo(() => events.filter(e => e.kind === 'tool').length, [events]);
+
+  const fetchGitDiff = React.useCallback(() => {
+    if (!projectId) return;
+    let cancelled = false;
+    setGitLoading(true);
+    setGitError(null);
+    api.getProjectGitDiff(projectId)
+      .then(items => {
+        if (cancelled) return;
+        setGitDiff(items || []);
+        setGitFetched(true);
+      })
+      .catch(err => {
+        if (cancelled) return;
+        setGitError(err?.message || 'Failed to load git diff');
+        setGitFetched(true);
+      })
+      .finally(() => { if (!cancelled) setGitLoading(false); });
+    return () => { cancelled = true; };
+  }, [projectId]);
+
+  React.useEffect(() => {
+    if (mode !== 'diff' || !projectId) return undefined;
+    return fetchGitDiff();
+  }, [mode, projectId, fetchGitDiff, toolEventCount]);
+
+  // Fetch the full project file listing when entering tree mode. Capped at
+  // 10k entries on the daemon side; that's more than enough for the kinds of
+  // projects this UI targets.
+  React.useEffect(() => {
+    if (mode !== 'tree' || !projectId || !hasWorkdir) return undefined;
+    let cancelled = false;
+    setProjectFilesLoading(true);
+    setProjectFilesError(null);
+    api.listProjectFiles(projectId, '', 10000)
+      .then(items => {
+        if (cancelled) return;
+        setProjectFiles(items || []);
+        setProjectFilesFetched(true);
+      })
+      .catch(err => {
+        if (cancelled) return;
+        setProjectFilesError(err?.message || 'Failed to load project files');
+        setProjectFilesFetched(true);
+      })
+      .finally(() => { if (!cancelled) setProjectFilesLoading(false); });
+    return () => { cancelled = true; };
+    // Re-fetch when chat (=project workspace state) or tool events change so
+    // newly-created files surface in the tree.
+  }, [mode, projectId, hasWorkdir, chatId, toolEventCount]);
+
+  // Re-resolve the default mode when the project changes.
+  React.useEffect(() => {
+    setMode(hasWorkdir ? 'diff' : 'tree');
+    setSelectedPath(null);
+    setGitDiff([]);
+    setGitFetched(false);
+    setProjectFiles([]);
+    setProjectFilesFetched(false);
+  }, [chatId, hasWorkdir]);
+
+  // Tree source: prefer the full project listing when we have it; otherwise
+  // fall back to files the crew touched (covers no-workdir chats).
+  const tree = React.useMemo(() => {
+    if (hasWorkdir && projectFiles.length > 0) {
+      // Only include file entries (skip pure directory entries — the tree
+      // builder produces folders implicitly from path segments).
+      const paths = projectFiles.filter(f => !f.is_dir).map(f => f.path);
+      return buildFileTree(paths);
+    }
+    return buildFileTree(files.map(f => f.path));
+  }, [hasWorkdir, projectFiles, files]);
+
+  const diffByPath = React.useMemo(() => {
+    const m = new Map();
+    for (const f of gitDiff) m.set(f.path, f);
+    return m;
+  }, [gitDiff]);
+
+  const selectedDiff = selectedPath ? diffByPath.get(selectedPath) : null;
+
+  const modes = [
+    { key: 'diff', Icon: FileDiffIcon, title: hasWorkdir ? 'Working changes' : 'Diff view (no workspace)', enabled: hasWorkdir },
+    { key: 'tree', Icon: FileTreeIcon, title: 'Directory', enabled: true },
+  ];
+
+  const headerSubtitle = (() => {
+    if (mode === 'diff') {
+      if (!hasWorkdir) return ['no git workspace'];
+      if (gitLoading && !gitFetched) return ['loading…'];
+      if (gitError) return ['error loading diff'];
+      const totalA = gitDiff.reduce((s, f) => s + (f.added || 0), 0);
+      const totalR = gitDiff.reduce((s, f) => s + (f.removed || 0), 0);
+      const out = [`${gitDiff.length} changed`];
+      if (totalA > 0 || totalR > 0) {
+        out.push(
+          <>
+            <span style={{ color: '#3E7A4A' }}>+{totalA}</span>
+            {' '}
+            <span style={{ color: '#B0413E' }}>−{totalR}</span>
+          </>
+        );
+      }
+      return out;
+    }
+    // tree mode
+    if (hasWorkdir) {
+      if (projectFilesLoading && !projectFilesFetched) return ['loading…'];
+      if (projectFilesError) return ['error loading files'];
+      const total = projectFiles.filter(f => !f.is_dir).length;
+      const items = [`${total} file${total === 1 ? '' : 's'}`];
+      if (files.length > 0) items.push(`${files.length} touched`);
+      if (totalEdits > 0) items.push(`${totalEdits} edit${totalEdits === 1 ? '' : 's'}`);
+      return items;
+    }
+    const items = [`${files.length} file${files.length === 1 ? '' : 's'} touched`];
+    if (totalEdits > 0) items.push(`${totalEdits} edit${totalEdits === 1 ? '' : 's'}`);
+    return items;
+  })();
+
+  return (
+    <div style={{
+      width: '100%', height: '100%', flexShrink: 0,
+      background: '#F6F0DC',
+      display: 'flex', flexDirection: 'column',
+      minHeight: 0, minWidth: 0,
+    }}>
+      <div style={{
+        padding: '14px 16px 12px', borderBottom: '1px solid #ECE6D5',
+        display: 'flex', alignItems: 'flex-start', gap: 10,
+        minHeight: 75,
+      }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 14, fontWeight: 600, color: '#1C1A17' }}>
+            {mode === 'diff' ? 'Working changes' : 'Workspace files'}
+          </div>
+          <div style={{
+            fontSize: 11.5, color: '#807972', marginTop: 4, fontFamily: MONO_FONT,
+            display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap',
+          }}>
+            {project?.name && <>
+              <span>{project.name}</span>
+              <span style={{ color: '#D6CDB6' }}>·</span>
+            </>}
+            {headerSubtitle.map((part, i) => (
+              <React.Fragment key={i}>
+                {i > 0 && <span style={{ color: '#D6CDB6' }}>·</span>}
+                <span>{part}</span>
+              </React.Fragment>
+            ))}
+          </div>
+        </div>
+
+        <ModeToggleGroup
+          modes={modes}
+          activeMode={mode}
+          onChange={setMode}
+        />
+
+        <CloseDrawerButton onClick={onClose} />
+      </div>
+
+      {selectedPath ? (
+        <FileContentView
+          projectId={projectId}
+          path={selectedPath}
+          diff={selectedDiff?.diff || null}
+          onBack={() => setSelectedPath(null)}
+        />
+      ) : (
+        <div style={{ flex: 1, overflow: 'auto', padding: '12px 14px 20px' }}>
+          {mode === 'diff' && !hasWorkdir && (
+            <div style={{
+              padding: '40px 12px', textAlign: 'center',
+              fontSize: 12.5, color: '#807972', lineHeight: 1.6,
+            }}>
+              <div style={{ marginBottom: 4 }}>This chat isn't bound to a workspace.</div>
+              <div style={{ fontSize: 11.5, color: '#A89F92' }}>Switch to Directory to see paths the crew touched.</div>
+            </div>
+          )}
+          {mode === 'diff' && hasWorkdir && gitLoading && !gitFetched && (
+            <div style={{ padding: '40px 12px', textAlign: 'center', fontSize: 12.5, color: '#807972' }}>Loading…</div>
+          )}
+          {mode === 'diff' && hasWorkdir && gitError && (
+            <div style={{ padding: '40px 12px', textAlign: 'center', fontSize: 12.5, color: '#B23A2E', lineHeight: 1.6 }}>
+              <div style={{ marginBottom: 4 }}>{gitError}</div>
+              {/not a git repository/i.test(gitError) && (
+                <div style={{ fontSize: 11.5, color: '#9C5142' }}>
+                  Switch to Directory to browse files in the workspace.
+                </div>
+              )}
+            </div>
+          )}
+          {mode === 'diff' && hasWorkdir && !gitError && gitFetched && gitDiff.length === 0 && (
+            <div style={{
+              padding: '40px 12px', textAlign: 'center',
+              fontSize: 12.5, color: '#807972', lineHeight: 1.6,
+            }}>
+              <div>No working-tree changes.</div>
+            </div>
+          )}
+          {mode === 'diff' && hasWorkdir && gitDiff.length > 0 && (
+            <div>
+              {gitDiff.map(f => (
+                <GitDiffCard key={f.path} file={f} onOpen={() => setSelectedPath(f.path)} />
+              ))}
+            </div>
+          )}
+
+          {mode === 'tree' && (() => {
+            const fromWorkdir = hasWorkdir && projectFiles.length > 0;
+            // Loading the project tree for the first time.
+            if (hasWorkdir && projectFilesLoading && !projectFilesFetched) {
+              return (
+                <div style={{ padding: '40px 12px', textAlign: 'center', fontSize: 12.5, color: '#807972' }}>
+                  Loading…
+                </div>
+              );
+            }
+            if (hasWorkdir && projectFilesError) {
+              return (
+                <div style={{
+                  padding: '40px 12px', textAlign: 'center',
+                  fontSize: 12.5, color: '#B23A2E', lineHeight: 1.6,
+                }}>
+                  {projectFilesError}
+                </div>
+              );
+            }
+            // Nothing to show: no workdir AND no touched files.
+            if (!fromWorkdir && files.length === 0) {
+              return (
+                <div style={{
+                  padding: '40px 12px', textAlign: 'center',
+                  fontSize: 12.5, color: '#807972', lineHeight: 1.6,
+                }}>
+                  <div>No files touched yet.</div>
+                </div>
+              );
+            }
+            return (
+              <div style={{
+                border: '1px solid #ECE6D5', borderRadius: 8, background: '#FFFEF8',
+                padding: '8px 6px',
+              }}>
+                <TreeNode
+                  node={tree}
+                  onPick={setSelectedPath}
+                  selectedPath={selectedPath}
+                  filesByPath={filesByPath}
+                  defaultOpenDepth={fromWorkdir ? 1 : Infinity}
+                />
+              </div>
+            );
+          })()}
+        </div>
+      )}
     </div>
   );
 }
@@ -1672,12 +2598,89 @@ export default function TaskView({ chatId, agentsMap, skills = [], projects = []
   const [error, setError] = React.useState(null);
   const [targetAgentId, setTargetAgentId] = React.useState(null);
   const [pendingSteers, setPendingSteers] = React.useState([]);
+  const [drawerOpen, setDrawerOpen] = React.useState(false);
+  const [drawerMounted, setDrawerMounted] = React.useState(false);
+  // drawerVisible is the CSS-driven state: the drawer mounts at visible=false
+  // (collapsed to width 0) and flips to true on the next frame so the width
+  // transition runs and the drawer slides in from the right edge.
+  const [drawerVisible, setDrawerVisible] = React.useState(false);
+  const [splitRatio, setSplitRatio] = React.useState(0.58);
+  const [dragging, setDragging] = React.useState(false);
+  const splitRef = React.useRef(null);
   const timelineRef = React.useRef(null);
   const lastSeqRef = React.useRef(0);
   const streamCleanupRef = React.useRef(() => {});
   const waitingForAgentRef = React.useRef(false);
   const waitingAfterSeqRef = React.useRef(0);
   const agentActivitySinceSendRef = React.useRef(false);
+
+  // Three-phase animation:
+  //   open click → drawerOpen=true → drawerMounted=true (still hidden) →
+  //     next frame: drawerVisible=true → CSS transitions width 0 → drawerWidth
+  //   close click → drawerOpen=false → drawerVisible=false (transition out) →
+  //     after 260ms: drawerMounted=false (unmount)
+  React.useEffect(() => {
+    if (drawerOpen) {
+      setDrawerMounted(true);
+      return undefined;
+    }
+    setDrawerVisible(false);
+    if (!drawerMounted) return undefined;
+    const t = setTimeout(() => setDrawerMounted(false), 260);
+    return () => clearTimeout(t);
+  }, [drawerOpen, drawerMounted]);
+
+  // Once the drawer is in the DOM, kick off the slide-in on the next frame so
+  // the browser has a chance to lay out at width 0 before the transition fires.
+  React.useEffect(() => {
+    if (!drawerMounted || !drawerOpen) return undefined;
+    const raf = requestAnimationFrame(() => setDrawerVisible(true));
+    return () => cancelAnimationFrame(raf);
+  }, [drawerMounted, drawerOpen]);
+
+  // Reset the drawer when switching chats so it doesn't carry state across
+  // unrelated conversations.
+  React.useEffect(() => { setDrawerOpen(false); }, [chatId]);
+
+  const currentProject = React.useMemo(() => {
+    const pid = chat?.project_id;
+    if (!pid) return null;
+    return (projects || []).find(p => p.id === pid) || null;
+  }, [chat?.project_id, projects]);
+  const fileCount = React.useMemo(
+    () => collectFiles(events, currentProject?.workdir || '').length,
+    [events, currentProject?.workdir],
+  );
+
+  const onSplitDragStart = React.useCallback((e) => {
+    e.preventDefault();
+    const container = splitRef.current;
+    if (!container) return;
+    setDragging(true);
+    const onMove = (ev) => {
+      const rect = container.getBoundingClientRect();
+      const x = ev.clientX - rect.left;
+      // Floor the conversation column at MIN_CONVERSATION_PX so the drag handle
+      // can't push it below readable width. The drawer side has its own min of
+      // 240px so the file list always has room to render.
+      const rawRatio = x / rect.width;
+      const minConvRatio = Math.min(0.85, MIN_CONVERSATION_PX / Math.max(rect.width, 1));
+      const maxConvRatio = 1 - (MIN_DRAWER_PX / Math.max(rect.width, 1));
+      const ratio = Math.min(Math.max(rawRatio, minConvRatio), Math.max(maxConvRatio, minConvRatio));
+      setSplitRatio(ratio);
+    };
+    const onUp = () => {
+      setDragging(false);
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+      document.body.style.userSelect = '';
+      document.body.style.cursor = '';
+    };
+    document.body.style.userSelect = 'none';
+    document.body.style.cursor = 'col-resize';
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  }, []);
 
   // Auto-scroll when events change
   React.useLayoutEffect(() => {
@@ -1911,52 +2914,123 @@ export default function TaskView({ chatId, agentsMap, skills = [], projects = []
     );
   }
 
+  const drawerWidthExpr = `calc(${((1 - splitRatio) * 100).toFixed(3)}% - 3px)`;
+  const drawerTransition = dragging ? 'none' : 'width 260ms cubic-bezier(0.22, 1, 0.36, 1), opacity 220ms ease';
+
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: '#FAF5E8' }}>
-      <TaskHeader chat={chat} events={events} />
-      <div
-        ref={timelineRef}
-        data-testid="conversation-scroll"
-        style={{ flex: 1, overflow: 'auto', padding: '8px 36px 24px' }}
-      >
-        <div data-testid="conversation-column" style={conversationColumn}>
-          {(() => {
-            const { nodes, lastDisplayedActor, lastAgentActor } = renderEventsWithHandovers({ events, agentsMap });
-            const streamingAgentId = lastAgentActor || chat?.current_agent_id;
-            const showStreamingHeader = lastDisplayedActor !== streamingAgentId;
-            return (
-              <>
-                {nodes}
-                {isStreaming && (
-                  <StreamingIndicator agentsMap={agentsMap} currentAgentId={streamingAgentId} showHeader={showStreamingHeader} />
-                )}
-              </>
-            );
-          })()}
-          {events.length === 0 && !isStreaming && (
-            <div style={{ paddingTop: 40, color: '#A89F92', fontSize: 13.5, fontStyle: 'italic' }}>
-              No events yet.
-            </div>
-          )}
+    <div
+      ref={splitRef}
+      style={{ display: 'flex', height: '100%', background: '#FAF5E8', overflow: 'hidden', minHeight: 0, minWidth: 0 }}
+    >
+      <div style={{
+        flex: '1 1 0',
+        minWidth: drawerMounted ? MIN_CONVERSATION_PX : 0,
+        display: 'flex', flexDirection: 'column',
+      }}>
+        <TaskHeader
+          chat={chat}
+          events={events}
+          fileCount={fileCount}
+          drawerOpen={drawerOpen}
+          onToggleDrawer={() => setDrawerOpen(true)}
+        />
+        <div
+          ref={timelineRef}
+          data-testid="conversation-scroll"
+          style={{ flex: 1, overflow: 'auto', padding: '8px 36px 24px' }}
+        >
+          <div data-testid="conversation-column" style={conversationColumn}>
+            {(() => {
+              const { nodes, lastDisplayedActor, lastAgentActor } = renderEventsWithHandovers({ events, agentsMap });
+              const streamingAgentId = lastAgentActor || chat?.current_agent_id;
+              const showStreamingHeader = lastDisplayedActor !== streamingAgentId;
+              return (
+                <>
+                  {nodes}
+                  {isStreaming && (
+                    <StreamingIndicator agentsMap={agentsMap} currentAgentId={streamingAgentId} showHeader={showStreamingHeader} />
+                  )}
+                </>
+              );
+            })()}
+            {events.length === 0 && !isStreaming && (
+              <div style={{ paddingTop: 40, color: '#A89F92', fontSize: 13.5, fontStyle: 'italic' }}>
+                No events yet.
+              </div>
+            )}
+          </div>
         </div>
+        <Composer
+          onSend={handleSend}
+          isStreaming={isStreaming}
+          onCancel={handleCancel}
+          pendingSteers={pendingSteers}
+          onCancelSteer={handleCancelSteer}
+          onEditSteer={handleCancelSteer}
+          onDeliverSteers={handleDeliverSteers}
+          agentsMap={agentsMap}
+          skills={skills}
+          projects={projects}
+          chatId={chatId}
+          projectId={chat?.project_id || ''}
+          defaultTargetAgentId={chat?.current_agent_id || chat?.main_agent_id || null}
+          targetAgentId={targetAgentId}
+          onChangeTargetAgent={setTargetAgentId}
+        />
       </div>
-      <Composer
-        onSend={handleSend}
-        isStreaming={isStreaming}
-        onCancel={handleCancel}
-        pendingSteers={pendingSteers}
-        onCancelSteer={handleCancelSteer}
-        onEditSteer={handleCancelSteer}
-        onDeliverSteers={handleDeliverSteers}
-        agentsMap={agentsMap}
-        skills={skills}
-        projects={projects}
-        chatId={chatId}
-        projectId={chat?.project_id || ''}
-        defaultTargetAgentId={chat?.current_agent_id || chat?.main_agent_id || null}
-        targetAgentId={targetAgentId}
-        onChangeTargetAgent={setTargetAgentId}
-      />
+
+      {drawerMounted && (
+        <>
+          <div
+            onMouseDown={onSplitDragStart}
+            role="separator"
+            aria-orientation="vertical"
+            title="Drag to resize"
+            style={{
+              width: drawerVisible ? 6 : 0, flexShrink: 0, cursor: 'col-resize',
+              position: 'relative', background: 'transparent', zIndex: 5,
+              transition: drawerTransition,
+              overflow: 'hidden',
+              pointerEvents: drawerVisible ? 'auto' : 'none',
+            }}
+          >
+            <div style={{
+              position: 'absolute', top: 0, bottom: 0, left: 2.5, width: 1,
+              background: dragging ? '#C4644A' : '#ECE6D5',
+              transition: dragging ? 'none' : 'background 120ms ease',
+            }}/>
+            <div style={{
+              position: 'absolute', top: '50%', left: 0, width: 6, height: 36,
+              transform: 'translateY(-50%)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              opacity: dragging ? 1 : 0.55,
+            }}>
+              <div style={{
+                width: 3, height: 28, borderRadius: 2,
+                background: dragging ? '#C4644A' : '#D6CDB6',
+              }}/>
+            </div>
+          </div>
+
+          <div style={{
+            width: drawerVisible ? drawerWidthExpr : 0,
+            opacity: drawerVisible ? 1 : 0,
+            transition: drawerTransition,
+            overflow: 'hidden',
+            flexShrink: 0,
+            display: 'flex', flexDirection: 'column',
+            minWidth: 0,
+          }}>
+            <FilesDrawer
+              chatId={chatId}
+              events={events}
+              agentsMap={agentsMap}
+              project={currentProject}
+              onClose={() => setDrawerOpen(false)}
+            />
+          </div>
+        </>
+      )}
       <style>{`@keyframes pulse { 0%,100%{opacity:.3} 50%{opacity:1} } @keyframes cw-spin { to { transform: rotate(360deg) } } @keyframes wordFadeIn { from { opacity: 0; transform: translateY(2px) } to { opacity: 1; transform: translateY(0) } } @keyframes cw-fade-in { from { opacity: 0 } to { opacity: 1 } } @keyframes cw-expand-in { from { opacity: 0; transform: translateY(-3px) } to { opacity: 1; transform: translateY(0) } } @keyframes cw-type-jump { from { opacity: 0 } to { opacity: 1 } } @keyframes cw-count-pop { 0% { transform: scale(1.35); color: #5C544B } 60% { transform: scale(.96); color: #807972 } 100% { transform: scale(1); color: #A89F92 } }`}</style>
     </div>
   );
