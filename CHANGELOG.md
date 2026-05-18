@@ -2,6 +2,15 @@
 
 All notable changes to this project are documented here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.1] - 2026-05-18
+
+### Changed
+- **Mention/skill dropdowns scroll the active item into view** — pressing ArrowUp/Down past the visible window of the suggestion popover (new task composer and chat composer) now keeps the highlighted row on screen instead of leaving you guessing what's selected.
+- **Bounded arrow-key navigation in mention dropdowns** — ArrowDown stops at the last item and ArrowUp stops at the first instead of wrapping around, matching most native menu behavior.
+
+### Fixed
+- **New task composer textarea auto-resizes** — the input now grows with content (up to ~360px) starting from a single row instead of a fixed 5-row height, and the syntax-highlight overlay stays aligned as you scroll inside the textarea.
+
 ## [0.4.0] - 2026-05-15
 
 ### Added

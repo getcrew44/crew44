@@ -87,7 +87,9 @@ export default function NewTaskRoute({ projects, agents, onNewTask, onExistingFo
   const [selectedAgentId, setSelectedAgentId] = React.useState(initialDraft.targetAgentId || '');
   const [submitting, setSubmitting] = React.useState(false);
   const [error, setError] = React.useState(null);
+  const [scrollTop, setScrollTop] = React.useState(0);
   const inputRef = React.useRef(null);
+  const listboxRef = React.useRef(null);
   const selectedProjectExists = projects.some(project => project.id === selectedProjectId);
   const canAttach = attachmentsSupported();
 
@@ -135,6 +137,20 @@ export default function NewTaskRoute({ projects, agents, onNewTask, onExistingFo
   React.useEffect(() => {
     setActiveSuggestion(0);
   }, [activeMention?.query]);
+
+  React.useEffect(() => {
+    const el = listboxRef.current?.children[activeSuggestion];
+    if (el) el.scrollIntoView({ block: 'nearest' });
+  }, [activeSuggestion]);
+
+  React.useEffect(() => {
+    if (!inputRef.current) return;
+    const prevScrollTop = inputRef.current.scrollTop;
+    inputRef.current.style.height = 'auto';
+    inputRef.current.style.height = Math.min(360, inputRef.current.scrollHeight) + 'px';
+    inputRef.current.scrollTop = prevScrollTop;
+    setScrollTop(inputRef.current.scrollTop);
+  }, [val]);
 
   React.useLayoutEffect(() => {
     if (!activeMention || !inputRef.current) {
@@ -214,12 +230,12 @@ export default function NewTaskRoute({ projects, agents, onNewTask, onExistingFo
     if (mentionOptions.length > 0) {
       if (e.key === 'ArrowDown') {
         e.preventDefault();
-        setActiveSuggestion(i => (i + 1) % mentionOptions.length);
+        setActiveSuggestion(i => Math.min(i + 1, mentionOptions.length - 1));
         return;
       }
       if (e.key === 'ArrowUp') {
         e.preventDefault();
-        setActiveSuggestion(i => (i - 1 + mentionOptions.length) % mentionOptions.length);
+        setActiveSuggestion(i => Math.max(i - 1, 0));
         return;
       }
       if (e.key === 'Enter' || e.key === 'Tab') {
@@ -278,6 +294,7 @@ export default function NewTaskRoute({ projects, agents, onNewTask, onExistingFo
           <div style={{ position: 'relative' }}>
             {mentionOptions.length > 0 && (
               <div
+                ref={listboxRef}
                 data-testid="new-task-mention-list"
                 role="listbox"
                 aria-label="Agent suggestions"
@@ -315,6 +332,7 @@ export default function NewTaskRoute({ projects, agents, onNewTask, onExistingFo
                 ))}
               </div>
             )}
+            <div style={{ position: 'relative', overflow: 'hidden' }}>
             {val && (
               <div
                 aria-hidden="true"
@@ -329,6 +347,7 @@ export default function NewTaskRoute({ projects, agents, onNewTask, onExistingFo
                   lineHeight: 1.55,
                   minHeight: 100,
                   color: '#1C1A17',
+                  transform: `translateY(${-scrollTop}px)`,
                 }}
               >
                 <MentionHighlightText text={val} agents={agents} />
@@ -342,6 +361,7 @@ export default function NewTaskRoute({ projects, agents, onNewTask, onExistingFo
               onSelect={(e) => updateCursor(e.target)}
               onClick={(e) => updateCursor(e.target)}
               onKeyUp={(e) => updateCursor(e.target)}
+              onScroll={(e) => setScrollTop(e.target.scrollTop)}
               onKeyDown={onKeyDown}
               onDragOver={(e) => {
                 if (!dataTransferHasFiles(e.dataTransfer)) return;
@@ -351,15 +371,16 @@ export default function NewTaskRoute({ projects, agents, onNewTask, onExistingFo
               onDrop={handleDrop}
               disabled={submitting}
               placeholder="Describe a task. The lead agent will plan it and assign subtasks."
-              rows={5}
+              rows={1}
               style={{
                 position: 'relative', zIndex: 1,
-                width: '100%', border: 'none', outline: 'none', resize: 'vertical',
+                width: '100%', border: 'none', outline: 'none', resize: 'none',
                 background: 'transparent', fontFamily: UI_FONT, fontSize: 15,
                 color: val ? 'transparent' : '#1C1A17', caretColor: '#1C1A17',
                 lineHeight: 1.55, minHeight: 100,
               }}
             />
+            </div>
           </div>
           <div style={{
             display: 'flex', alignItems: 'center', gap: 8, marginTop: 8,

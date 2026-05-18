@@ -1281,6 +1281,7 @@ function Composer({ onSend, isStreaming, onCancel, pendingSteers = [], onCancelS
   const [fileMatches, setFileMatches] = React.useState([]);
   const [scrollTop, setScrollTop] = React.useState(0);
   const ta = React.useRef(null);
+  const listboxRef = React.useRef(null);
   const canAttach = attachmentsSupported();
   const agents = React.useMemo(() => (
     Object.values(agentsMap || {})
@@ -1373,6 +1374,11 @@ function Composer({ onSend, isStreaming, onCancel, pendingSteers = [], onCancelS
     setActiveSuggestion(0);
   }, [activeToken?.kind, activeToken?.query, suggestionOptions.length]);
 
+  React.useEffect(() => {
+    const el = listboxRef.current?.children[activeSuggestion];
+    if (el) el.scrollIntoView({ block: 'nearest' });
+  }, [activeSuggestion]);
+
   const updateCursor = (node) => {
     setCursor(node?.selectionStart ?? val.length);
   };
@@ -1461,12 +1467,12 @@ function Composer({ onSend, isStreaming, onCancel, pendingSteers = [], onCancelS
     if (suggestionOptions.length > 0) {
       if (e.key === 'ArrowDown') {
         e.preventDefault();
-        setActiveSuggestion(i => (i + 1) % suggestionOptions.length);
+        setActiveSuggestion(i => Math.min(i + 1, suggestionOptions.length - 1));
         return;
       }
       if (e.key === 'ArrowUp') {
         e.preventDefault();
-        setActiveSuggestion(i => (i - 1 + suggestionOptions.length) % suggestionOptions.length);
+        setActiveSuggestion(i => Math.max(i - 1, 0));
         return;
       }
       if (e.key === 'Enter' || e.key === 'Tab') {
@@ -1524,6 +1530,7 @@ function Composer({ onSend, isStreaming, onCancel, pendingSteers = [], onCancelS
         <div style={{ position: 'relative' }}>
           {suggestionOptions.length > 0 && (
             <div
+              ref={listboxRef}
               role="listbox"
               aria-label={activeToken?.kind === 'slash' ? 'Skill suggestions' : 'Mention suggestions'}
               style={{
@@ -1537,6 +1544,7 @@ function Composer({ onSend, isStreaming, onCancel, pendingSteers = [], onCancelS
                 borderRadius: 10,
                 boxShadow: '0 8px 24px rgba(28,26,23,0.14)',
                 padding: 4,
+                scrollPaddingBlock: 4,
                 maxHeight: 280,
                 overflowY: 'auto',
               }}
