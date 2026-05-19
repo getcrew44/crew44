@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 )
 
 type claudeSettings struct {
@@ -50,65 +51,127 @@ func readSharedClaudeSettings() (claudeSettings, bool, error) {
 	return settings, true, nil
 }
 
-// readClaudeOAuthToken returns the user's Claude Code access token from the
-// platform-appropriate credential store so the spawned (isolated) claude CLI
-// can authenticate without prompting `/login` again. Returns "" if no
-// credential is found — claude will surface its own "Not logged in" message
-// and the user can run `/login` once. The override CLAUDE_CODE_OAUTH_TOKEN in
-// the daemon process is honored first, mainly for tests.
-func readClaudeOAuthToken() string {
-	if v := os.Getenv("CLAUDE_CODE_OAUTH_TOKEN"); v != "" {
-		return v
-	}
-	switch runtime.GOOS {
-	case "darwin":
-		return readClaudeOAuthTokenFromKeychain()
-	default:
-		return readClaudeOAuthTokenFromFile()
-	}
+// claudeOAuthCredential holds the env-var-injectable subset of the host's
+// Claude Code OAuth credential. Any field may be empty.
+type claudeOAuthCredential struct {
+	AccessToken  string
+	RefreshToken string
+	Scopes       string // space-separated, ready for CLAUDE_CODE_OAUTH_SCOPES
 }
 
-// readClaudeOAuthTokenFromKeychain reads the OAuth blob claude stored in the
-// macOS login keychain under the "Claude Code-credentials" service and
-// extracts the active access token. Failures (no entry, locked keychain,
-// malformed payload) are treated as "no token" — the caller falls back to
-// letting claude print its own login prompt.
-func readClaudeOAuthTokenFromKeychain() string {
+// readClaudeOAuthCredential pulls the Claude Code OAuth credential from the
+// parent process environment first, then the platform credential store.
+// The spawned (isolated) claude runs with a redirected HOME and
+// CLAUDE_CONFIG_DIR, so it cannot see the host keychain (ACL-gated for
+// non-GUI processes) or .credentials.json on its own. crew44 has to
+// re-supply the credential — especially because backendagent/claude.go
+// strips every CLAUDE_CODE_* var from the parent env before launching
+// the child, so anything the user explicitly set there would otherwise
+// vanish.
+//
+// We inject three env vars from the resulting credential:
+//
+//   - CLAUDE_CODE_OAUTH_TOKEN         (accessToken, 12h TTL)
+//   - CLAUDE_CODE_OAUTH_REFRESH_TOKEN (long-lived refreshToken)
+//   - CLAUDE_CODE_OAUTH_SCOPES        (space-separated)
+//
+// With refreshToken + scopes set, claude can swap an expired accessToken
+// for a fresh one without a browser — the documented "automated
+// environments" path. The refresh-token / scopes pair is atomic per the
+// env-vars docs; injecting one without the other is a broken auth env.
+//
+// Precedence:
+//
+//  1. Parent-env override — anything the user explicitly set wins, both
+//     so tests/CI can pin a deterministic credential and so the
+//     documented automation pattern (refresh + scopes only) works.
+//     CLAUDE_CODE_OAUTH_TOKEN and the refresh/scopes pair are honored
+//     independently; a partial pair (only refresh, only scopes) is
+//     ignored and falls through.
+//  2. Platform credential store — keychain on macOS, .credentials.json
+//     elsewhere.
+func readClaudeOAuthCredential() claudeOAuthCredential {
+	var fromEnv claudeOAuthCredential
+	if v := os.Getenv("CLAUDE_CODE_OAUTH_TOKEN"); v != "" {
+		fromEnv.AccessToken = v
+	}
+	if r, s := os.Getenv("CLAUDE_CODE_OAUTH_REFRESH_TOKEN"), os.Getenv("CLAUDE_CODE_OAUTH_SCOPES"); r != "" && s != "" {
+		fromEnv.RefreshToken = r
+		fromEnv.Scopes = s
+	}
+	if fromEnv.AccessToken != "" || fromEnv.RefreshToken != "" {
+		return fromEnv
+	}
+
+	var blob []byte
+	var ok bool
+	switch runtime.GOOS {
+	case "darwin":
+		blob, ok = readClaudeOAuthBlobFromKeychain()
+	default:
+		blob, ok = readClaudeOAuthBlobFromFile()
+	}
+	if !ok {
+		return claudeOAuthCredential{}
+	}
+	return parseClaudeOAuthCredential(blob)
+}
+
+// parseClaudeOAuthCredential parses the JSON blob claude stores in the
+// platform credential store and returns the env-var-injectable fields.
+// Pure function — no I/O, no platform dependency — so the parsing logic
+// can be covered by fixture-based tests on every OS.
+//
+// Invariant: if the returned RefreshToken is non-empty, Scopes is also
+// non-empty. Per the env-vars docs, CLAUDE_CODE_OAUTH_REFRESH_TOKEN
+// requires CLAUDE_CODE_OAUTH_SCOPES — without scopes the refresh token
+// is unusable, so we treat them as an atomic pair and zero both out
+// rather than ever emit a broken half.
+func parseClaudeOAuthCredential(blob []byte) claudeOAuthCredential {
+	var payload struct {
+		ClaudeAiOauth struct {
+			AccessToken  string   `json:"accessToken"`
+			RefreshToken string   `json:"refreshToken"`
+			Scopes       []string `json:"scopes"`
+		} `json:"claudeAiOauth"`
+	}
+	if err := json.Unmarshal(blob, &payload); err != nil {
+		return claudeOAuthCredential{}
+	}
+	o := payload.ClaudeAiOauth
+	cred := claudeOAuthCredential{AccessToken: o.AccessToken}
+	scopes := strings.Join(o.Scopes, " ")
+	if o.RefreshToken != "" && scopes != "" {
+		cred.RefreshToken = o.RefreshToken
+		cred.Scopes = scopes
+	}
+	return cred
+}
+
+// readClaudeOAuthBlobFromKeychain returns the raw JSON blob claude stored
+// in the macOS login keychain entry "Claude Code-credentials". Failures
+// (no entry, locked keychain) are treated as "no credential" — the caller
+// lets claude print its own login prompt.
+func readClaudeOAuthBlobFromKeychain() ([]byte, bool) {
 	cmd := exec.Command("security", "find-generic-password", "-s", "Claude Code-credentials", "-w")
 	out, err := cmd.Output()
 	if err != nil {
-		return ""
+		return nil, false
 	}
-	var payload struct {
-		ClaudeAiOauth struct {
-			AccessToken string `json:"accessToken"`
-		} `json:"claudeAiOauth"`
-	}
-	if err := json.Unmarshal(out, &payload); err != nil {
-		return ""
-	}
-	return payload.ClaudeAiOauth.AccessToken
+	return out, true
 }
 
-// readClaudeOAuthTokenFromFile reads the access token from the file-based
-// credential store that claude uses on Linux/Windows. The file lives at
-// <CLAUDE_CONFIG_DIR>/.credentials.json with the same JSON shape as the macOS
-// keychain blob.
-func readClaudeOAuthTokenFromFile() string {
+// readClaudeOAuthBlobFromFile returns the raw JSON blob from the
+// file-based credential store claude uses on Linux/Windows. The file
+// lives at <CLAUDE_CONFIG_DIR>/.credentials.json with the same JSON shape
+// as the macOS keychain blob.
+func readClaudeOAuthBlobFromFile() ([]byte, bool) {
 	path := filepath.Join(resolveSharedClaudeConfigDir(), ".credentials.json")
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return ""
+		return nil, false
 	}
-	var payload struct {
-		ClaudeAiOauth struct {
-			AccessToken string `json:"accessToken"`
-		} `json:"claudeAiOauth"`
-	}
-	if err := json.Unmarshal(data, &payload); err != nil {
-		return ""
-	}
-	return payload.ClaudeAiOauth.AccessToken
+	return data, true
 }
 
 func resolveSharedClaudeConfigDir() string {

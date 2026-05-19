@@ -3,6 +3,7 @@ package runtime
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -172,6 +173,52 @@ func TestPrepareSkillEnvironmentClaudeInjectsOAuthToken(t *testing.T) {
 	}
 }
 
+func TestPrepareSkillEnvironmentClaudeInjectsRefreshTokenAndScopes(t *testing.T) {
+	// When a Claude Code credential blob is available on the host, crew44
+	// hands the spawned (isolated) claude not just the access token but
+	// also the refresh token and scopes — claude needs all three to
+	// exchange an expired access token for a fresh one without a browser.
+	// Without that, the 12h access-token TTL would 401 the next session.
+	//
+	// Skip on darwin: the credential store there is the macOS keychain,
+	// which prepareSkillEnvironment reads via `security` — we must not
+	// touch the developer's real Claude credentials from a unit test. The
+	// pure-function path (parseClaudeOAuthCredential) gives parity
+	// coverage on every OS.
+	if runtime.GOOS == "darwin" {
+		t.Skip("file-based credential store path is linux/windows only")
+	}
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "")
+	sharedDir := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", sharedDir)
+	blob := `{"claudeAiOauth":{"accessToken":"access-abc","refreshToken":"refresh-xyz","scopes":["user:profile","user:inference"]}}`
+	if err := os.WriteFile(filepath.Join(sharedDir, ".credentials.json"), []byte(blob), 0o600); err != nil {
+		t.Fatalf("write credentials: %v", err)
+	}
+
+	workDir := t.TempDir()
+	envDir := filepath.Join(t.TempDir(), "runtime-env")
+	preparedEnv, err := prepareSkillEnvironment(RunRequest{
+		Runtime:       model.RuntimeRecord{Provider: "claude"},
+		WorkDir:       workDir,
+		RuntimeEnvDir: envDir,
+	})
+	if err != nil {
+		t.Fatalf("prepareSkillEnvironment failed: %v", err)
+	}
+	if got := preparedEnv.Env["CLAUDE_CODE_OAUTH_TOKEN"]; got != "access-abc" {
+		t.Fatalf("CLAUDE_CODE_OAUTH_TOKEN = %q, want access-abc", got)
+	}
+	if got := preparedEnv.Env["CLAUDE_CODE_OAUTH_REFRESH_TOKEN"]; got != "refresh-xyz" {
+		t.Fatalf("CLAUDE_CODE_OAUTH_REFRESH_TOKEN = %q, want refresh-xyz", got)
+	}
+	if got := preparedEnv.Env["CLAUDE_CODE_OAUTH_SCOPES"]; got != "user:profile user:inference" {
+		t.Fatalf("CLAUDE_CODE_OAUTH_SCOPES = %q, want %q", got, "user:profile user:inference")
+	}
+	if got := preparedEnv.Env["CLAUDE_CODE_SUBPROCESS_ENV_SCRUB"]; got != "1" {
+		t.Fatalf("CLAUDE_CODE_SUBPROCESS_ENV_SCRUB = %q, want 1 (scrub credentials from claude's bash/hook/MCP subprocesses)", got)
+	}
+}
 
 func TestPrepareSkillEnvironmentCodexUsesIsolatedHome(t *testing.T) {
 	sharedHome := t.TempDir()

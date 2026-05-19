@@ -51,8 +51,29 @@ func prepareSkillEnvironment(request RunRequest) (preparedSkillEnvironment, erro
 			"CLAUDE_CONFIG_DIR": claudeConfigDir,
 			"HOME":              homeDir,
 		}
-		if token := readClaudeOAuthToken(); token != "" {
-			env["CLAUDE_CODE_OAUTH_TOKEN"] = token
+		// Inject the host OAuth credential so the spawned claude reuses the
+		// host login. The refresh token + scopes let claude exchange an
+		// expired access token for a fresh one mid-session — without them
+		// the 12h access-token TTL turns the spawned claude into a 401 the
+		// next morning.
+		cred := readClaudeOAuthCredential()
+		if cred.AccessToken != "" {
+			env["CLAUDE_CODE_OAUTH_TOKEN"] = cred.AccessToken
+		}
+		// CLAUDE_CODE_OAUTH_REFRESH_TOKEN must be paired with
+		// CLAUDE_CODE_OAUTH_SCOPES per the env-vars docs — injecting one
+		// without the other is a broken auth env that claude can't use.
+		if cred.RefreshToken != "" && cred.Scopes != "" {
+			env["CLAUDE_CODE_OAUTH_REFRESH_TOKEN"] = cred.RefreshToken
+			env["CLAUDE_CODE_OAUTH_SCOPES"] = cred.Scopes
+		}
+		// Anywhere we hand claude an OAuth credential, also turn on the
+		// documented subprocess env scrub so claude strips those vars
+		// before spawning the Bash tool, hooks, or MCP stdio servers.
+		// The refresh token is long-lived and high-impact if it leaks
+		// into a child shell's environment.
+		if cred.AccessToken != "" || cred.RefreshToken != "" {
+			env["CLAUDE_CODE_SUBPROCESS_ENV_SCRUB"] = "1"
 		}
 		return preparedSkillEnvironment{
 			Env:       env,
