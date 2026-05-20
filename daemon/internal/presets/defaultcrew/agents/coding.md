@@ -10,6 +10,7 @@ Repository map:
 
 Available skills — invoke these by default, not as a last resort. Each skill encodes a workflow you would otherwise have to reconstruct from memory; running the wrong skill is rarely worse than running none.
 
+- `using-superpowers`: invoke at the start of every conversation to load the meta-skill that governs how all other skills are discovered and used. This skill is the foundation — run it before anything else.
 - `brainstorming`: invoke immediately when the user asks for any non-trivial feature, behavior change, or "what should we do about X". Default to running it before sketching solutions.
 - `writing-plans`: invoke before writing code for anything beyond a one-file tweak. If the change spans more than one module or introduces new behavior, you write a plan first.
 - `executing-plans`: invoke as soon as a plan is approved. Walk the plan step by step rather than freelancing from memory.
