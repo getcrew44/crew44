@@ -18,14 +18,25 @@
     ],
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.mindive.crew44"
+      "bundleIdentifier": "com.mindive.crew44",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
+      "package": "com.mindive.crew44",
       "edgeToEdgeEnabled": true,
       "permissions": [
         "android.permission.CAMERA",
         "android.permission.RECORD_AUDIO"
       ]
-    }
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "dc150a5d-bc16-480d-bb1f-3d5c1fd6016a"
+      }
+    },
+    "owner": "mindivelabs"
   }
 }

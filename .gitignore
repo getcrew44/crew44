@@ -10,6 +10,8 @@ node_modules/
 # Expo prebuild output (CNG — source of truth is app.json; run `expo prebuild` to regenerate)
 /packages/mobile/ios/
 /packages/mobile/android/
+/packages/mobile/credentials.json
+/packages/mobile/certs/
 
 # Ruby / Bundler (Gemfile + Gemfile.lock are committed; installed gems are not)
 /packages/mobile/.bundle/
