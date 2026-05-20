@@ -11,7 +11,39 @@ import (
 )
 
 type claudeSettings struct {
-	Env map[string]string `json:"env,omitempty"`
+	Env map[string]envValue `json:"env,omitempty"`
+}
+
+// envValue accepts string, number, boolean, and null JSON scalars and
+// normalizes them to their textual form. Claude Code's own settings
+// parser tolerates non-string scalars (e.g. `"API_TIMEOUT_MS": 3000000`)
+// since env vars are strings at the OS level anyway — rejecting them
+// here would refuse otherwise-valid host settings.
+type envValue string
+
+func (e *envValue) UnmarshalJSON(data []byte) error {
+	if len(data) == 0 {
+		return fmt.Errorf("empty env value")
+	}
+	switch data[0] {
+	case '"':
+		var s string
+		if err := json.Unmarshal(data, &s); err != nil {
+			return err
+		}
+		*e = envValue(s)
+		return nil
+	case '{', '[':
+		return fmt.Errorf("env value must be a scalar, got %s", data)
+	case 'n': // null
+		*e = ""
+		return nil
+	default:
+		// Numbers (3000000, -1.5) and booleans (true/false): the raw
+		// JSON literal is already the string form an env var expects.
+		*e = envValue(data)
+		return nil
+	}
 }
 
 func prepareClaudeConfig(configDir string) error {
