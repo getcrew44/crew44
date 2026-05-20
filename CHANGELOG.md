@@ -2,6 +2,19 @@
 
 All notable changes to this project are documented here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.3] - 2026-05-20
+
+### Added
+- **Pick a model when creating an agent.** The agent-creation dialog now shows a dropdown of supported models for the selected runtime instead of a freeform text input — Claude Code agents pick from `claude-opus-4-7` (default), `claude-sonnet-4-6`, and `claude-haiku-4-5-20251001`; Codex agents pick from `gpt-5.5` (default), `gpt-5.4`, `gpt-5.4-mini`, and `gpt-5.3-codex`.
+- **Change an agent's model after the fact.** The agent detail page exposes the same dropdown as a property so you can swap models without recreating the agent. When no model is pinned, the dropdown surfaces the catalog default as the picked value and the avatar sub-text mirrors it.
+- **Agent cards in the Crew list show the effective model.** Cards that previously hid the model badge for un-pinned agents now display the runtime's catalog default ID (`claude-opus-4-7`, `gpt-5.5`) using the same style as hand-picked models, so every card carries the same information.
+- **`runtimes.models` RPC** returns the static catalog (id, label, provider, default flag) for a runtime so the UI can populate the dropdown.
+
+### Changed
+- **Default model is honored at execution time.** Backends now fall back through `agent.Model` → runtime metadata's `model` → catalog default (`DefaultModelID`) before invoking `claude --model …` / codex turn-context, so agents with no pinned model actually run on the spec's default instead of whatever the CLI's implicit default happens to be.
+- **Switching an agent's runtime clears the pinned model.** Model IDs are provider-specific, so a stale value carried in the partial-update payload would otherwise be passed to the new backend and break. The runtime engine then falls back to the new runtime's catalog default at execution; callers that want to pin a model on the new runtime issue a second update.
+- **Deferred handover divider preserves source-agent trailing output.** When the backend emits a handover marker mid-stream, the divider now buffers until the first event from a different agent — so any final messages from the source agent render before the divider rather than getting visually orphaned underneath it.
+
 ## [0.5.2] - 2026-05-20
 
 ### Changed
