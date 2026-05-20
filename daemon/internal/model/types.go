@@ -173,13 +173,18 @@ type ThinkingPayload struct {
 }
 
 type ToolCallPayload struct {
-	Name  string         `json:"name"`
-	Input map[string]any `json:"input,omitempty"`
+	CallID  string         `json:"call_id,omitempty"`
+	Name    string         `json:"name"`
+	Input   map[string]any `json:"input,omitempty"`
+	Compact bool           `json:"compact,omitempty"`
 }
 
 type ToolCallResultPayload struct {
-	Name   string `json:"name"`
-	Output string `json:"output"`
+	CallID      string `json:"call_id,omitempty"`
+	ToolCallSeq int64  `json:"tool_call_seq,omitempty"`
+	Name        string `json:"name"`
+	Output      string `json:"output,omitempty"`
+	Compact     bool   `json:"compact,omitempty"`
 }
 
 type RuntimeSessionPayload struct {

@@ -755,12 +755,12 @@ describe('TaskView', () => {
     await emitEvent(stream, {
       seq: 1, type: 'tool_call', ts: '2026-05-12T10:00:00Z',
       actor_agent_id: 'agent-1',
-      tool_call: { name: 'Bash', input: { command: "sed -n '1,180p' /tmp/x" } },
+      tool_call: { call_id: 'call-1', name: 'Bash', input: { command: "sed -n '1,180p' /tmp/x" } },
     });
     await emitEvent(stream, {
       seq: 2, type: 'tool_call_result', ts: '2026-05-12T10:00:01Z',
       actor_agent_id: 'agent-1',
-      tool_call_result: { name: 'Bash', output: 'first output line\nsecond output line' },
+      tool_call_result: { call_id: 'call-1', tool_call_seq: 1, name: 'Bash', output: 'first output line\nsecond output line' },
     });
 
     // The compact row is visible; the detail box should be hidden by default.

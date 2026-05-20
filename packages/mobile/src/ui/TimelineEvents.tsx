@@ -1,5 +1,5 @@
 import React from "react";
-import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Platform, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { Agent } from "@/api/types";
 import { ErrorItem, HandoverDividerItem, RenderableTimelineItem, ThinkingItem, ToolItem } from "@/api/events";
 import { AttachmentTray } from "./AttachmentTray";
@@ -15,6 +15,8 @@ type AgentDisplay = {
 
 const CHEVRON_CLOSED = "›";
 const CHEVRON_OPEN = "⌄";
+
+export type LoadedToolDetails = Pick<ToolItem, "path" | "input" | "output" | "detail" | "result">;
 
 function resolveAuthor(id: string, agents: Agent[]): AgentDisplay {
   if (id === "__human__") return { id, name: "You", initial: "Y", kind: "human" };
@@ -45,6 +47,7 @@ function ThoughtChip({ thought }: { thought: ThinkingItem }) {
 }
 
 function ScrollableToolText({ text, style }: { text: string; style?: object }) {
+  const sections = toolOutputSections(text);
   return (
     <ScrollView
       style={styles.toolScroll}
@@ -52,9 +55,30 @@ function ScrollableToolText({ text, style }: { text: string; style?: object }) {
       nestedScrollEnabled
       persistentScrollbar
     >
-      <Text style={[styles.eventText, style]}>{text}</Text>
+      {sections.map((section, index) => (
+        <View key={`${section.label || "output"}-${index}`} style={index > 0 ? styles.toolOutputSection : null}>
+          {section.label ? <Text style={[styles.toolOutputLabel, section.label === "stderr" && styles.toolOutputError]}>{section.label}</Text> : null}
+          <Text
+            selectable
+            style={[styles.toolPreText, section.label === "stderr" && styles.toolOutputError, style]}
+          >
+            {section.text}
+          </Text>
+        </View>
+      ))}
     </ScrollView>
   );
+}
+
+function toolOutputSections(rawOutput: string): Array<{ label: string; text: string }> {
+  if (!rawOutput) return [];
+  try {
+    const parsed = JSON.parse(rawOutput);
+    if (typeof parsed === "string") return [{ label: "", text: parsed }];
+    return [{ label: "", text: rawOutput }];
+  } catch {
+    return [{ label: "", text: rawOutput }];
+  }
 }
 
 function HandoverVerb({ subtype }: { subtype?: string }) {
@@ -84,26 +108,51 @@ function HandoverDivider({ item, agents }: { item: HandoverDividerItem; agents: 
   );
 }
 
-function ToolLine({ tool }: { tool: ToolItem }) {
+function ToolLine({
+  tool,
+  onLoadToolDetails
+}: {
+  tool: ToolItem;
+  onLoadToolDetails?: (toolCallSeq: number) => Promise<LoadedToolDetails>;
+}) {
   const [open, setOpen] = React.useState(false);
-  const detail = tool.output || tool.detail || "";
-  const canOpen = Boolean(detail || tool.path.length > 70);
+  const [loaded, setLoaded] = React.useState<LoadedToolDetails | null>(null);
+  const [loadingDetails, setLoadingDetails] = React.useState(false);
+  const [detailError, setDetailError] = React.useState("");
+  const effectiveTool = loaded ? { ...tool, ...loaded, compact: false } : tool;
+  const detail = effectiveTool.output || effectiveTool.detail || "";
+  const canOpen = Boolean(tool.compact || detail || effectiveTool.path.length > 70);
+  const openTool = async () => {
+    if (!canOpen) return;
+    const nextOpen = !open;
+    setOpen(nextOpen);
+    if (!nextOpen || !tool.compact || loaded || loadingDetails || !onLoadToolDetails) return;
+    setLoadingDetails(true);
+    setDetailError("");
+    try {
+      setLoaded(await onLoadToolDetails(tool._seq));
+    } catch (err) {
+      setDetailError(err instanceof Error ? err.message : "Failed to load tool details");
+    } finally {
+      setLoadingDetails(false);
+    }
+  };
   return (
     <View style={[styles.toolLine, open && styles.toolLineOpen]}>
       <Pressable
         style={styles.toolSummary}
-        onPress={() => {
-          if (canOpen) setOpen(value => !value);
-        }}
+        onPress={openTool}
       >
         <Text style={[styles.toolCaret, !canOpen && styles.toolCaretMuted]}>{open ? CHEVRON_OPEN : CHEVRON_CLOSED}</Text>
-        <Text style={styles.toolName} numberOfLines={1}>{tool.tool}</Text>
-        {tool.path ? <Text style={styles.toolDetail} numberOfLines={1}>{tool.path}</Text> : <View style={styles.flex} />}
-        <ToolStatus result={tool.result} />
+        <Text style={styles.toolName} numberOfLines={1}>{effectiveTool.tool}</Text>
+        {effectiveTool.path ? <Text style={styles.toolDetail} numberOfLines={1}>{effectiveTool.path}</Text> : <View style={styles.flex} />}
+        <ToolStatus result={effectiveTool.result} />
       </Pressable>
       {open ? (
         <View style={styles.toolDetails}>
-          {tool.path.length > 70 ? <Text style={styles.toolDetailExpanded}>{tool.path}</Text> : null}
+          {loadingDetails ? <Text style={styles.toolLoading}>Loading details...</Text> : null}
+          {detailError ? <Text style={styles.toolError}>{detailError}</Text> : null}
+          {effectiveTool.path.length > 70 ? <Text style={styles.toolDetailExpanded}>{effectiveTool.path}</Text> : null}
           {detail ? <ScrollableToolText text={detail} /> : null}
         </View>
       ) : null}
@@ -169,7 +218,13 @@ function ToolGutter({
   );
 }
 
-function ToolGroupLine({ item }: { item: Extract<RenderableTimelineItem, { kind: "tool_group" }> }) {
+function ToolGroupLine({
+  item,
+  onLoadToolDetails
+}: {
+  item: Extract<RenderableTimelineItem, { kind: "tool_group" }>;
+  onLoadToolDetails?: (toolCallSeq: number) => Promise<LoadedToolDetails>;
+}) {
   const [open, setOpen] = React.useState(false);
   const status = item.events.some(event => event.result === "pending")
     ? "pending"
@@ -186,7 +241,13 @@ function ToolGroupLine({ item }: { item: Extract<RenderableTimelineItem, { kind:
       </Pressable>
       {open ? (
         <View style={styles.toolGroupDetails}>
-          {item.events.map(tool => <ToolLine key={`${tool._seq}:${tool.tool}`} tool={tool} />)}
+          {item.events.map(tool => (
+            <ToolLine
+              key={`${tool._seq}:${tool.tool}`}
+              tool={tool}
+              onLoadToolDetails={onLoadToolDetails}
+            />
+          ))}
         </View>
       ) : null}
     </View>
@@ -211,7 +272,15 @@ function ErrorDetails({ item }: { item: ErrorItem }) {
   );
 }
 
-export function TimelineRow({ item, agents }: { item: RenderableTimelineItem; agents: Agent[] }) {
+export function TimelineRow({
+  item,
+  agents,
+  onLoadToolDetails
+}: {
+  item: RenderableTimelineItem;
+  agents: Agent[];
+  onLoadToolDetails?: (toolCallSeq: number) => Promise<LoadedToolDetails>;
+}) {
   if (item.kind === "handover_divider") return <HandoverDivider item={item} agents={agents} />;
   if (item.kind === "message") {
     const agent = resolveAuthor(item.author, agents);
@@ -226,6 +295,12 @@ export function TimelineRow({ item, agents }: { item: RenderableTimelineItem; ag
           {item._thought ? <ThoughtChip thought={item._thought} /> : null}
           <RichText text={item.body} />
           <AttachmentTray attachments={item.attachments} />
+          {item.optimistic ? (
+            <View style={styles.sendingRow}>
+              <ActivityIndicator size="small" color={colors.muted} />
+              <Text style={styles.sendingText}>Sending</Text>
+            </View>
+          ) : null}
         </View>
       </View>
     );
@@ -245,14 +320,14 @@ export function TimelineRow({ item, agents }: { item: RenderableTimelineItem; ag
   if (item.kind === "tool") {
     return (
       <ToolGutter author={item.author} time={item.time} agents={agents} showHeader={item.showHeader}>
-        <ToolLine tool={item} />
+        <ToolLine tool={item} onLoadToolDetails={onLoadToolDetails} />
       </ToolGutter>
     );
   }
   if (item.kind === "tool_group") {
     return (
       <ToolGutter author={item.author} time={item.time} agents={agents} showHeader={item.showHeader}>
-        <ToolGroupLine item={item} />
+        <ToolGroupLine item={item} onLoadToolDetails={onLoadToolDetails} />
       </ToolGutter>
     );
   }
@@ -313,6 +388,18 @@ const styles = StyleSheet.create({
   userBubble: {
     backgroundColor: "#EDF4EC",
     borderColor: "#D1E5CF"
+  },
+  sendingRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    marginTop: 8,
+    opacity: 0.78
+  },
+  sendingText: {
+    color: colors.muted,
+    fontSize: 10,
+    fontWeight: "700"
   },
   agentBubble: {
     flex: 1,
@@ -409,7 +496,8 @@ const styles = StyleSheet.create({
     borderRadius: 6,
     overflow: "hidden",
     borderWidth: 1,
-    borderColor: "transparent"
+    borderColor: "transparent",
+    marginVertical: 2
   },
   toolLineOpen: {
     borderColor: "#EFE8D8",
@@ -435,7 +523,9 @@ const styles = StyleSheet.create({
   },
   toolGroupDetails: {
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: colors.border
+    borderTopColor: colors.border,
+    paddingVertical: 3,
+    gap: 4
   },
   toolDetails: {
     borderTopWidth: StyleSheet.hairlineWidth,
@@ -449,6 +539,26 @@ const styles = StyleSheet.create({
   },
   toolScrollContent: {
     paddingRight: 8
+  },
+  toolOutputSection: {
+    marginTop: 8
+  },
+  toolOutputLabel: {
+    color: colors.muted,
+    fontSize: 10,
+    fontWeight: "800",
+    textTransform: "uppercase",
+    marginBottom: 4,
+    fontFamily: Platform.select({ ios: "Menlo", android: "monospace", default: undefined })
+  },
+  toolPreText: {
+    color: colors.text,
+    fontSize: 12,
+    lineHeight: 18,
+    fontFamily: Platform.select({ ios: "Menlo", android: "monospace", default: undefined })
+  },
+  toolOutputError: {
+    color: colors.danger
   },
   toolName: {
     color: colors.text,
@@ -480,6 +590,16 @@ const styles = StyleSheet.create({
   },
   toolStatusError: {
     color: colors.danger
+  },
+  toolLoading: {
+    color: colors.muted,
+    fontSize: 12,
+    fontWeight: "600"
+  },
+  toolError: {
+    color: colors.danger,
+    fontSize: 12,
+    fontWeight: "600"
   },
   statusWrap: {
     flexDirection: "row",

@@ -281,6 +281,7 @@ func (a *App) runChat(ctx context.Context, controller *chatRunController, chatID
 		var lastAssistant string
 		var pendingHandoverAgent model.AgentConfig
 		var pendingHandoverNote string
+		pendingToolSeqs := map[string][]int64{}
 		result, err := a.engine.Run(ctx, runtime.RunRequest{
 			Runtime:         runtimeRecord,
 			Agent:           runtimeAgent,
@@ -300,6 +301,14 @@ func (a *App) runChat(ctx context.Context, controller *chatRunController, chatID
 				ToolCall:       streamEvent.ToolCall,
 				ToolCallResult: streamEvent.ToolCallResult,
 				RuntimeSession: streamEvent.RuntimeSession,
+			}
+			if event.ToolCallResult != nil && event.ToolCallResult.CallID != "" {
+				key := toolCallKey(currentAgentID, event.ToolCallResult.CallID)
+				queue := pendingToolSeqs[key]
+				if len(queue) > 0 {
+					event.ToolCallResult.ToolCallSeq = queue[0]
+					pendingToolSeqs[key] = queue[1:]
+				}
 			}
 			if streamEvent.Message != nil && streamEvent.Message.Role == model.MessageRoleAssistant {
 				cleaned, handoverTargets := model.ExtractAgentHandoverMarkers(streamEvent.Message.Content)
@@ -349,6 +358,10 @@ func (a *App) runChat(ctx context.Context, controller *chatRunController, chatID
 			persisted, err := a.store.AppendEvent(chatID, event)
 			if err != nil {
 				return err
+			}
+			if persisted.ToolCall != nil && persisted.ToolCall.CallID != "" {
+				key := toolCallKey(currentAgentID, persisted.ToolCall.CallID)
+				pendingToolSeqs[key] = append(pendingToolSeqs[key], persisted.Seq)
 			}
 			if streamEvent.RuntimeSession != nil && streamEvent.RuntimeSession.SessionID != "" {
 				a.updateLastRuntimeSession(chatID, currentAgentID, streamEvent.RuntimeSession.SessionID)
@@ -749,6 +762,10 @@ func appendUnique(values []string, next string) []string {
 		}
 	}
 	return append(values, next)
+}
+
+func toolCallKey(agentID, callID string) string {
+	return agentID + "\x00" + callID
 }
 
 func promptSkills(skills []runtime.SkillContext) []promptbuilder.Skill {

@@ -35,6 +35,15 @@ function appendUnique(prev: ChatIndexEntry[], next: ChatIndexEntry[]): ChatIndex
   return sortRecentFirst(merged);
 }
 
+function isRunningChat(chat: ChatIndexEntry): boolean {
+  return chat.status === "running" || chat.status === "streaming";
+}
+
+function chatSubtitle(chat: ChatIndexEntry): string {
+  const updatedAt = new Date(chat.updated_at).toLocaleString();
+  return isRunningChat(chat) ? `Running · ${updatedAt}` : `Updated ${updatedAt}`;
+}
+
 export default function ProjectChatsScreen() {
   const { projectId } = useLocalSearchParams<{ projectId: string }>();
   const { api, status, error: connectionError, connectionIssue, reconnect, disconnect } = useMobileClient();
@@ -148,7 +157,7 @@ export default function ProjectChatsScreen() {
           renderItem={({ item }) => (
             <Row
               title={item.title || "Untitled chat"}
-              subtitle={`${item.status || "active"} · ${new Date(item.updated_at).toLocaleString()}`}
+              subtitle={chatSubtitle(item)}
               onPress={() => router.push(`/chats/${chatId(item)}`)}
             />
           )}

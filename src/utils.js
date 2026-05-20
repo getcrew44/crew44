@@ -150,6 +150,7 @@ export function mapBackendEvent(event) {
       author: event.actor_agent_id,
       time: ts,
       tsISO,
+      callId: event.tool_call?.call_id || '',
       tool: event.tool_call?.name || 'tool',
       path: summarizeToolInput(input),
       // Preserve the raw input so downstream consumers (e.g. the files drawer)
@@ -158,6 +159,7 @@ export function mapBackendEvent(event) {
       input,
       result: 'pending',
       _seq: event.seq,
+      seq: event.seq,
     };
   }
   if (event.type === 'tool_call_result') {
@@ -166,9 +168,12 @@ export function mapBackendEvent(event) {
       author: event.actor_agent_id,
       time: ts,
       tsISO,
+      callId: event.tool_call_result?.call_id || '',
+      toolCallSeq: event.tool_call_result?.tool_call_seq || 0,
       name: event.tool_call_result?.name || '',
       output: event.tool_call_result?.output || '',
       _seq: event.seq,
+      seq: event.seq,
     };
   }
   if (event.type === 'runtime_session') {
@@ -215,11 +220,11 @@ export function mergeToolResults(events) {
   const out = [];
   for (const ev of events) {
     if (ev.kind === 'tool_result') {
-      // Find last pending tool with same name
       let merged = false;
       for (let i = out.length - 1; i >= 0; i--) {
-        if (out[i].kind === 'tool' && out[i].tool === ev.name && out[i].result === 'pending') {
-          out[i] = { ...out[i], result: 'ok', detail: ev.output?.slice(0, 120) };
+        const candidate = out[i];
+        if (candidate.kind === 'tool' && candidate._seq === ev.toolCallSeq && candidate.result === 'pending') {
+          out[i] = { ...candidate, result: 'ok', detail: ev.output?.slice(0, 120), output: ev.output };
           merged = true;
           break;
         }
