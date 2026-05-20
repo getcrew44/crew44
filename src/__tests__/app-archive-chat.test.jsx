@@ -18,6 +18,8 @@ vi.mock('../api.js', () => ({
   streamChatEvents: vi.fn(),
   cancelChat: vi.fn(),
   listProjectFiles: vi.fn(),
+  readProjectFile: vi.fn(),
+  getProjectGitDiff: vi.fn(() => Promise.resolve([])),
   // archiveChat() builds an ISO timestamp via updateChat under the hood; the
   // App-level handler only awaits the wrapper, so we mock the wrapper directly.
 }));
