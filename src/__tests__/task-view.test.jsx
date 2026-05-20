@@ -962,6 +962,79 @@ describe('TaskView', () => {
     expect(dividers[0]).not.toHaveTextContent(/Default Agent handed off to Default Agent/);
   });
 
+  it('defers the handover divider until the source agent stops streaming (A msg → A→B handover → more A → B msg)', async () => {
+    // Regression for the pendingHandover state machine in
+    // renderEventsWithHandovers (TaskView.jsx). The backend may emit the
+    // handover marker mid-stream, before agent A finishes its final
+    // response. The divider must therefore be deferred and placed *after*
+    // all of A's output — never between A's pre- and post-marker events —
+    // and rendered exactly once.
+    api.streamChatEvents.mockImplementation(() => vi.fn());
+
+    render(<TaskView chatId="chat-1" agentsMap={agentsMap} />);
+    await screen.findByTestId('composer-input');
+
+    const stream = api.streamChatEvents.mock.calls[0];
+    await emitEvent(stream, {
+      seq: 1, type: 'message', ts: '2026-05-12T10:00:00Z',
+      actor_agent_id: 'agent-1', message: { role: 'assistant', content: 'starting work' },
+    });
+    await emitEvent(stream, {
+      seq: 2, type: 'handover', ts: '2026-05-12T10:00:01Z',
+      actor_agent_id: 'agent-1',
+      handover: { subtype: 'delegate', agent_id: 'agent-2', agent_name: 'Default Agent' },
+    });
+    // A continues to stream after the marker. The divider must be deferred
+    // (final-flush may render it at the tail while A is the last actor —
+    // never between seq=1 and seq=3).
+    await emitEvent(stream, {
+      seq: 3, type: 'message', ts: '2026-05-12T10:00:02Z',
+      actor_agent_id: 'agent-1', message: { role: 'assistant', content: 'one more thought from Aria' },
+    });
+
+    // Helper: position of the leftmost match by walking direct children.
+    // The divider renders text across multiple inline spans, so we can't
+    // grep the raw innerHTML — use textContent per row.
+    const rowPositions = () => {
+      const column = screen.getByTestId('conversation-column');
+      const rows = Array.from(column.querySelectorAll('*'));
+      const find = (needle) => rows.findIndex(el => (el.textContent || '').includes(needle));
+      return {
+        starting:   find('starting work'),
+        trailing:   find('one more thought from Aria'),
+        divider:    find('handed off to'),
+        takingOver: find('taking over'),
+      };
+    };
+
+    {
+      const p = rowPositions();
+      expect(p.starting).toBeGreaterThanOrEqual(0);
+      expect(p.trailing).toBeGreaterThan(p.starting);
+      if (p.divider !== -1) {
+        // If the divider has rendered already (final-flush at the tail),
+        // it must be after BOTH A messages, never between them.
+        expect(p.divider).toBeGreaterThan(p.trailing);
+      }
+    }
+
+    // B now produces its first event — divider must be placed between A's
+    // trailing message and B's first event, exactly once.
+    await emitEvent(stream, {
+      seq: 4, type: 'message', ts: '2026-05-12T10:00:03Z',
+      actor_agent_id: 'agent-2', message: { role: 'assistant', content: 'taking over' },
+    });
+
+    const dividers = await screen.findAllByTestId('handover-divider');
+    expect(dividers).toHaveLength(1);
+    expect(dividers[0]).toHaveTextContent(/Aria handed off to Default Agent/);
+
+    const p = rowPositions();
+    expect(p.trailing).toBeGreaterThanOrEqual(0);
+    expect(p.divider).toBeGreaterThan(p.trailing);
+    expect(p.takingOver).toBeGreaterThan(p.divider);
+  });
+
   it('uses the right verb for return and escalate handover subtypes', async () => {
     api.streamChatEvents.mockImplementation(() => vi.fn());
 
