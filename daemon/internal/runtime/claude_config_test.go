@@ -1,8 +1,73 @@
 package runtime
 
 import (
+	"encoding/json"
 	"testing"
 )
+
+func TestClaudeSettingsEnvCoercesScalars(t *testing.T) {
+	// Real-world settings.json from a user — API_TIMEOUT_MS as a number,
+	// CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC as a quoted "1". Both
+	// should parse, and the round-trip should emit strings for both
+	// since the isolated claude config must hold valid env scalars.
+	const blob = `{
+	  "env": {
+	    "ANTHROPIC_BASE_URL": "https://example.test",
+	    "API_TIMEOUT_MS": 3000000,
+	    "ANTHROPIC_MODEL": "MiniMax-M2.7",
+	    "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
+	    "SOMETHING_BOOLEAN": true,
+	    "SOMETHING_NULL": null
+	  }
+	}`
+	var s claudeSettings
+	if err := json.Unmarshal([]byte(blob), &s); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	want := map[string]envValue{
+		"ANTHROPIC_BASE_URL":                      "https://example.test",
+		"API_TIMEOUT_MS":                          "3000000",
+		"ANTHROPIC_MODEL":                         "MiniMax-M2.7",
+		"CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
+		"SOMETHING_BOOLEAN":                       "true",
+		"SOMETHING_NULL":                          "",
+	}
+	for k, v := range want {
+		if got := s.Env[k]; got != v {
+			t.Errorf("%s: got %q, want %q", k, got, v)
+		}
+	}
+
+	// Round-trip: every value must marshal as a JSON string, since the
+	// isolated claude reads back via the same parser and OS env vars
+	// must be strings.
+	out, err := json.Marshal(s)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var back struct {
+		Env map[string]string `json:"env"`
+	}
+	if err := json.Unmarshal(out, &back); err != nil {
+		t.Fatalf("re-unmarshal as string map failed (round-trip not string-valued): %v\nout=%s", err, out)
+	}
+	if back.Env["API_TIMEOUT_MS"] != "3000000" {
+		t.Errorf("round-trip API_TIMEOUT_MS: got %q, want %q", back.Env["API_TIMEOUT_MS"], "3000000")
+	}
+}
+
+func TestClaudeSettingsEnvRejectsComposite(t *testing.T) {
+	cases := []string{
+		`{"env":{"X":["a","b"]}}`,
+		`{"env":{"X":{"nested":"yes"}}}`,
+	}
+	for _, blob := range cases {
+		var s claudeSettings
+		if err := json.Unmarshal([]byte(blob), &s); err == nil {
+			t.Errorf("expected error for %s, got nil (parsed as %+v)", blob, s.Env)
+		}
+	}
+}
 
 func TestReadClaudeOAuthCredentialParentEnv(t *testing.T) {
 	// All cases set at least one CLAUDE_CODE_OAUTH_* var, which short-
