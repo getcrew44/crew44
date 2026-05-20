@@ -2,6 +2,14 @@
 
 All notable changes to this project are documented here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.4] - 2026-05-20
+
+### Added
+- **Signed, notarized macOS DMG distribution script.** `npm run dist` now bundles the daemon, builds the Vite UI, packages the Electron app, and (when Apple credentials are present) signs and notarizes the result into a distributable `.dmg`. `npm run dist:unsigned` skips signing/notarization for local builds. New entitlements file at `electron/build/entitlements.mac.plist`.
+
+### Fixed
+- **Claude settings.json with numeric or boolean env values no longer crashes the daemon.** The parser previously rejected configs like `"API_TIMEOUT_MS": 3000000` with `json: cannot unmarshal number into Go struct field claudeSettings.env of type string`, refusing to launch Claude Code at all. The parser now coerces string, number, boolean, and null JSON scalars into their textual form — matching what Claude Code itself accepts and what OS env vars require. Composite values (objects/arrays) still error.
+
 ## [0.5.3] - 2026-05-20
 
 ### Added
