@@ -206,6 +206,50 @@ func TestBuildScanPromptRequiresBoundedMetadataFirstScanning(t *testing.T) {
 	}
 }
 
+func TestBuildScanPromptIncludesFalsePositiveExamples(t *testing.T) {
+	prompt := BuildScanPrompt(time.Date(2026, 5, 13, 22, 4, 0, 0, time.Local), DefaultSchedule())
+	for _, want := range []string{
+		"False-positive examples",
+		"Electron IPC",
+		"overlay textarea",
+		"Reject these even if they appear in 2 sessions",
+		"Return {\"suggestions\":[]} rather than a weak candidate",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("scan prompt missing %q:\n%s", want, prompt)
+		}
+	}
+}
+
+func TestBuildScanPromptMinesStrategySignalsButOmitsStrategyKind(t *testing.T) {
+	sched := DefaultSchedule()
+	sched.Surfaces = ScheduleSurfaces{Skill: true, Memory: true, Strategy: true}
+	prompt := BuildScanPrompt(time.Date(2026, 5, 13, 22, 4, 0, 0, time.Local), sched)
+	for _, want := range []string{
+		"Look for two kinds of upgrades",
+		"- skill: reusable patterns worth codifying as a new SKILL.md",
+		"- memory-project: facts about a specific project worth pinning",
+		"- memory-user: personal preferences",
+		"Strategy-shaped signals are still in scope",
+		"routing, scheduling, agent shape, cost",
+		"map it to either a skill or a memory",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("scan prompt missing %q:\n%s", want, prompt)
+		}
+	}
+	for _, forbidden := range []string{
+		"Look for three kinds of upgrades",
+		"- strategy:",
+		"strategy →",
+		"co-founder-style nudges",
+	} {
+		if strings.Contains(prompt, forbidden) {
+			t.Fatalf("scan prompt should not contain %q:\n%s", forbidden, prompt)
+		}
+	}
+}
+
 func TestScannerPostsIncrementalProjectChatCorpus(t *testing.T) {
 	since := time.Date(2026, 5, 12, 8, 0, 0, 0, time.UTC)
 	until := time.Date(2026, 5, 14, 8, 0, 0, 0, time.UTC)

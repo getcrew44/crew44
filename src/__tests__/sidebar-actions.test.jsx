@@ -198,8 +198,8 @@ describe('Sidebar navigation', () => {
   it('calls setRoute when a nav item is clicked', () => {
     const setRoute = vi.fn();
     render(<Sidebar {...baseProps} setRoute={setRoute} />);
-    fireEvent.click(screen.getByText('Search'));
-    expect(setRoute).toHaveBeenCalledWith('search');
+    fireEvent.click(screen.getByText('Auto optimization'));
+    expect(setRoute).toHaveBeenCalledWith('auto');
   });
 
   it('highlights the active nav item', () => {

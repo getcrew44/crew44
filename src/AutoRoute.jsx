@@ -14,17 +14,15 @@ const AUTO_UI = '-apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif
 const CONTENT_MAX_WIDTH = 720;
 
 const KIND_META = {
-  'strategy':       { label: 'Strategy', dot: '#8A6B3E', tint: '#F5EBD2', icon: 'compass' },
   'skill':          { label: 'Skill',    dot: '#C4644A', tint: '#F7E5DC', icon: 'spark'   },
   'memory-project': { label: 'Memory · project', dot: '#5B7A6A', tint: '#E2EAE3', icon: 'pin' },
   'memory-user':    { label: 'Memory · you',     dot: '#7A5B8A', tint: '#ECE2F1', icon: 'pin' },
 };
 
 const FILTERS = [
-  { key: 'all',      label: 'All'      },
-  { key: 'strategy', label: 'Strategy' },
-  { key: 'skill',    label: 'Skills'   },
-  { key: 'memory',   label: 'Memories' },
+  { key: 'all',    label: 'All'      },
+  { key: 'skill',  label: 'Skills'   },
+  { key: 'memory', label: 'Memories' },
 ];
 
 const CLOSED_STATES = ['accepted', 'dismissed', 'snoozed', 'pending_compaction'];
@@ -104,6 +102,69 @@ function relAgo(iso) {
   return Math.floor(sec / 86400) + 'd';
 }
 
+function renderInline(text) {
+  const parts = [];
+  const regex = /(\*\*[^*]+\*\*|`[^`]+`|\*[^*]+\*)/g;
+  let last = 0, m;
+  while ((m = regex.exec(text)) !== null) {
+    if (m.index > last) parts.push(text.slice(last, m.index));
+    const raw = m[0];
+    if (raw.startsWith('**')) {
+      parts.push(<strong key={m.index} style={{ fontWeight: 600 }}>{raw.slice(2, -2)}</strong>);
+    } else if (raw.startsWith('`')) {
+      parts.push(<code key={m.index} style={{ fontFamily: AUTO_MONO, fontSize: '0.88em', background: '#F0EAD8', padding: '1px 5px', borderRadius: 3, color: '#5C544B' }}>{raw.slice(1, -1)}</code>);
+    } else {
+      parts.push(<em key={m.index}>{raw.slice(1, -1)}</em>);
+    }
+    last = m.index + raw.length;
+  }
+  if (last < text.length) parts.push(text.slice(last));
+  return parts.length === 1 && typeof parts[0] === 'string' ? parts[0] : parts;
+}
+
+function MiniMd({ text, style }) {
+  const lines = (text || '').split('\n');
+  const blocks = [];
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+    if (line.startsWith('### '))      { blocks.push({ type: 'h3', content: line.slice(4) }); i++; }
+    else if (line.startsWith('## ')) { blocks.push({ type: 'h2', content: line.slice(3) }); i++; }
+    else if (line.startsWith('# '))  { blocks.push({ type: 'h1', content: line.slice(2) }); i++; }
+    else if (/^[-*] /.test(line)) {
+      const items = [];
+      while (i < lines.length && /^[-*] /.test(lines[i])) { items.push(lines[i].slice(2)); i++; }
+      blocks.push({ type: 'ul', items });
+    } else if (/^\d+\. /.test(line)) {
+      const items = [];
+      while (i < lines.length && /^\d+\. /.test(lines[i])) { items.push(lines[i].replace(/^\d+\. /, '')); i++; }
+      blocks.push({ type: 'ol', items });
+    } else if (line.trim() === '') {
+      i++;
+    } else {
+      const textLines = [];
+      while (i < lines.length && lines[i].trim() !== '' && !lines[i].startsWith('#') && !/^[-*] /.test(lines[i]) && !/^\d+\. /.test(lines[i])) {
+        textLines.push(lines[i]); i++;
+      }
+      if (textLines.length) blocks.push({ type: 'p', content: textLines.join(' ') });
+    }
+  }
+  return (
+    <div style={{ fontSize: 13, color: '#5C544B', lineHeight: 1.65, ...style }}>
+      {blocks.map((b, idx) => {
+        const mt = idx === 0 ? 0 : undefined;
+        if (b.type === 'h1') return <div key={idx} style={{ fontSize: 14, fontWeight: 700, color: '#1C1A17', marginTop: mt ?? 16, marginBottom: 4 }}>{renderInline(b.content)}</div>;
+        if (b.type === 'h2') return <div key={idx} style={{ fontSize: 11, fontWeight: 700, color: '#A89F92', textTransform: 'uppercase', letterSpacing: 0.6, marginTop: mt ?? 14, marginBottom: 5 }}>{renderInline(b.content)}</div>;
+        if (b.type === 'h3') return <div key={idx} style={{ fontSize: 13, fontWeight: 600, color: '#1C1A17', marginTop: mt ?? 10, marginBottom: 3 }}>{renderInline(b.content)}</div>;
+        if (b.type === 'p')  return <p   key={idx} style={{ margin: 0, marginTop: mt ?? 8, padding: 0 }}>{renderInline(b.content)}</p>;
+        if (b.type === 'ul') return <ul  key={idx} style={{ margin: 0, marginTop: mt ?? 6, padding: '0 0 0 18px' }}>{b.items.map((item, j) => <li key={j} style={{ marginBottom: 3 }}>{renderInline(item)}</li>)}</ul>;
+        if (b.type === 'ol') return <ol  key={idx} style={{ margin: 0, marginTop: mt ?? 6, padding: '0 0 0 18px' }}>{b.items.map((item, j) => <li key={j} style={{ marginBottom: 3 }}>{renderInline(item)}</li>)}</ol>;
+        return null;
+      })}
+    </div>
+  );
+}
+
 function isNeverScanDate(iso) {
   if (!iso) return true;
   const d = new Date(iso);
@@ -160,11 +221,11 @@ function Preview({ preview }) {
   }
   if (preview.type === 'skill') {
     return (
-      <div style={{ padding: '6px 16px 12px' }}>
-        <div style={{ fontFamily: AUTO_MONO, fontSize: 11, color: '#A89F92', marginBottom: 6 }}>
+      <div style={{ padding: '6px 20px 16px' }}>
+        <div style={{ fontFamily: AUTO_MONO, fontSize: 11, color: '#A89F92', marginBottom: 10 }}>
           skills/<span style={{ color: '#1C1A17', fontWeight: 500 }}>{preview.name}</span>/SKILL.md
         </div>
-        <pre style={{ margin: 0, fontFamily: AUTO_MONO, fontSize: 11.5, lineHeight: 1.7, color: '#1C1A17', whiteSpace: 'pre-wrap' }}>{(preview.lines || []).join('\n')}</pre>
+        <MiniMd text={(preview.lines || []).join('\n')}/>
       </div>
     );
   }
@@ -209,7 +270,7 @@ function PreviewEditor({ preview, onSave, onCancel }) {
   );
 }
 
-function SuggestionCard({ entry, editing, onAct, onEdit, onSaveEdit, onCancelEdit }) {
+function SuggestionCard({ entry, editing, onAct, onEdit, onSaveEdit, onCancelEdit, onPickChat }) {
   const s = entry.suggestion;
   const state = entry.state?.state;
   const edited = entry.state?.edited_preview;
@@ -218,11 +279,7 @@ function SuggestionCard({ entry, editing, onAct, onEdit, onSaveEdit, onCancelEdi
   React.useEffect(() => { if (editing) setExpanded(true); }, [editing]);
 
   if (CLOSED_STATES.includes(state)) {
-    const acceptedLabel = (
-      s.kind === 'strategy' ? 'Logged' :
-      s.kind === 'skill' ? 'Saved to skills/' :
-      'Pinned'
-    );
+    const acceptedLabel = s.kind === 'skill' ? 'Saved to skills/' : 'Pinned';
     const stateLabel = state === 'accepted'
       ? acceptedLabel
       : state === 'pending_compaction'
@@ -254,36 +311,29 @@ function SuggestionCard({ entry, editing, onAct, onEdit, onSaveEdit, onCancelEdi
 
   return (
     <div style={autoCard}>
-      <div style={{ padding: '14px 16px 12px', display: 'flex', alignItems: 'flex-start', gap: 12 }}>
-        <div style={{ width: 28, height: 28, borderRadius: 8, flexShrink: 0, background: m.tint, color: m.dot, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <AutoIcon name={m.icon} size={14}/>
-        </div>
+      <div style={{ padding: '18px 20px 16px' }}>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
             <KindBadge kind={s.kind}/>
-            <PriorityChip p={s.priority}/>
             {edited && (
               <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 999, background: '#E2EAE3', color: '#3E7A4A', fontWeight: 500, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
                 <AutoIcon name="edit" size={10}/> Edited
               </span>
             )}
             <span style={{ flex: 1 }}/>
-            <span style={{ fontSize: 11.5, color: '#A89F92', fontFamily: AUTO_MONO, display: 'inline-flex', alignItems: 'center', gap: 10 }}>
-              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                <AutoIcon name="clock" size={11}/> {relAgo(s.generated_at)}
-              </span>
-              {s.impact && <span>· {s.impact}</span>}
+            <span style={{ fontSize: 11.5, color: '#A89F92', fontFamily: AUTO_MONO, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+              <AutoIcon name="clock" size={11}/> {relAgo(s.generated_at)}
             </span>
           </div>
-          <div style={{ fontSize: 14.5, fontWeight: 500, color: '#1C1A17', marginBottom: 4 }}>{s.title}</div>
-          <div style={{ fontSize: 13, color: '#5C544B', lineHeight: 1.55 }}>{s.body}</div>
+          <div style={{ fontSize: 14.5, fontWeight: 500, color: '#1C1A17', marginBottom: 6 }}>{s.title}</div>
+          <MiniMd text={s.body}/>
         </div>
       </div>
       {expanded && !editing && s.evidence && (s.evidence.runs?.length || s.evidence.windows?.length) ? (
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', padding: '10px 16px 4px', fontSize: 12, color: '#807972' }}>
           <span style={{ textTransform: 'uppercase', letterSpacing: 0.4, fontSize: 10.5, color: '#A89F92' }}>Evidence</span>
           {(s.evidence.runs || []).map(r => (
-            <span key={r} style={{ fontFamily: AUTO_MONO, fontSize: 11, padding: '1px 6px', background: '#F0EAD8', borderRadius: 4, color: '#5C544B' }}>{r}</span>
+            <span key={r} onClick={onPickChat ? () => onPickChat(r) : undefined} style={{ fontFamily: AUTO_MONO, fontSize: 11, padding: '1px 6px', background: '#F0EAD8', borderRadius: 4, color: '#5C544B', cursor: onPickChat ? 'pointer' : 'default' }}>{r}</span>
           ))}
           {(s.evidence.windows || []).map((w, i) => <span key={i} style={{ color: '#807972' }}>· {w}</span>)}
         </div>
@@ -294,7 +344,7 @@ function SuggestionCard({ entry, editing, onAct, onEdit, onSaveEdit, onCancelEdi
           onSave={(text) => onSaveEdit(s.id, applyPreviewText(preview, text))}
           onCancel={() => onCancelEdit(s.id)}/>
       )}
-      <div style={{ borderTop: '1px solid #ECE6D5', padding: '8px 12px', display: 'flex', alignItems: 'center', gap: 6 }}>
+      <div style={{ borderTop: '1px solid #ECE6D5', padding: '10px 16px', display: 'flex', alignItems: 'center', gap: 6 }}>
         <button onClick={() => setExpanded(e => !e)} style={ghostBtn} disabled={editing}>{expanded ? 'Hide details' : 'View details'}</button>
         <span style={{ flex: 1 }}/>
         <button onClick={() => onAct(s.id, 'snooze')}   style={ghostBtn} disabled={editing}>Snooze 7d</button>
@@ -370,8 +420,7 @@ function ScheduleStrip({ list, onRun, onSchedule, schedule, scanElapsedMs, onVie
     : primaryBtn;
   return (
     <div style={{ ...autoCard, display: 'flex', alignItems: 'stretch', marginBottom: 20 }}>
-      <Counter label="New this scan" n={items.length} sub="suggestions"/>
-      <Counter label="High impact"   n={items.filter(e => e.suggestion.priority === 'high').length} sub="worth a look"/>
+      <Counter label="Suggestions" n={items.length} sub=""/>
       <LastScanCounter iso={list?.last_scan_at} runsAnalyzed={list?.runs_analyzed}/>
       <div style={{ padding: '14px 16px', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', justifyContent: 'space-between', gap: 6, minWidth: 220 }}>
         <div style={{ fontSize: 11.5, color: '#A89F92', textTransform: 'uppercase', letterSpacing: 0.4 }}>Next scan</div>
@@ -460,8 +509,7 @@ function ScheduleModal({ open, schedule, onClose, onSave }) {
           <Row label="Scan for">
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
               {[['skill','Skills — repeated workflows worth codifying'],
-                ['memory','Memories — project and personal preferences'],
-                ['strategy','Strategy — direction, spend, team shape']].map(([k, label]) => (
+                ['memory','Memories — project and personal preferences']].map(([k, label]) => (
                 <label key={k} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: '#1C1A17', cursor: 'pointer' }}>
                   <input type="checkbox" checked={!!(draft.surfaces || {})[k]} onChange={() => setSurface(k, !(draft.surfaces || {})[k])} style={{ accentColor: '#1C1A17' }}/>
                   {label}
@@ -582,7 +630,7 @@ function WhatItSeesModal({ open, onClose, latestScanId }) {
           <PrivacyItem title="Runs through your configured Partner agent" body="Wherever your Partner runtime sends data, the scanner sends the same kind of data."/>
           <PrivacyItem title="Output is reviewed before anything changes" body="Suggestions are accepted, edited, or dismissed per row. Nothing mutates skills, memory files, or schedules unless you accept."/>
           <PrivacyItem title="Retention" body="Scan corpus is kept under ~/.crew44/optimizer/scans/ until you purge it. No automatic aggregation in v1."/>
-          <PrivacyItem title="What an accepted suggestion does" body="Strategy → writes a record of intent to applied/. Skill → drops a SKILL.md in your skills folder. Memory → writes a typed markdown file under memory/ and adds a one-line pointer to MEMORY.md."/>
+          <PrivacyItem title="What an accepted suggestion does" body="Skill → drops a SKILL.md in your skills folder. Memory → writes a typed markdown file under memory/ and adds a one-line pointer to MEMORY.md."/>
           <div style={{ display: 'flex', gap: 8, marginTop: 14 }}>
             <button style={ghostBtn} onClick={() => purgeOptimizerScans().then(() => setScan(null))}>Purge scan corpus now</button>
           </div>
@@ -712,7 +760,7 @@ function ScanResultsModal({ open, onClose, scanId }) {
   );
 }
 
-export default function AutoRoute({ onToast }) {
+export default function AutoRoute({ onToast, onPickChat }) {
   const [list, setList] = React.useState(null);
   const [schedule, setSchedule] = React.useState(null);
   const [editingId, setEditingId] = React.useState(null);
@@ -763,7 +811,7 @@ export default function AutoRoute({ onToast }) {
       if (action === 'accept') {
         const e = (list?.items || []).find(x => x.suggestion.id === id);
         const kind = e?.suggestion.kind;
-        onToast?.(kind === 'strategy' ? 'Strategy logged' : kind === 'skill' ? 'Saved to skills/' : kind ? 'Memory pinned' : 'Done');
+        onToast?.(kind === 'skill' ? 'Saved to skills/' : kind ? 'Memory pinned' : 'Done');
       }
     }).catch(e => onToast?.(e.message || 'Action failed'));
   };
@@ -810,7 +858,7 @@ export default function AutoRoute({ onToast }) {
         <div style={{ marginBottom: 18 }}>
           <h1 style={{ fontSize: 22, fontWeight: 600, margin: '0 0 4px', color: '#1C1A17', letterSpacing: -0.2 }}>Auto optimization</h1>
           <div style={{ fontSize: 13, color: '#807972', maxWidth: 640 }}>
-            A weekly read of your run history. Surfaces repeating workflows worth turning into skills, facts worth pinning to memory, and co-founder-style nudges on where to spend energy next.
+            A weekly read of your run history. Surfaces repeating workflows worth turning into skills and facts worth pinning to memory.
           </div>
         </div>
 
@@ -849,7 +897,8 @@ export default function AutoRoute({ onToast }) {
               onAct={handleAct}
               onEdit={(id) => setEditingId(id)}
               onSaveEdit={handleSaveEdit}
-              onCancelEdit={() => setEditingId(null)}/>
+              onCancelEdit={() => setEditingId(null)}
+              onPickChat={onPickChat}/>
           ))}
         </div>
 

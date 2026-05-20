@@ -133,6 +133,11 @@ export async function updateRuntime(id, patch) {
   return rpc.call('runtimes.update', { id, patch });
 }
 
+export async function listRuntimeModels(id) {
+  const data = await rpc.call('runtimes.models', { id });
+  return data.items || [];
+}
+
 export async function listPresets() {
   const data = await rpc.call('presets.list');
   return data.items || [];

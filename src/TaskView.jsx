@@ -1885,11 +1885,35 @@ function renderEventsWithHandovers({ events, agentsMap }) {
   // handovers and user messages (anything that visually breaks the run).
   let prevDisplayedActor = null;
   const isAgentActor = (id) => id && id !== '__human__';
+  // Deferred handover: the backend may emit the handover event before the
+  // source agent finishes streaming its response (the marker is detected
+  // mid-stream). We hold it here and flush right before the first event that
+  // is NOT from the source agent — this places the divider after all of A's
+  // output and prevents spurious synthesized return-dividers.
+  let pendingHandover = null;
+
+  const flushPendingHandover = () => {
+    if (!pendingHandover) return;
+    out.push(
+      <HandoverDivider
+        key={pendingHandover.key}
+        from={pendingHandover.from}
+        to={pendingHandover.to}
+        subtype={pendingHandover.subtype}
+        note={pendingHandover.note}
+        agentsMap={agentsMap}
+      />
+    );
+    prevAgentActor = pendingHandover.to;
+    prevDisplayedActor = null;
+    pendingHandover = null;
+  };
 
   prepared.forEach((e, i) => {
-    // 1. Explicit backend-emitted handover → render directly and update the
-    //    last-agent tracker so the next agent message doesn't synthesize a
-    //    duplicate divider.
+    // 1. Explicit backend-emitted handover → defer rendering until we see the
+    //    first event from a different agent. This ensures the divider appears
+    //    after all of the source agent's output even when the backend emits
+    //    the handover marker before the agent's final message is fully sent.
     //
     //    The daemon emits TWO handover events per handoff: a "scheduled"
     //    event (source → target, what the user actually wants to see) and
@@ -1900,18 +1924,17 @@ function renderEventsWithHandovers({ events, agentsMap }) {
       const from = e.agent_id || e.author;
       const to = e.target_agent_id;
       if (from && to && from !== to) {
-        out.push(
-          <HandoverDivider
-            key={`h-${e._seq ?? i}`}
-            from={from}
-            to={to}
-            subtype={e.subtype}
-            note={e.note}
-            agentsMap={agentsMap}
-          />
-        );
-        prevAgentActor = to;
-        prevDisplayedActor = null;
+        // If this new handover immediately reverses a pending one with no
+        // intervening events from the intermediate agent, both cancel out —
+        // the round-trip was invisible to the user so we suppress both.
+        if (pendingHandover && pendingHandover.to === from && pendingHandover.from === to) {
+          pendingHandover = null;
+        } else {
+          flushPendingHandover();
+          pendingHandover = { from, to, subtype: e.subtype, note: e.note, key: `h-${e._seq ?? i}` };
+          // Do NOT update prevAgentActor yet: the source may still have output
+          // events after this point. prevAgentActor is updated when we flush.
+        }
       } else if (from && to && from === to) {
         // Still update the actor tracker so subsequent events don't
         // synthesize a fallback divider for the same identity.
@@ -1920,10 +1943,18 @@ function renderEventsWithHandovers({ events, agentsMap }) {
       return;
     }
 
-    // 2. Synthesized fallback for actor changes without an explicit handover
-    //    event (e.g. user retargets via the composer's AgentPicker).
     const actor = e.author;
-    if (isAgentActor(actor) && prevAgentActor && actor !== prevAgentActor) {
+
+    // Flush the pending handover divider before rendering any event that is
+    // not from the source agent (including user messages).
+    if (pendingHandover && !(isAgentActor(actor) && actor === pendingHandover.from)) {
+      flushPendingHandover();
+    }
+
+    // 2. Synthesized fallback for actor changes without an explicit handover
+    //    event (e.g. user retargets via the composer's AgentPicker). Skip
+    //    when a pending handover already covers this transition.
+    if (!pendingHandover && isAgentActor(actor) && prevAgentActor && actor !== prevAgentActor) {
       out.push(
         <HandoverDivider
           key={`syn-${e._seq ?? i}`}
@@ -1959,6 +1990,11 @@ function renderEventsWithHandovers({ events, agentsMap }) {
       prevDisplayedActor = actor;
     }
   });
+
+  // Flush any pending handover that had no destination events after it
+  // (e.g. the conversation ended right after the handover was emitted).
+  flushPendingHandover();
+
   return { nodes: out, lastDisplayedActor: prevDisplayedActor, lastAgentActor: prevAgentActor };
 }
 
@@ -2836,8 +2872,11 @@ export default function TaskView({ chatId, agentsMap, skills = [], projects = []
         ) {
           agentActivitySinceSendRef.current = true;
         }
+        const mapped = mapBackendEvent(event);
+        if (mapped?.kind === 'handover' && mapped.target_agent_id) {
+          setTargetAgentId(mapped.target_agent_id);
+        }
         setEvents(prev => {
-          const mapped = mapBackendEvent(event);
           if (!mapped) return prev;
           if (prev.some(e => e._seq === event.seq)) return prev;
           lastSeqRef.current = Math.max(lastSeqRef.current, event.seq);
