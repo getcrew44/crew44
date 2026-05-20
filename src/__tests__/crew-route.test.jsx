@@ -9,6 +9,7 @@ vi.mock('../api.js', () => ({
   updateAgent: vi.fn(),
   archiveAgent: vi.fn(),
   listPresets: vi.fn(() => Promise.resolve([])),
+  listRuntimeModels: vi.fn(() => Promise.resolve([])),
   seedDefaultCrew: vi.fn(),
   resetDefaultCrew: vi.fn(),
   resetAgentPreset: vi.fn(),
@@ -128,6 +129,28 @@ describe('CrewRoute agents tab', () => {
 
     expect(screen.getByText('Updated just now')).toBeInTheDocument();
     expect(screen.queryByText('Updated just now ago')).not.toBeInTheDocument();
+  });
+
+  it('preselects the runtime default model when creating an agent', async () => {
+    api.listRuntimeModels.mockResolvedValue([
+      { id: 'gpt-5.4', label: 'GPT-5.4' },
+      { id: 'gpt-5.5', label: 'GPT-5.5', default: true },
+    ]);
+    api.createAgent.mockResolvedValue({});
+    const onDataRefresh = vi.fn();
+
+    render(<CrewRoute {...baseProps} initialTab="agents" onDataRefresh={onDataRefresh} />);
+
+    fireEvent.click(screen.getByRole('button', { name: '+ New agent' }));
+    fireEvent.change(screen.getByPlaceholderText('e.g. Coding Agent'), { target: { value: 'Coding Agent' } });
+
+    await screen.findByRole('button', { name: /GPT-5\.5/ });
+    fireEvent.click(screen.getByRole('button', { name: 'Create agent' }));
+
+    await waitFor(() => {
+      expect(api.createAgent).toHaveBeenCalledWith('Coding Agent', '', 'codex', 'gpt-5.5');
+    });
+    expect(onDataRefresh).toHaveBeenCalledOnce();
   });
 
   it('shows the runtime name as quiet metadata without a label or badge', () => {
@@ -281,5 +304,37 @@ describe('CrewRoute agent detail', () => {
 
     fireEvent.change(editor, { target: { value: Array.from({ length: 40 }, (_, i) => `Line ${i + 1}`).join('\n') } });
     expect(editor).toHaveStyle({ height: '560px', overflowY: 'auto' });
+  });
+
+  it('updates the pinned model from the agent detail model picker', async () => {
+    api.listRuntimeModels.mockResolvedValue([
+      { id: 'gpt-5.4', label: 'GPT-5.4' },
+      { id: 'gpt-5.5', label: 'GPT-5.5', default: true },
+    ]);
+    api.updateAgent.mockResolvedValue({});
+    const onDataRefresh = vi.fn();
+
+    render(<CrewRoute
+      {...agentProps}
+      agents={[{
+        ...agentProps.agents[0],
+        model: 'gpt-5.4',
+      }]}
+      onDataRefresh={onDataRefresh}
+    />);
+
+    fireEvent.click(screen.getByText('Planning Agent'));
+
+    fireEvent.click(await screen.findByRole('button', { name: /GPT-5\.4/ }));
+    fireEvent.click(screen.getByText('GPT-5.5'));
+
+    await waitFor(() => {
+      expect(api.updateAgent).toHaveBeenCalledWith('agent-1', expect.objectContaining({
+        id: 'agent-1',
+        runtime_id: 'codex',
+        model: 'gpt-5.5',
+      }));
+    });
+    expect(onDataRefresh).toHaveBeenCalledOnce();
   });
 });

@@ -394,18 +394,44 @@ function AgentFormDialog({ mode, initial, runtimes, onCancel, onSubmit }) {
   const [name, setName] = React.useState(initial?.name || '');
   const [runtimeId, setRuntimeId] = React.useState(initial?.runtime_id || runtimes[0]?.id || '');
   const [model, setModel] = React.useState('');
+  const [models, setModels] = React.useState([]);
+  const [modelsLoading, setModelsLoading] = React.useState(false);
   const [submitting, setSubmitting] = React.useState(false);
   const [error, setError] = React.useState(null);
 
   const isCreate = mode === 'create';
   const canSubmit = name.trim().length > 0 && (!isCreate || runtimeId);
 
+  React.useEffect(() => {
+    if (!isCreate || !runtimeId) {
+      setModels([]);
+      setModel('');
+      return;
+    }
+    let cancelled = false;
+    setModelsLoading(true);
+    api.listRuntimeModels(runtimeId)
+      .then(items => {
+        if (cancelled) return;
+        setModels(items);
+        const def = items.find(m => m.default) || items[0];
+        setModel(def ? def.id : '');
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setModels([]);
+        setModel('');
+      })
+      .finally(() => { if (!cancelled) setModelsLoading(false); });
+    return () => { cancelled = true; };
+  }, [isCreate, runtimeId]);
+
   const handleSubmit = async () => {
     if (!canSubmit || submitting) return;
     setSubmitting(true);
     setError(null);
     try {
-      await onSubmit({ name: name.trim(), runtime_id: runtimeId, model: model.trim() });
+      await onSubmit({ name: name.trim(), runtime_id: runtimeId, model });
     } catch (err) {
       setError(err?.message || 'Something went wrong');
       setSubmitting(false);
@@ -413,6 +439,7 @@ function AgentFormDialog({ mode, initial, runtimes, onCancel, onSubmit }) {
   };
 
   const runtimeOptions = runtimes.map(r => ({ value: r.id, label: r.name || r.id }));
+  const modelOptions = models.map(m => ({ value: m.id, label: m.label || m.id, hint: m.default ? 'default' : undefined }));
 
   return (
     <div style={dialogBackdrop} onClick={onCancel}>
@@ -456,18 +483,14 @@ function AgentFormDialog({ mode, initial, runtimes, onCancel, onSubmit }) {
             )}
 
             <label style={{ fontSize: 12, fontWeight: 500, color: '#5C544B', display: 'block', marginBottom: 6 }}>Model</label>
-            <input
-              value={model}
-              onChange={e => setModel(e.target.value)}
-              onKeyDown={e => {
-                if (e.key === 'Enter' && canSubmit) handleSubmit();
-                if (e.key === 'Escape') onCancel();
-              }}
-              placeholder="Auto"
-              style={{ ...inputStyle, marginBottom: 4, fontFamily: MONO_FONT, fontSize: 12.5 }}
-            />
-            <div style={{ fontSize: 11.5, color: '#A89F92', marginBottom: 8 }}>
-              Leave blank to use the runtime's default model.
+            <div style={{ marginBottom: 8 }}>
+              <CustomSelect
+                value={model}
+                options={modelOptions}
+                onChange={setModel}
+                placeholder={modelsLoading ? 'Loading models…' : 'Pick a model…'}
+                disabled={!runtimeId || modelsLoading || modelOptions.length === 0}
+              />
             </div>
           </>
         )}
@@ -711,12 +734,33 @@ function AgentsSection({ agents, runtimes, onPickAgent, onDataRefresh, onToast, 
   const [presets, setPresets] = React.useState([]);
   const [seedBusy, setSeedBusy] = React.useState(false);
   const [resetBusy, setResetBusy] = React.useState(false);
+  const [runtimeDefaults, setRuntimeDefaults] = React.useState({});
 
   React.useEffect(() => {
     let cancelled = false;
     api.listPresets().then(items => { if (!cancelled) setPresets(items); }).catch(() => {});
     return () => { cancelled = true; };
   }, [agents]);
+
+  const runtimeIds = runtimes.map(r => r.id).join(',');
+  React.useEffect(() => {
+    let cancelled = false;
+    Promise.all(runtimes.map(async (r) => {
+      try {
+        const items = await api.listRuntimeModels(r.id);
+        const def = items.find(m => m.default) || items[0];
+        return def ? [r.id, def] : null;
+      } catch {
+        return null;
+      }
+    })).then(pairs => {
+      if (cancelled) return;
+      const next = {};
+      for (const pair of pairs) if (pair) next[pair[0]] = pair[1];
+      setRuntimeDefaults(next);
+    });
+    return () => { cancelled = true; };
+  }, [runtimeIds]);
 
   const missingPresets = presets.filter(p => !p.has_copy);
   const hasMissingPresets = missingPresets.length > 0;
@@ -926,16 +970,20 @@ function AgentsSection({ agents, runtimes, onPickAgent, onDataRefresh, onToast, 
                 ) : (
                   <span style={{ fontSize: 12.5, color: '#A89F92', fontStyle: 'italic' }}>No runtime</span>
                 )}
-                {a.model && (
-                  <span style={{
-                    fontSize: 11.5, color: '#807972', fontWeight: 500,
-                    background: '#EDE8D8', borderRadius: 4, padding: '2px 7px',
-                    whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-                    maxWidth: '50%', flexShrink: 0,
-                  }} title={a.model}>
-                    {a.model}
-                  </span>
-                )}
+                {(() => {
+                  const id = a.model || runtimeDefaults[a.runtime_id]?.id;
+                  if (!id) return null;
+                  return (
+                    <span style={{
+                      fontSize: 11.5, color: '#807972', fontWeight: 500,
+                      background: '#EDE8D8', borderRadius: 4, padding: '2px 7px',
+                      whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                      maxWidth: '50%', flexShrink: 0,
+                    }} title={id}>
+                      {id}
+                    </span>
+                  );
+                })()}
               </div>
             </div>
           );
@@ -999,7 +1047,20 @@ function AgentDetail({ agent, skills, runtimes, agentsMap, onBack, onSave, onRef
   const [instruction, setInstruction] = React.useState(agent.instruction || '');
   const [saving, setSaving] = React.useState(false);
   const [confirmDelete, setConfirmDelete] = React.useState(false);
+  const [models, setModels] = React.useState([]);
   const instructionEditorRef = React.useRef(null);
+
+  React.useEffect(() => {
+    if (!agent.runtime_id) {
+      setModels([]);
+      return;
+    }
+    let cancelled = false;
+    api.listRuntimeModels(agent.runtime_id)
+      .then(items => { if (!cancelled) setModels(items); })
+      .catch(() => { if (!cancelled) setModels([]); });
+    return () => { cancelled = true; };
+  }, [agent.runtime_id]);
 
   React.useLayoutEffect(() => {
     resizeInstructionEditor(instructionEditorRef.current);
@@ -1034,10 +1095,23 @@ function AgentDetail({ agent, skills, runtimes, agentsMap, onBack, onSave, onRef
   const handleRuntimeChange = async (nextRuntimeId) => {
     if (!nextRuntimeId || nextRuntimeId === agent.runtime_id) return;
     try {
-      await api.updateAgent(agent.id, { ...agent, runtime_id: nextRuntimeId });
+      // Drop the model from the payload — model IDs are provider-specific, so
+      // the stale value would be invalid for the new runtime. The daemon
+      // enforces this too, but sending '' makes the intent explicit.
+      await api.updateAgent(agent.id, { ...agent, runtime_id: nextRuntimeId, model: '' });
       onRefresh?.();
     } catch (err) {
       console.error('Runtime switch failed:', err);
+    }
+  };
+
+  const handleModelChange = async (nextModel) => {
+    if (nextModel === (agent.model || '')) return;
+    try {
+      await api.updateAgent(agent.id, { ...agent, model: nextModel });
+      onRefresh?.();
+    } catch (err) {
+      console.error('Model switch failed:', err);
     }
   };
 
@@ -1051,7 +1125,12 @@ function AgentDetail({ agent, skills, runtimes, agentsMap, onBack, onSave, onRef
   const runtimeOptions = runtimes || [];
   const runtimeSelectable = runtimeOptions.length > 0;
   const deleteAllowed = canDeleteAgent(agent);
-  const modelLabel = displayModel(agent.model);
+  const modelOptions = models.map(m => ({ value: m.id, label: m.label || m.id, hint: m.default ? 'default' : undefined }));
+  const modelSelectable = modelOptions.length > 0;
+  const defaultModelId = (models.find(m => m.default) || models[0])?.id || '';
+  const selectedModelId = agent.model || defaultModelId;
+  const selectedModelLabel = models.find(m => m.id === selectedModelId)?.label || selectedModelId;
+  const modelLabel = selectedModelLabel || displayModel(agent.model);
 
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column', background: '#FAF5E8' }}>
@@ -1080,7 +1159,17 @@ function AgentDetail({ agent, skills, runtimes, agentsMap, onBack, onSave, onRef
             <div style={{ fontSize: 13, color: '#807972', marginBottom: 16 }}>{modelLabel}</div>
 
             <div style={{ fontSize: 11.5, color: '#A89F92', textTransform: 'uppercase', letterSpacing: 0.4, fontWeight: 500, marginBottom: 8 }}>Properties</div>
-            <PropRow label="Model" value={<code style={{ fontFamily: MONO_FONT, fontSize: 12 }}>{modelLabel}</code>} />
+            <PropRow label="Model" value={
+              modelSelectable ? (
+                <CustomSelect
+                  value={selectedModelId}
+                  options={modelOptions}
+                  onChange={handleModelChange}
+                  placeholder="Pick a model…"
+                  size="sm"
+                />
+              ) : (<code style={{ fontFamily: MONO_FONT, fontSize: 12 }}>{modelLabel}</code>)
+            } />
             <PropRow label="Runtime" value={
               runtimeSelectable ? (
                 <CustomSelect
