@@ -215,8 +215,7 @@ export default function NewTaskRoute({ projects, agents, onNewTask, onExistingFo
 
     try {
       const titleSource = text || attachments[0]?.display_name || 'Attachments';
-      const title = titleSource.length > 55 ? titleSource.slice(0, 52) + '…' : titleSource;
-      const chat = await api.createChat(projectId, title, agentId);
+      const chat = await api.createChat(projectId, titleSource, agentId);
       await api.postMessage(chat.id, text, chat.main_agent_id, attachments);
       clearComposerDraft(projectId, '');
       onNewTask(chat.id);

@@ -649,8 +649,10 @@ function TaskHeader({ chat, events, fileCount, drawerOpen, onToggleDrawer }) {
         <div style={{ flex: 1, minWidth: 0 }}>
           <h1 style={{
             margin: 0, fontSize: 22, fontWeight: 600,
-            color: '#1C1A17', letterSpacing: -0.2, lineHeight: 1.2,
-          }}>{chat.title || 'Untitled chat'}</h1>
+            color: '#1C1A17', letterSpacing: 0, lineHeight: 1.2,
+            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+            minWidth: 0,
+          }} title={chat.title || 'Untitled chat'}>{chat.title || 'Untitled chat'}</h1>
           <div style={{
             display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 10,
             fontSize: 12.5, color: '#A89F92', marginTop: 8,

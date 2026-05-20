@@ -875,7 +875,7 @@ func (a *App) CreateChat(projectID, title, mainAgentID string) (model.ChatRecord
 	record := model.ChatRecord{
 		ID:                  id.New(),
 		ProjectID:           project.ID,
-		Title:               title,
+		Title:               model.NormalizeChatTitle(title),
 		MainAgentID:         mainAgentID,
 		CurrentAgentID:      mainAgentID,
 		ParticipantAgentIDs: []string{mainAgentID},
@@ -930,7 +930,7 @@ func (a *App) UpdateChat(chat model.ChatRecord) (model.ChatRecord, error) {
 		return model.ChatRecord{}, a.mapError(err)
 	}
 	if chat.Title != "" {
-		current.Title = chat.Title
+		current.Title = model.NormalizeChatTitle(chat.Title)
 	}
 	if chat.Status != "" {
 		current.Status = chat.Status

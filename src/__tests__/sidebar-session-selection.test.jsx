@@ -92,10 +92,10 @@ describe('Sidebar session selection', () => {
 
 // ── Mapping unit test ──────────────────────────────────────────────────────────
 // Verifies the sidebarProjects computation uses c.id (ChatRecord field),
-// not c.chat_id (ChatIndexEntry field — does not exist on ChatRecord).
+// not c.chat_id (legacy index field — does not exist on ChatRecord).
 describe('sidebarProjects chat ID mapping', () => {
   // Simulate what projects.chats.list actually returns:
-  // ListProjectChats returns []ChatRecord, not []ChatIndexEntry.
+  // ListProjectChats returns []ChatRecord.
   const chatRecord = {
     id: 'real-uuid-123',
     title: 'My Chat',
