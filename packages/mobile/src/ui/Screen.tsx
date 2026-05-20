@@ -11,7 +11,7 @@ export function Header({ title, left, right }: { title: string; left?: React.Rea
   return (
     <View style={styles.header}>
       {left}
-      <Text style={styles.title}>{title}</Text>
+      <Text style={styles.title} numberOfLines={1} ellipsizeMode="tail">{title}</Text>
       {right}
     </View>
   );
@@ -78,9 +78,9 @@ export function LoadingState({ label = "Loading..." }: { label?: string }) {
 
 export function Row({ title, subtitle, onPress }: { title: string; subtitle?: string; onPress?: () => void }) {
   return (
-    <Pressable onPress={onPress} style={styles.row}>
+    <Pressable onPress={onPress} style={styles.row} accessibilityLabel={title}>
       <View style={{ flex: 1, minWidth: 0 }}>
-        <Text style={styles.rowTitle} numberOfLines={1}>{title}</Text>
+        <Text style={styles.rowTitle} numberOfLines={1} ellipsizeMode="tail">{title}</Text>
         {subtitle ? <Text style={styles.rowSubtitle} numberOfLines={2}>{subtitle}</Text> : null}
       </View>
       {onPress ? <Text style={styles.chevron}>›</Text> : null}

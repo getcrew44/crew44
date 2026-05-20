@@ -78,15 +78,6 @@ type ProjectRecord struct {
 	ArchivedAt   time.Time `json:"archived_at,omitempty"`
 }
 
-type ChatIndexEntry struct {
-	ChatID         string    `json:"chat_id"`
-	Title          string    `json:"title"`
-	Status         string    `json:"status"`
-	CurrentAgentID string    `json:"current_agent_id"`
-	UpdatedAt      time.Time `json:"updated_at"`
-	ArchivedAt     time.Time `json:"archived_at,omitempty"`
-}
-
 type LastRuntimeSession struct {
 	AgentID   string    `json:"agent_id"`
 	SessionID string    `json:"session_id"`

@@ -16,15 +16,30 @@ import (
 )
 
 type Store struct {
-	root string
-	mu   sync.Mutex
+	root         string
+	mu           sync.Mutex
+	chatProjects map[string]string
+}
+
+type legacyChatIndexEntry struct {
+	ChatID string `json:"chat_id"`
 }
 
 func New(root string) (*Store, error) {
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		return nil, err
 	}
-	return &Store{root: root}, nil
+	s := &Store{
+		root:         root,
+		chatProjects: map[string]string{},
+	}
+	if err := s.migrateLegacyChatFiles(); err != nil {
+		return nil, err
+	}
+	if err := s.loadChatProjectIndex(); err != nil {
+		return nil, err
+	}
+	return s, nil
 }
 
 func (s *Store) Root() string {
@@ -403,14 +418,15 @@ func (s *Store) SaveProject(project model.ProjectRecord) error {
 func (s *Store) DeleteProject(id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	chats, err := readChatIndex(filepath.Join(s.root, "projects", "proj-"+id, "chats.jsonl"))
+	chats, err := readChatRecords(filepath.Join(s.root, "projects", "proj-"+id, "chats.jsonl"))
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
 	for _, chat := range chats {
-		if err := os.RemoveAll(filepath.Join(s.root, "chats", "chat-"+chat.ChatID)); err != nil {
+		if err := os.RemoveAll(filepath.Join(s.root, "chats", "chat-"+chat.ID)); err != nil {
 			return err
 		}
+		delete(s.chatProjects, chat.ID)
 	}
 	projects, err := readProjectRegistry(filepath.Join(s.root, "projects", "registry.jsonl"))
 	if err != nil {
@@ -428,37 +444,45 @@ func (s *Store) DeleteProject(id string) error {
 	return os.RemoveAll(filepath.Join(s.root, "projects", "proj-"+id))
 }
 
-func (s *Store) ListProjectChats(projectID string) ([]model.ChatIndexEntry, error) {
+func (s *Store) ListProjectChats(projectID string) ([]model.ChatRecord, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	var entries []model.ChatIndexEntry
-	err := readJSONL(filepath.Join(s.root, "projects", "proj-"+projectID, "chats.jsonl"), &entries)
+	records, err := readChatRecords(filepath.Join(s.root, "projects", "proj-"+projectID, "chats.jsonl"))
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, ErrNotFound
 	}
-	return entries, err
+	return records, err
 }
 
 func (s *Store) GetChat(id string) (model.ChatRecord, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	var chat model.ChatRecord
-	err := readJSON(filepath.Join(s.root, "chats", "chat-"+id, "chat.json"), &chat)
-	if errors.Is(err, os.ErrNotExist) {
+	projectID := s.chatProjects[id]
+	if projectID == "" {
 		return model.ChatRecord{}, ErrNotFound
 	}
-	return chat, err
+	records, err := readChatRecords(filepath.Join(s.root, "projects", "proj-"+projectID, "chats.jsonl"))
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return model.ChatRecord{}, ErrNotFound
+		}
+		return model.ChatRecord{}, err
+	}
+	for _, chat := range records {
+		if chat.ID == id {
+			return chat, nil
+		}
+	}
+	return model.ChatRecord{}, ErrNotFound
 }
 
 func (s *Store) SaveChat(chat model.ChatRecord) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	chat.Title = model.NormalizeChatTitle(chat.Title)
 
 	dir := filepath.Join(s.root, "chats", "chat-"+chat.ID)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return err
-	}
-	if err := writeJSON(filepath.Join(dir, "chat.json"), chat); err != nil {
 		return err
 	}
 	if _, err := os.Stat(filepath.Join(dir, "events.jsonl")); errors.Is(err, os.ErrNotExist) {
@@ -471,25 +495,21 @@ func (s *Store) SaveChat(chat model.ChatRecord) error {
 			return err
 		}
 	}
-	return s.saveProjectChatIndexLocked(chat)
+	return s.saveProjectChatRecordLocked(chat)
 }
 
 func (s *Store) ListChats(projectID string) ([]model.ChatRecord, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	entries, err := readChatIndex(filepath.Join(s.root, "projects", "proj-"+projectID, "chats.jsonl"))
+	records, err := readChatRecords(filepath.Join(s.root, "projects", "proj-"+projectID, "chats.jsonl"))
 	if err != nil {
 		return nil, err
 	}
-	chats := make([]model.ChatRecord, 0, len(entries))
-	for _, entry := range entries {
-		if !entry.ArchivedAt.IsZero() {
+	chats := make([]model.ChatRecord, 0, len(records))
+	for _, chat := range records {
+		if !chat.ArchivedAt.IsZero() {
 			continue
-		}
-		var chat model.ChatRecord
-		if err := readJSON(filepath.Join(s.root, "chats", "chat-"+entry.ChatID, "chat.json"), &chat); err != nil {
-			return nil, err
 		}
 		chats = append(chats, chat)
 	}
@@ -540,52 +560,69 @@ func (s *Store) WriteSummary(chatID, summary string) error {
 	return os.WriteFile(filepath.Join(s.root, "chats", "chat-"+chatID, "summary.md"), []byte(summary), 0o644)
 }
 
-func (s *Store) saveProjectChatIndexLocked(chat model.ChatRecord) error {
+func (s *Store) saveProjectChatRecordLocked(chat model.ChatRecord) error {
 	dir := filepath.Join(s.root, "projects", "proj-"+chat.ProjectID)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
+	if previousProjectID := s.chatProjects[chat.ID]; previousProjectID != "" && previousProjectID != chat.ProjectID {
+		previousPath := filepath.Join(s.root, "projects", "proj-"+previousProjectID, "chats.jsonl")
+		previous, err := readChatRecords(previousPath)
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		filtered := make([]model.ChatRecord, 0, len(previous))
+		for _, record := range previous {
+			if record.ID != chat.ID {
+				filtered = append(filtered, record)
+			}
+		}
+		if err := writeJSONL(previousPath, filtered); err != nil {
+			return err
+		}
+	}
 	path := filepath.Join(dir, "chats.jsonl")
-	entries, err := readChatIndex(path)
+	records, err := readChatRecords(path)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
-	index := model.ChatIndexEntry{
-		ChatID:         chat.ID,
-		Title:          chat.Title,
-		Status:         chat.Status,
-		CurrentAgentID: chat.CurrentAgentID,
-		UpdatedAt:      chat.UpdatedAt,
-		ArchivedAt:     chat.ArchivedAt,
+	records = upsertChatRecord(records, chat)
+	if err := writeJSONL(path, records); err != nil {
+		return err
 	}
-	entries = upsertChatIndex(entries, index)
-	return writeJSONL(path, entries)
+	s.chatProjects[chat.ID] = chat.ProjectID
+	return nil
 }
 
 func (s *Store) DeleteChat(id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	var chat model.ChatRecord
-	if err := readJSON(filepath.Join(s.root, "chats", "chat-"+id, "chat.json"), &chat); err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return ErrNotFound
-		}
-		return err
+	projectID := s.chatProjects[id]
+	if projectID == "" {
+		return ErrNotFound
 	}
-	entries, err := readChatIndex(filepath.Join(s.root, "projects", "proj-"+chat.ProjectID, "chats.jsonl"))
+	path := filepath.Join(s.root, "projects", "proj-"+projectID, "chats.jsonl")
+	records, err := readChatRecords(path)
 	if err != nil {
 		return err
 	}
-	filtered := make([]model.ChatIndexEntry, 0, len(entries))
-	for _, entry := range entries {
-		if entry.ChatID != id {
-			filtered = append(filtered, entry)
+	removed := false
+	filtered := make([]model.ChatRecord, 0, len(records))
+	for _, chat := range records {
+		if chat.ID == id {
+			removed = true
+			continue
 		}
+		filtered = append(filtered, chat)
 	}
-	if err := writeJSONL(filepath.Join(s.root, "projects", "proj-"+chat.ProjectID, "chats.jsonl"), filtered); err != nil {
+	if !removed {
+		return ErrNotFound
+	}
+	if err := writeJSONL(path, filtered); err != nil {
 		return err
 	}
+	delete(s.chatProjects, id)
 	return os.RemoveAll(filepath.Join(s.root, "chats", "chat-"+id))
 }
 
@@ -607,13 +644,158 @@ func readSkillsRegistry(path string) ([]model.SkillRecord, error) {
 	return entries, err
 }
 
-func readChatIndex(path string) ([]model.ChatIndexEntry, error) {
-	var entries []model.ChatIndexEntry
-	err := readJSONL(path, &entries)
+func readChatRecords(path string) ([]model.ChatRecord, error) {
+	var records []model.ChatRecord
+	err := readJSONL(path, &records)
 	if errors.Is(err, os.ErrNotExist) {
-		return nil, nil
+		return nil, os.ErrNotExist
 	}
-	return entries, err
+	return records, err
+}
+
+func readLegacyChatList(path string) (records []model.ChatRecord, legacy []legacyChatIndexEntry, legacyFormat bool, err error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, nil, false, err
+	}
+	for _, rawLine := range bytes.Split(data, []byte("\n")) {
+		line := bytes.TrimSpace(rawLine)
+		if len(line) == 0 {
+			continue
+		}
+		var probe struct {
+			ID     string `json:"id"`
+			ChatID string `json:"chat_id"`
+		}
+		if err := json.Unmarshal(line, &probe); err != nil {
+			return nil, nil, false, fmt.Errorf("parse %s: %w", path, err)
+		}
+		if probe.ChatID != "" {
+			if len(records) > 0 {
+				return nil, nil, false, fmt.Errorf("mixed chat list formats in %s", path)
+			}
+			var entry legacyChatIndexEntry
+			if err := json.Unmarshal(line, &entry); err != nil {
+				return nil, nil, false, fmt.Errorf("parse %s: %w", path, err)
+			}
+			legacy = append(legacy, entry)
+			legacyFormat = true
+			continue
+		}
+		if legacyFormat {
+			return nil, nil, false, fmt.Errorf("mixed chat list formats in %s", path)
+		}
+		var record model.ChatRecord
+		if err := json.Unmarshal(line, &record); err != nil {
+			return nil, nil, false, fmt.Errorf("parse %s: %w", path, err)
+		}
+		if record.ID == "" {
+			return nil, nil, false, fmt.Errorf("chat record without id in %s", path)
+		}
+		records = append(records, record)
+	}
+	return records, legacy, legacyFormat, nil
+}
+
+func (s *Store) migrateLegacyChatFiles() error {
+	projectsDir := filepath.Join(s.root, "projects")
+	projects, err := os.ReadDir(projectsDir)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	for _, project := range projects {
+		if !project.IsDir() || !strings.HasPrefix(project.Name(), "proj-") {
+			continue
+		}
+		projectID := strings.TrimPrefix(project.Name(), "proj-")
+		chatsPath := filepath.Join(projectsDir, project.Name(), "chats.jsonl")
+		records, legacy, legacyFormat, err := readLegacyChatList(chatsPath)
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		if legacyFormat {
+			records = make([]model.ChatRecord, 0, len(legacy))
+			for _, entry := range legacy {
+				if entry.ChatID == "" {
+					return fmt.Errorf("legacy chat index without chat_id in %s", chatsPath)
+				}
+				var chat model.ChatRecord
+				chatPath := filepath.Join(s.root, "chats", "chat-"+entry.ChatID, "chat.json")
+				if err := readJSON(chatPath, &chat); err != nil {
+					return err
+				}
+				if chat.ID != entry.ChatID {
+					return fmt.Errorf("legacy chat id mismatch in %s", chatPath)
+				}
+				if chat.ProjectID != projectID {
+					return fmt.Errorf("legacy chat project mismatch in %s", chatPath)
+				}
+				records = append(records, chat)
+			}
+		}
+		changed := legacyFormat
+		for i := range records {
+			normalizedTitle := model.NormalizeChatTitle(records[i].Title)
+			if records[i].Title != normalizedTitle {
+				records[i].Title = normalizedTitle
+				changed = true
+			}
+		}
+		if changed {
+			if err := writeJSONL(chatsPath, records); err != nil {
+				return err
+			}
+		}
+		for _, chat := range records {
+			if err := os.Remove(filepath.Join(s.root, "chats", "chat-"+chat.ID, "chat.json")); err != nil && !errors.Is(err, os.ErrNotExist) {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func (s *Store) loadChatProjectIndex() error {
+	projectsDir := filepath.Join(s.root, "projects")
+	projects, err := os.ReadDir(projectsDir)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	for _, project := range projects {
+		if !project.IsDir() || !strings.HasPrefix(project.Name(), "proj-") {
+			continue
+		}
+		projectID := strings.TrimPrefix(project.Name(), "proj-")
+		records, err := readChatRecords(filepath.Join(projectsDir, project.Name(), "chats.jsonl"))
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		for _, chat := range records {
+			if chat.ID == "" {
+				return fmt.Errorf("chat record without id in project %s", projectID)
+			}
+			if chat.ProjectID != projectID {
+				return fmt.Errorf("chat %s belongs to project %s but is listed under %s", chat.ID, chat.ProjectID, projectID)
+			}
+			if previousProjectID := s.chatProjects[chat.ID]; previousProjectID != "" && previousProjectID != projectID {
+				return fmt.Errorf("chat %s is listed in both project %s and %s", chat.ID, previousProjectID, projectID)
+			}
+			s.chatProjects[chat.ID] = projectID
+		}
+	}
+	return nil
 }
 
 func readEvents(path string) ([]model.Event, error) {
@@ -635,14 +817,14 @@ func upsertProjectIndex(entries []model.ProjectIndexEntry, next model.ProjectInd
 	return append(entries, next)
 }
 
-func upsertChatIndex(entries []model.ChatIndexEntry, next model.ChatIndexEntry) []model.ChatIndexEntry {
-	for i, entry := range entries {
-		if entry.ChatID == next.ChatID {
-			entries[i] = next
-			return entries
+func upsertChatRecord(records []model.ChatRecord, next model.ChatRecord) []model.ChatRecord {
+	for i, record := range records {
+		if record.ID == next.ID {
+			records[i] = next
+			return records
 		}
 	}
-	return append(entries, next)
+	return append(records, next)
 }
 
 func writeJSON(path string, value any) error {

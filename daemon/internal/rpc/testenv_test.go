@@ -434,3 +434,12 @@ func assertFileExists(t *testing.T, path string) {
 		t.Fatalf("expected file %s to exist: %v", path, err)
 	}
 }
+
+func assertFileNotExists(t *testing.T, path string) {
+	t.Helper()
+	if _, err := os.Stat(path); err == nil {
+		t.Fatalf("expected file %s not to exist", path)
+	} else if !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("stat %s: %v", path, err)
+	}
+}

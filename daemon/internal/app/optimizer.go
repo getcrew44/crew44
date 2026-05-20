@@ -177,18 +177,11 @@ func (d *appDispatcher) BuildScanCorpus(_ context.Context, since, until time.Tim
 		if project.SystemHidden || project.ID == optimizer.SystemProjectID || !project.ArchivedAt.IsZero() {
 			continue
 		}
-		entries, err := d.app.store.ListProjectChats(project.ID)
+		chats, err := d.app.store.ListProjectChats(project.ID)
 		if err != nil {
 			return corpus, err
 		}
-		for _, entry := range entries {
-			if !entry.ArchivedAt.IsZero() {
-				continue
-			}
-			chat, err := d.app.store.GetChat(entry.ChatID)
-			if err != nil {
-				continue
-			}
+		for _, chat := range chats {
 			if !chat.ArchivedAt.IsZero() {
 				continue
 			}
