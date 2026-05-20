@@ -67,14 +67,6 @@ func prepareSkillEnvironment(request RunRequest) (preparedSkillEnvironment, erro
 			env["CLAUDE_CODE_OAUTH_REFRESH_TOKEN"] = cred.RefreshToken
 			env["CLAUDE_CODE_OAUTH_SCOPES"] = cred.Scopes
 		}
-		// Anywhere we hand claude an OAuth credential, also turn on the
-		// documented subprocess env scrub so claude strips those vars
-		// before spawning the Bash tool, hooks, or MCP stdio servers.
-		// The refresh token is long-lived and high-impact if it leaks
-		// into a child shell's environment.
-		if cred.AccessToken != "" || cred.RefreshToken != "" {
-			env["CLAUDE_CODE_SUBPROCESS_ENV_SCRUB"] = "1"
-		}
 		return preparedSkillEnvironment{
 			Env:       env,
 			ExtraArgs: []string{"--setting-sources", "user"},

@@ -215,9 +215,6 @@ func TestPrepareSkillEnvironmentClaudeInjectsRefreshTokenAndScopes(t *testing.T)
 	if got := preparedEnv.Env["CLAUDE_CODE_OAUTH_SCOPES"]; got != "user:profile user:inference" {
 		t.Fatalf("CLAUDE_CODE_OAUTH_SCOPES = %q, want %q", got, "user:profile user:inference")
 	}
-	if got := preparedEnv.Env["CLAUDE_CODE_SUBPROCESS_ENV_SCRUB"]; got != "1" {
-		t.Fatalf("CLAUDE_CODE_SUBPROCESS_ENV_SCRUB = %q, want 1 (scrub credentials from claude's bash/hook/MCP subprocesses)", got)
-	}
 }
 
 func TestPrepareSkillEnvironmentCodexUsesIsolatedHome(t *testing.T) {
