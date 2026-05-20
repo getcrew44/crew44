@@ -7,7 +7,7 @@ import { Agent, BackendEvent, Chat } from "@/api/types";
 import { AgentTargetPicker } from "@/ui/AgentTargetPicker";
 import { DesktopOfflineState } from "@/ui/DesktopOfflineState";
 import { BackButton, EmptyState, Header, LoadingState, Screen } from "@/ui/Screen";
-import { TimelineRow } from "@/ui/TimelineEvents";
+import { LoadedToolDetails, TimelineRow } from "@/ui/TimelineEvents";
 import { goBackOrHome } from "@/ui/navigation";
 import { colors } from "@/ui/theme";
 
@@ -72,6 +72,19 @@ export default function ChatScreen() {
     if (!mapped) return;
     setItems(prev => {
       if (prev.some(item => item.seq === mapped.seq)) return prev;
+      if (mapped.kind === "message" && mapped.role === "user") {
+        const optimisticIndex = prev.findIndex(item =>
+          item.kind === "message" &&
+          item.optimistic &&
+          item.role === "user" &&
+          item.body === mapped.body
+        );
+        if (optimisticIndex !== -1) {
+          const next = prev.slice();
+          next[optimisticIndex] = mapped;
+          return next;
+        }
+      }
       return [...prev, mapped];
     });
   }, []);
@@ -83,6 +96,7 @@ export default function ChatScreen() {
     cleanupRef.current = api.subscribeChatEvents(
       chatId,
       after,
+      { compactTools: true },
       appendEvent,
       () => {
         setStreaming(false);
@@ -103,7 +117,7 @@ export default function ChatScreen() {
     try {
       const [nextChat, events, nextAgents] = await Promise.all([
         api.getChat(chatId),
-        api.listEvents(chatId, 0),
+        api.listEvents(chatId, 0, { compactTools: true }),
         api.listAgents()
       ]);
       setChat(nextChat);
@@ -195,7 +209,8 @@ export default function ChatScreen() {
         role: "user",
         body: text,
         time: "now",
-        tsISO: new Date().toISOString()
+        tsISO: new Date().toISOString(),
+        optimistic: true
       };
       setItems(prev => [...prev, optimistic]);
     }
@@ -218,6 +233,30 @@ export default function ChatScreen() {
     await api.cancelChat(chatId);
     cleanupRef.current();
     setStreaming(false);
+  }, [api, chatId]);
+
+  const loadToolDetails = React.useCallback(async (toolCallSeq: number): Promise<LoadedToolDetails> => {
+    if (!api || !chatId) throw new Error("Not connected");
+    const details = await api.getToolDetails(chatId, toolCallSeq);
+    const call = mapBackendEvent(details.tool_call);
+    const result = details.tool_result ? mapBackendEvent(details.tool_result) : null;
+    if (!call || call.kind !== "tool") throw new Error("Tool call not found");
+    if (result?.kind === "tool_result") {
+      return {
+        path: call.path,
+        input: call.input,
+        result: "ok",
+        output: result.output,
+        detail: result.output.slice(0, 120)
+      };
+    }
+    return {
+      path: call.path,
+      input: call.input,
+      result: call.result,
+      output: call.output,
+      detail: call.detail
+    };
   }, [api, chatId]);
 
   if (status === "error" && !api) {
@@ -255,7 +294,9 @@ export default function ChatScreen() {
             ref={listRef}
             data={renderItems}
             keyExtractor={(item, index) => `${item.kind}:${item._seq}:${index}`}
-            renderItem={({ item }) => <TimelineRow item={item} agents={agents} />}
+            renderItem={({ item }) => (
+              <TimelineRow item={item} agents={agents} onLoadToolDetails={loadToolDetails} />
+            )}
             contentContainerStyle={styles.timeline}
             ListEmptyComponent={<EmptyState title="No messages yet" body="Send the first message to this crew." />}
             onContentSizeChange={() => {

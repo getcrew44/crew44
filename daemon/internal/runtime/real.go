@@ -103,14 +103,16 @@ func mapAgentMessage(msg backendagent.Message, runtimeRecord model.RuntimeRecord
 		return StreamEvent{
 			Type: model.EventTypeToolCall,
 			ToolCall: &model.ToolCallPayload{
-				Name:  msg.Tool,
-				Input: msg.Input,
+				CallID: msg.CallID,
+				Name:   msg.Tool,
+				Input:  msg.Input,
 			},
 		}, true
 	case backendagent.MessageToolResult:
 		return StreamEvent{
 			Type: model.EventTypeToolCallResult,
 			ToolCallResult: &model.ToolCallResultPayload{
+				CallID: msg.CallID,
 				Name:   msg.Tool,
 				Output: msg.Output,
 			},

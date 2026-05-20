@@ -96,8 +96,9 @@ func (MockEngine) Run(ctx context.Context, request RunRequest, emit func(StreamE
 		if err := emit(StreamEvent{
 			Type: model.EventTypeToolCall,
 			ToolCall: &model.ToolCallPayload{
-				Name:  "mock.search",
-				Input: map[string]any{"prompt": cleanPrompt(request.Prompt)},
+				CallID: "mock-search-1",
+				Name:   "mock.search",
+				Input:  map[string]any{"prompt": cleanPrompt(request.Prompt)},
 			},
 		}); err != nil {
 			return RunResult{}, err
@@ -105,6 +106,7 @@ func (MockEngine) Run(ctx context.Context, request RunRequest, emit func(StreamE
 		if err := emit(StreamEvent{
 			Type: model.EventTypeToolCallResult,
 			ToolCallResult: &model.ToolCallResultPayload{
+				CallID: "mock-search-1",
 				Name:   "mock.search",
 				Output: "ok",
 			},

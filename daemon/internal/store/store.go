@@ -554,6 +554,24 @@ func (s *Store) ListEvents(chatID string, after int64) ([]model.Event, error) {
 	return filtered, nil
 }
 
+func (s *Store) GetEvent(chatID string, seq int64) (model.Event, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	events, err := readEvents(filepath.Join(s.root, "chats", "chat-"+chatID, "events.jsonl"))
+	if errors.Is(err, os.ErrNotExist) {
+		return model.Event{}, ErrNotFound
+	}
+	if err != nil {
+		return model.Event{}, err
+	}
+	for _, event := range events {
+		if event.Seq == seq {
+			return event, nil
+		}
+	}
+	return model.Event{}, ErrNotFound
+}
+
 func (s *Store) WriteSummary(chatID, summary string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

@@ -952,6 +952,37 @@ func (a *App) ListEvents(chatID string, after int64) ([]model.Event, error) {
 	return events, a.mapError(err)
 }
 
+func (a *App) GetEvent(chatID string, seq int64) (model.Event, error) {
+	event, err := a.store.GetEvent(chatID, seq)
+	return event, a.mapError(err)
+}
+
+func (a *App) GetToolCallDetails(chatID string, toolCallSeq int64) (model.Event, *model.Event, error) {
+	events, err := a.store.ListEvents(chatID, 0)
+	if err != nil {
+		return model.Event{}, nil, a.mapError(err)
+	}
+	var call model.Event
+	var result *model.Event
+	for _, event := range events {
+		if event.Seq == toolCallSeq {
+			if event.Type != model.EventTypeToolCall {
+				return model.Event{}, nil, a.mapError(store.ErrNotFound)
+			}
+			call = event
+			continue
+		}
+		if event.Type == model.EventTypeToolCallResult && event.ToolCallResult != nil && event.ToolCallResult.ToolCallSeq == toolCallSeq {
+			copy := event
+			result = &copy
+		}
+	}
+	if call.Seq == 0 {
+		return model.Event{}, nil, a.mapError(store.ErrNotFound)
+	}
+	return call, result, nil
+}
+
 func (a *App) CancelChat(chatID string) error {
 	a.mu.Lock()
 	controller := a.runs[chatID]

@@ -64,6 +64,7 @@ func (s *Server) registerMethods() {
 		"chats.events.list":                s.chatsEventsList,
 		"chats.events.subscribe":           s.chatsEventsSubscribe,
 		"chats.events.unsubscribe":         s.chatsEventsUnsubscribe,
+		"chats.tool.get":                   s.chatsToolGet,
 		"chats.cancel":                     s.chatsCancel,
 
 		"optimizer.suggestions.list": s.optimizerSuggestionsList,
@@ -577,14 +578,36 @@ func (s *Server) chatsMessagesInterruptDeliver(_ context.Context, _ Peer, params
 
 func (s *Server) chatsEventsList(_ context.Context, _ Peer, params json.RawMessage) (any, error) {
 	var body struct {
-		ChatID string `json:"chat_id"`
-		After  int64  `json:"after"`
+		ChatID       string `json:"chat_id"`
+		After        int64  `json:"after"`
+		CompactTools bool   `json:"compact_tools"`
 	}
 	if err := decodeParams(params, &body); err != nil {
 		return nil, err
 	}
 	events, err := s.app.ListEvents(body.ChatID, body.After)
+	if err != nil {
+		return nil, err
+	}
+	if body.CompactTools {
+		events = compactToolEvents(events)
+	}
 	return map[string]any{"events": events}, err
+}
+
+func (s *Server) chatsToolGet(_ context.Context, _ Peer, params json.RawMessage) (any, error) {
+	var body struct {
+		ChatID      string `json:"chat_id"`
+		ToolCallSeq int64  `json:"tool_call_seq"`
+	}
+	if err := decodeParams(params, &body); err != nil {
+		return nil, err
+	}
+	call, result, err := s.app.GetToolCallDetails(body.ChatID, body.ToolCallSeq)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{"tool_call": call, "tool_result": result}, nil
 }
 
 func (s *Server) chatsCancel(_ context.Context, _ Peer, params json.RawMessage) (any, error) {

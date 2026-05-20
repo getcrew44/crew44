@@ -259,6 +259,52 @@ function ToolStatusChip({ result }) {
   return null;
 }
 
+function toolOutputSections(rawOutput) {
+  if (!rawOutput) return [];
+  try {
+    const parsed = JSON.parse(rawOutput);
+    if (typeof parsed === 'string') {
+      return [{ label: '', text: parsed }];
+    }
+    return [{ label: '', text: rawOutput }];
+  } catch {
+    return [{ label: '', text: rawOutput }];
+  }
+}
+
+function ToolOutputPre({ output, result }) {
+  const sections = toolOutputSections(output);
+  if (sections.length === 0) return null;
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      {sections.map((section, index) => (
+        <div key={`${section.label || 'output'}-${index}`}>
+          {section.label && (
+            <div style={{
+              marginBottom: 4,
+              fontSize: 11,
+              color: section.label === 'stderr' ? '#B23A2E' : '#807972',
+              fontFamily: MONO_FONT,
+              textTransform: 'uppercase',
+            }}>
+              {section.label}
+            </div>
+          )}
+          <pre style={{
+            margin: 0,
+            fontFamily: MONO_FONT,
+            fontSize: 12.5,
+            color: result === 'error' || section.label === 'stderr' ? '#B23A2E' : '#1C1A17',
+            whiteSpace: 'pre-wrap',
+            wordBreak: 'break-word',
+            lineHeight: 1.55,
+          }}>{section.text}</pre>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 // The collapsible card body for a single tool call. Used both standalone
 // (inside ToolEvent) and as a child inside ToolGroupEvent's expanded list.
 function ToolEventCard({ event, defaultOpen = false }) {
@@ -328,9 +374,7 @@ function ToolEventCard({ event, defaultOpen = false }) {
           {pathOverflows && (
             <div style={{ marginBottom: hasOutput ? 8 : 0 }}>{event.path}</div>
           )}
-          {hasOutput && (
-            <span style={{ color: event.result === 'error' ? '#B23A2E' : '#1C1A17' }}>{fullOutput}</span>
-          )}
+          {hasOutput && <ToolOutputPre output={fullOutput} result={event.result} />}
         </div>
       )}
     </div>
@@ -2868,7 +2912,7 @@ export default function TaskView({ chatId, agentsMap, skills = [], projects = []
           if (mapped.kind === 'tool_result') {
             const updated = [...prev];
             for (let i = updated.length - 1; i >= 0; i--) {
-              if (updated[i].kind === 'tool' && updated[i].tool === mapped.name && updated[i].result === 'pending') {
+              if (updated[i].kind === 'tool' && updated[i]._seq === mapped.toolCallSeq && updated[i].result === 'pending') {
                 updated[i] = {
                   ...updated[i],
                   result: 'ok',

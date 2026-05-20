@@ -27,6 +27,7 @@ export interface MessageItem extends BaseTimelineItem {
   userSteer?: boolean;
   steerAgentId?: string;
   interrupted?: boolean;
+  optimistic?: boolean;
   _thought?: ThinkingItem;
 }
 
@@ -38,18 +39,23 @@ export interface ThinkingItem extends BaseTimelineItem {
 
 export interface ToolItem extends BaseTimelineItem {
   kind: "tool";
+  callId: string;
   tool: string;
   path: string;
   input: Record<string, unknown> | null;
   result: "pending" | "ok" | "error";
   detail?: string;
   output?: string;
+  compact?: boolean;
 }
 
 export interface ToolResultItem extends BaseTimelineItem {
   kind: "tool_result";
+  callId: string;
+  toolCallSeq: number;
   name: string;
   output: string;
+  compact?: boolean;
 }
 
 export interface ToolGroupItem extends BaseTimelineItem {
@@ -102,7 +108,7 @@ function eventTime(value: string): string {
 
 function summarizeToolInput(input: Record<string, unknown> | null | undefined): string {
   if (input == null) return "";
-  const preferred = ["command", "cmd", "path", "file_path", "file", "args", "query", "prompt", "pattern", "url"];
+  const preferred = ["_summary", "command", "cmd", "path", "file_path", "file", "args", "query", "prompt", "pattern", "url"];
   for (const key of preferred) {
     const value = input[key];
     if (typeof value === "string" && value) return value;
@@ -153,10 +159,12 @@ export function mapBackendEvent(event: BackendEvent): TimelineItem | null {
       seq,
       _seq: seq,
       author: event.actor_agent_id,
+      callId: event.tool_call?.call_id || "",
       tool: event.tool_call?.name || "tool",
       path: summarizeToolInput(input),
       input,
       result: "pending",
+      compact: Boolean(event.tool_call?.compact),
       time,
       tsISO
     };
@@ -167,8 +175,11 @@ export function mapBackendEvent(event: BackendEvent): TimelineItem | null {
       seq,
       _seq: seq,
       author: event.actor_agent_id,
+      callId: event.tool_call_result?.call_id || "",
+      toolCallSeq: event.tool_call_result?.tool_call_seq || 0,
       name: event.tool_call_result?.name || "",
       output: event.tool_call_result?.output || "",
+      compact: Boolean(event.tool_call_result?.compact),
       time,
       tsISO
     };
@@ -228,12 +239,13 @@ function mergeToolResults(events: TimelineItem[]): TimelineItem[] {
     let merged = false;
     for (let i = out.length - 1; i >= 0; i--) {
       const prev = out[i];
-      if (prev.kind === "tool" && prev.tool === event.name && prev.result === "pending") {
+      if (prev.kind === "tool" && prev._seq === event.toolCallSeq && prev.result === "pending") {
         out[i] = {
           ...prev,
           result: "ok",
           detail: event.output.slice(0, 120),
-          output: event.output
+          output: event.output,
+          compact: prev.compact || event.compact
         };
         merged = true;
         break;

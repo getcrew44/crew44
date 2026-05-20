@@ -195,9 +195,10 @@ describe('mapBackendEvent', () => {
   it('maps tool_call event with input.path', () => {
     const e = mapBackendEvent({
       ...baseEvent, type: 'tool_call',
-      tool_call: { name: 'read_file', input: { path: 'src/x.ts' } },
+      tool_call: { call_id: 'call-1', name: 'read_file', input: { path: 'src/x.ts' } },
     });
     expect(e.kind).toBe('tool');
+    expect(e.callId).toBe('call-1');
     expect(e.tool).toBe('read_file');
     expect(e.path).toBe('src/x.ts');
     expect(e.result).toBe('pending');
@@ -239,9 +240,11 @@ describe('mapBackendEvent', () => {
   it('maps tool_call_result event', () => {
     const e = mapBackendEvent({
       ...baseEvent, type: 'tool_call_result',
-      tool_call_result: { name: 'read_file', output: 'file contents' },
+      tool_call_result: { call_id: 'call-1', tool_call_seq: 10, name: 'read_file', output: 'file contents' },
     });
     expect(e.kind).toBe('tool_result');
+    expect(e.callId).toBe('call-1');
+    expect(e.toolCallSeq).toBe(10);
     expect(e.name).toBe('read_file');
     expect(e.output).toBe('file contents');
   });
@@ -319,7 +322,7 @@ describe('mergeToolResults', () => {
   it('merges a tool_result into the matching pending tool_call', () => {
     const events = [
       { kind: 'tool', tool: 'read_file', result: 'pending', _seq: 1 },
-      { kind: 'tool_result', name: 'read_file', output: 'file contents', _seq: 2 },
+      { kind: 'tool_result', name: 'read_file', toolCallSeq: 1, output: 'file contents', _seq: 2 },
     ];
     const merged = mergeToolResults(events);
     expect(merged).toHaveLength(1);
@@ -331,24 +334,24 @@ describe('mergeToolResults', () => {
   it('drops orphan tool_result with no matching tool_call', () => {
     const events = [
       { kind: 'message', body: 'hi', _seq: 1 },
-      { kind: 'tool_result', name: 'nothing', output: 'orphaned', _seq: 2 },
+      { kind: 'tool_result', name: 'nothing', toolCallSeq: 99, output: 'orphaned', _seq: 2 },
     ];
     const merged = mergeToolResults(events);
     // No matching tool means the result IS appended standalone, per current behaviour
     expect(merged.length).toBe(2);
   });
 
-  it('matches most recent pending tool when multiple exist', () => {
+  it('matches by tool_call_seq when multiple tools share a name', () => {
     const events = [
       { kind: 'tool', tool: 'read_file', result: 'pending', _seq: 1 },
       { kind: 'tool', tool: 'read_file', result: 'pending', _seq: 2 },
-      { kind: 'tool_result', name: 'read_file', output: 'second result', _seq: 3 },
+      { kind: 'tool_result', name: 'read_file', toolCallSeq: 1, output: 'first result', _seq: 3 },
     ];
     const merged = mergeToolResults(events);
     expect(merged).toHaveLength(2);
-    expect(merged[0].result).toBe('pending'); // first still pending
-    expect(merged[1].result).toBe('ok');      // second merged
-    expect(merged[1].detail).toBe('second result');
+    expect(merged[0].result).toBe('ok');
+    expect(merged[0].detail).toBe('first result');
+    expect(merged[1].result).toBe('pending');
   });
 
   it('passes non-tool events through unchanged', () => {
@@ -363,7 +366,7 @@ describe('mergeToolResults', () => {
     const longOutput = 'x'.repeat(500);
     const events = [
       { kind: 'tool', tool: 't', result: 'pending', _seq: 1 },
-      { kind: 'tool_result', name: 't', output: longOutput, _seq: 2 },
+      { kind: 'tool_result', name: 't', toolCallSeq: 1, output: longOutput, _seq: 2 },
     ];
     const merged = mergeToolResults(events);
     expect(merged[0].detail.length).toBe(120);

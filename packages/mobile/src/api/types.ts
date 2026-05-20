@@ -60,12 +60,17 @@ export interface BackendEvent {
     content: string;
   };
   tool_call?: {
+    call_id?: string;
     name: string;
     input?: Record<string, unknown>;
+    compact?: boolean;
   };
   tool_call_result?: {
+    call_id?: string;
+    tool_call_seq?: number;
     name: string;
-    output: string;
+    output?: string;
+    compact?: boolean;
   };
   handover?: {
     subtype: string;
@@ -82,6 +87,11 @@ export interface BackendEvent {
     target_agent_id?: string;
     target_agent_name?: string;
   };
+}
+
+export interface ToolDetails {
+  tool_call: BackendEvent;
+  tool_result?: BackendEvent | null;
 }
 
 export interface MessageAttachment {
