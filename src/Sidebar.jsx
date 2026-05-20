@@ -615,13 +615,15 @@ export default function Sidebar({ projects, currentChatId, route, setRoute, onPi
       {/* Function nav */}
       <div style={{ padding: '2px 0' }}>
         <NavItem icon="new"    label="New Task"          active={route === 'new'}    onClick={() => setRoute('new')} testId="nav-new-task" />
-        <NavItem icon="search" label="Search"            active={route === 'search'} onClick={() => setRoute('search')} testId="nav-search" />
+        {/* Search — feature incomplete, hidden until ready */}
+        {/* <NavItem icon="search" label="Search"            active={route === 'search'} onClick={() => setRoute('search')} testId="nav-search" /> */}
         <NavItem icon="agents" label="Agents"
           active={route === 'agents' || route === 'skills' || route === 'runtimes'}
           onClick={() => setRoute('agents')}
           testId="nav-agents"
         />
-        <NavItem icon="phone" label="Pair Mobile" active={false} onClick={onPairMobile} testId="nav-pair-mobile" />
+        {/* Pair Mobile — feature incomplete, hidden until ready */}
+        {/* <NavItem icon="phone" label="Pair Mobile" active={false} onClick={onPairMobile} testId="nav-pair-mobile" /> */}
         <NavItem icon="auto"   label="Auto optimization" active={route === 'auto'}   onClick={() => setRoute('auto')} testId="nav-auto" />
       </div>
 
