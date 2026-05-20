@@ -33,18 +33,18 @@ func BuildScanPromptWithCorpus(now time.Time, sched Schedule, corpus ScanCorpus)
 	b.WriteString(windowEnd.Format("2006-01-02 15:04 MST"))
 	b.WriteString(".\n\n")
 
-	b.WriteString("Look for three kinds of upgrades:\n")
+	b.WriteString("Look for two kinds of upgrades:\n")
 	if sched.Surfaces.Skill {
-		b.WriteString("- skill: repeated workflows worth codifying as a new SKILL.md\n")
+		b.WriteString("- skill: reusable patterns worth codifying as a new SKILL.md\n")
 	}
 	if sched.Surfaces.Memory {
 		b.WriteString("- memory-project: facts about a specific project worth pinning (include preview.scope_id with the project UUID)\n")
 		b.WriteString("- memory-user: personal preferences (style, schedule, escalation patterns)\n")
 	}
-	if sched.Surfaces.Strategy {
-		b.WriteString("- strategy: co-founder-style nudges on routing, scheduling, agent shape, cost\n")
-	}
 	b.WriteString("\n")
+	b.WriteString("Strategy-shaped signals are still in scope: routing, scheduling, agent shape, cost, queueing, and role-boundary patterns. Do not emit a strategy kind; map it to either a skill or a memory:\n")
+	b.WriteString("- skill when the strategy signal is a reusable decision or routing procedure.\n")
+	b.WriteString("- memory-project or memory-user when the strategy signal is a durable fact, preference, constraint, or habit.\n\n")
 
 	thresholdHint := map[string]string{
 		"all":  "Emit everything you see.",
@@ -61,7 +61,7 @@ func BuildScanPromptWithCorpus(now time.Time, sched Schedule, corpus ScanCorpus)
 	b.WriteString("- Reject patterns derivable in <60s by grepping or reading one existing file in the project. Code is the source of truth; do not duplicate it into prose.\n")
 	b.WriteString("- Reject bug post-mortems whose fix already lives in code (merged commits, lint rules, types). The fix is the memory; propose a code comment via `kind: documentation` if anything.\n")
 	b.WriteString("- Reject generic engineering advice (\"write tests,\" \"handle errors,\" \"read all files first\").\n")
-	b.WriteString("- Reject single-window noise. Require ≥3 distinct sessions across ≥7 days OR an explicit user instruction/correction with a stated reason.\n")
+	b.WriteString("- Reject mid-iteration noise. Gate on content quality, not session count. A skill candidate must be a complete reusable procedure with a stable trigger and ordered steps (one rich session is enough if the steps are crystallized; \"user fixed similar bugs twice this week\" is not). A memory candidate must be a durable fact, constraint, or stated preference that will still be true next week (one explicit user statement with a stated reason is enough; \"user touched this file twice today\" is not). In both cases, cite specific chat/turn IDs in evidence.runs and describe what makes the pattern stable, not how often it appeared.\n")
 	b.WriteString("- Reject content already in CLAUDE.md, AGENTS.md, README.md, package.json scripts, or an existing SKILL.md.\n")
 	b.WriteString("- An empty `suggestions` array is a valid, often correct, response. Prefer 0 strong over 5 weak — the user judges the next scan by the worst suggestion in this one.\n\n")
 
@@ -93,8 +93,9 @@ func BuildScanPromptWithCorpus(now time.Time, sched Schedule, corpus ScanCorpus)
 	b.WriteString("\n```\n\n")
 	b.WriteString("Rules:\n")
 	b.WriteString("- schema_version must be 1.\n")
-	b.WriteString("- Each suggestion id is a short hint like \"s-1\", \"k-1\", \"m-1\" (server rewrites to globally unique).\n")
-	b.WriteString("- preview.type matches kind: strategy → plan or diff, skill → skill, memory-* → memory.\n")
+	b.WriteString("- Each suggestion id is a short hint like \"k-1\", \"m-1\", \"u-1\" (server rewrites to globally unique).\n")
+	b.WriteString("- kind must be only skill, memory-project, or memory-user. Do not emit strategy suggestions.\n")
+	b.WriteString("- preview.type matches kind: skill → skill, memory-* → memory.\n")
 	b.WriteString("- For memory-project, set preview.scope_id to the project UUID the runs came from.\n")
 	b.WriteString("- evidence.runs are chat/turn IDs you can quote. evidence.windows are short human-readable spans (\"3 lockfile-recovery sessions\").\n")
 	b.WriteString("- If you cannot find any signals, return an empty suggestions array. Do not invent.\n")

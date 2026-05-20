@@ -14,17 +14,15 @@ const AUTO_UI = '-apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif
 const CONTENT_MAX_WIDTH = 720;
 
 const KIND_META = {
-  'strategy':       { label: 'Strategy', dot: '#8A6B3E', tint: '#F5EBD2', icon: 'compass' },
   'skill':          { label: 'Skill',    dot: '#C4644A', tint: '#F7E5DC', icon: 'spark'   },
   'memory-project': { label: 'Memory · project', dot: '#5B7A6A', tint: '#E2EAE3', icon: 'pin' },
   'memory-user':    { label: 'Memory · you',     dot: '#7A5B8A', tint: '#ECE2F1', icon: 'pin' },
 };
 
 const FILTERS = [
-  { key: 'all',      label: 'All'      },
-  { key: 'strategy', label: 'Strategy' },
-  { key: 'skill',    label: 'Skills'   },
-  { key: 'memory',   label: 'Memories' },
+  { key: 'all',    label: 'All'      },
+  { key: 'skill',  label: 'Skills'   },
+  { key: 'memory', label: 'Memories' },
 ];
 
 const CLOSED_STATES = ['accepted', 'dismissed', 'snoozed', 'pending_compaction'];
@@ -281,11 +279,7 @@ function SuggestionCard({ entry, editing, onAct, onEdit, onSaveEdit, onCancelEdi
   React.useEffect(() => { if (editing) setExpanded(true); }, [editing]);
 
   if (CLOSED_STATES.includes(state)) {
-    const acceptedLabel = (
-      s.kind === 'strategy' ? 'Logged' :
-      s.kind === 'skill' ? 'Saved to skills/' :
-      'Pinned'
-    );
+    const acceptedLabel = s.kind === 'skill' ? 'Saved to skills/' : 'Pinned';
     const stateLabel = state === 'accepted'
       ? acceptedLabel
       : state === 'pending_compaction'
@@ -515,8 +509,7 @@ function ScheduleModal({ open, schedule, onClose, onSave }) {
           <Row label="Scan for">
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
               {[['skill','Skills — repeated workflows worth codifying'],
-                ['memory','Memories — project and personal preferences'],
-                ['strategy','Strategy — direction, spend, team shape']].map(([k, label]) => (
+                ['memory','Memories — project and personal preferences']].map(([k, label]) => (
                 <label key={k} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: '#1C1A17', cursor: 'pointer' }}>
                   <input type="checkbox" checked={!!(draft.surfaces || {})[k]} onChange={() => setSurface(k, !(draft.surfaces || {})[k])} style={{ accentColor: '#1C1A17' }}/>
                   {label}
@@ -637,7 +630,7 @@ function WhatItSeesModal({ open, onClose, latestScanId }) {
           <PrivacyItem title="Runs through your configured Partner agent" body="Wherever your Partner runtime sends data, the scanner sends the same kind of data."/>
           <PrivacyItem title="Output is reviewed before anything changes" body="Suggestions are accepted, edited, or dismissed per row. Nothing mutates skills, memory files, or schedules unless you accept."/>
           <PrivacyItem title="Retention" body="Scan corpus is kept under ~/.crew44/optimizer/scans/ until you purge it. No automatic aggregation in v1."/>
-          <PrivacyItem title="What an accepted suggestion does" body="Strategy → writes a record of intent to applied/. Skill → drops a SKILL.md in your skills folder. Memory → writes a typed markdown file under memory/ and adds a one-line pointer to MEMORY.md."/>
+          <PrivacyItem title="What an accepted suggestion does" body="Skill → drops a SKILL.md in your skills folder. Memory → writes a typed markdown file under memory/ and adds a one-line pointer to MEMORY.md."/>
           <div style={{ display: 'flex', gap: 8, marginTop: 14 }}>
             <button style={ghostBtn} onClick={() => purgeOptimizerScans().then(() => setScan(null))}>Purge scan corpus now</button>
           </div>
@@ -818,7 +811,7 @@ export default function AutoRoute({ onToast, onPickChat }) {
       if (action === 'accept') {
         const e = (list?.items || []).find(x => x.suggestion.id === id);
         const kind = e?.suggestion.kind;
-        onToast?.(kind === 'strategy' ? 'Strategy logged' : kind === 'skill' ? 'Saved to skills/' : kind ? 'Memory pinned' : 'Done');
+        onToast?.(kind === 'skill' ? 'Saved to skills/' : kind ? 'Memory pinned' : 'Done');
       }
     }).catch(e => onToast?.(e.message || 'Action failed'));
   };
@@ -865,7 +858,7 @@ export default function AutoRoute({ onToast, onPickChat }) {
         <div style={{ marginBottom: 18 }}>
           <h1 style={{ fontSize: 22, fontWeight: 600, margin: '0 0 4px', color: '#1C1A17', letterSpacing: -0.2 }}>Auto optimization</h1>
           <div style={{ fontSize: 13, color: '#807972', maxWidth: 640 }}>
-            A weekly read of your run history. Surfaces repeating workflows worth turning into skills, facts worth pinning to memory, and co-founder-style nudges on where to spend energy next.
+            A weekly read of your run history. Surfaces repeating workflows worth turning into skills and facts worth pinning to memory.
           </div>
         </div>
 
