@@ -56,6 +56,21 @@ func BuildScanPromptWithCorpus(now time.Time, sched Schedule, corpus ScanCorpus)
 	}
 	b.WriteString(thresholdHint + "\n\n")
 
+	b.WriteString("Quality bar — default to NOT surfacing. You are judged on signal-to-noise, not volume:\n")
+	b.WriteString("- Reject framework or library boilerplate (anything documented in the framework's own quickstart — Electron IPC, React state lifting, etc.).\n")
+	b.WriteString("- Reject patterns derivable in <60s by grepping or reading one existing file in the project. Code is the source of truth; do not duplicate it into prose.\n")
+	b.WriteString("- Reject bug post-mortems whose fix already lives in code (merged commits, lint rules, types). The fix is the memory; propose a code comment via `kind: documentation` if anything.\n")
+	b.WriteString("- Reject generic engineering advice (\"write tests,\" \"handle errors,\" \"read all files first\").\n")
+	b.WriteString("- Reject single-window noise. Require ≥3 distinct sessions across ≥7 days OR an explicit user instruction/correction with a stated reason.\n")
+	b.WriteString("- Reject content already in CLAUDE.md, AGENTS.md, README.md, package.json scripts, or an existing SKILL.md.\n")
+	b.WriteString("- An empty `suggestions` array is a valid, often correct, response. Prefer 0 strong over 5 weak — the user judges the next scan by the worst suggestion in this one.\n\n")
+
+	b.WriteString("False-positive examples — Reject these even if they appear in 2 sessions:\n")
+	b.WriteString("- Electron IPC main/preload/renderer as a skill: this is framework boilerplate and is derivable from any existing IPC handler in under 60 seconds.\n")
+	b.WriteString("- overlay textarea scroll/overflow bugs as memory: this is a merged bug post-mortem; if the invariant matters, it belongs in the component as a code comment, type, lint rule, or refactor.\n")
+	b.WriteString("- \"read all relevant files before writing code\" as a skill: this is generic engineering advice, not project-specific procedural memory.\n")
+	b.WriteString("- 2 fixes in one component within a few days: this is active iteration, not a stable recurring pattern. Return {\"suggestions\":[]} rather than a weak candidate.\n\n")
+
 	b.WriteString("Scan discipline:\n")
 	b.WriteString("- The daemon already provided a bounded incremental corpus below. Treat it as the source of truth for this scan.\n")
 	b.WriteString("- Do not run shell, filesystem, SQLite, or JSONL discovery to find more sessions unless the user explicitly asks later.\n")

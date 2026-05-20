@@ -67,7 +67,7 @@ func (m *Manager) AttachScheduler(s *Scheduler) { m.scheduler = s }
 // ---------- List + state read ----------
 
 func (m *Manager) ListSuggestions() (SuggestionList, error) {
-	latestID, err := m.store.LatestScanID()
+	latestID, err := m.store.LatestFinishedScanID()
 	if err != nil {
 		return SuggestionList{}, err
 	}

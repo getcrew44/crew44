@@ -141,6 +141,42 @@ func (s *Store) LatestScanID() (string, error) {
 	return latest, nil
 }
 
+// LatestFinishedScanID returns the id of the most recently completed scan
+// (FinishedAt non-zero). Returns "" with nil error when no finished scan exists.
+// Used by ListSuggestions so a rescan in progress does not overwrite LastScanAt
+// with a zero time while the old scan's suggestions are still being displayed.
+func (s *Store) LatestFinishedScanID() (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	entries, err := os.ReadDir(s.scansDir())
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return "", nil
+		}
+		return "", err
+	}
+	var latest string
+	var latestFinished time.Time
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
+			continue
+		}
+		id := strings.TrimSuffix(e.Name(), ".json")
+		var scan Scan
+		if err := readJSON(s.scanPath(id), &scan); err != nil {
+			continue
+		}
+		if scan.FinishedAt.IsZero() {
+			continue
+		}
+		if scan.FinishedAt.After(latestFinished) {
+			latestFinished = scan.FinishedAt
+			latest = id
+		}
+	}
+	return latest, nil
+}
+
 func (s *Store) WriteFailedScanRaw(scanID, raw string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

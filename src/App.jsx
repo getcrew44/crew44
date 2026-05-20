@@ -663,7 +663,7 @@ export default function App() {
         body="Search across every conversation, edit, and file the crew has touched. ⌘K from anywhere." />
     );
   } else if (route === 'auto') {
-    content = <AutoRoute onToast={showToast} />;
+    content = <AutoRoute onToast={showToast} onPickChat={handlePickChat} />;
   } else {
     content = <NewTaskRoute projects={projects} agents={agentsList} onNewTask={handleNewTask} onExistingFolder={handleExistingFolder} initialProjectId={newTaskProjectId} />;
   }

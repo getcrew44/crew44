@@ -829,9 +829,9 @@ function AgentsSection({ agents, runtimes, onPickAgent, onDataRefresh, onToast, 
               onClick={() => onPickAgent(a.id)}
               style={{
                 ...card, padding: '22px 22px 16px', cursor: 'pointer',
-                display: 'flex', flexDirection: 'column', gap: 18,
+                display: 'flex', flexDirection: 'column', gap: 14,
                 transition: 'background 0.12s, border-color 0.12s, transform 0.12s, box-shadow 0.12s',
-                minHeight: 132, position: 'relative',
+                minHeight: 160, position: 'relative',
                 boxShadow: '0 8px 22px rgba(92, 84, 75, 0.035)',
               }}
               onMouseEnter={e => {
@@ -898,8 +898,19 @@ function AgentsSection({ agents, runtimes, onPickAgent, onDataRefresh, onToast, 
                   )}
                 </div>
               </div>
+              {a.instruction && (
+                <div style={{
+                  fontSize: 12.5, color: '#9C9488', lineHeight: 1.5,
+                  display: '-webkit-box', WebkitBoxOrient: 'vertical',
+                  WebkitLineClamp: 2, overflow: 'hidden',
+                  marginTop: -4,
+                }}>
+                  {a.instruction}
+                </div>
+              )}
               <div style={{
                 display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                gap: 8,
                 paddingTop: 14, borderTop: '1px solid #E9E1CE',
                 marginTop: 'auto',
               }}>
@@ -914,6 +925,16 @@ function AgentsSection({ agents, runtimes, onPickAgent, onDataRefresh, onToast, 
                   </div>
                 ) : (
                   <span style={{ fontSize: 12.5, color: '#A89F92', fontStyle: 'italic' }}>No runtime</span>
+                )}
+                {a.model && (
+                  <span style={{
+                    fontSize: 11.5, color: '#807972', fontWeight: 500,
+                    background: '#EDE8D8', borderRadius: 4, padding: '2px 7px',
+                    whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                    maxWidth: '50%', flexShrink: 0,
+                  }} title={a.model}>
+                    {a.model}
+                  </span>
                 )}
               </div>
             </div>

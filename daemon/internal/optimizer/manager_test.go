@@ -379,6 +379,60 @@ func (b *blockingDispatcher) BuildScanCorpus(_ context.Context, since, until tim
 }
 func (b *blockingDispatcher) Cancel(context.Context, string) error { return nil }
 
+func TestManager_ListSuggestions_LastScanAtPreservedDuringRescan(t *testing.T) {
+	store, err := NewStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Seed a completed scan with a known FinishedAt.
+	completedAt := time.Now().UTC().Add(-1 * time.Hour).Truncate(time.Second)
+	completedScan := Scan{
+		ID:           "scan-completed",
+		StartedAt:    completedAt.Add(-5 * time.Minute),
+		FinishedAt:   completedAt,
+		Status:       ScanStatusSuccess,
+		RunsAnalyzed: 3,
+	}
+	if err := store.SaveScan(completedScan); err != nil {
+		t.Fatal(err)
+	}
+
+	// Start a new scan (creates a running scan file with zero FinishedAt).
+	blockedDisp := &blockingDispatcher{release: make(chan struct{})}
+	scanner := NewScanner(store, blockedDisp, &fakeResolver{agentID: "p"})
+	scanner.maxWait = 2 * time.Second
+	mgr := NewManager(store, scanner, &fakeMemWriter{}, &fakeSkillWriter{})
+
+	if _, _, err := mgr.StartScan(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	// While the rescan is in flight, ListSuggestions must show the
+	// previously-completed scan's LastScanAt, not zero.
+	list, err := mgr.ListSuggestions()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !list.Scanning {
+		t.Fatal("expected Scanning=true while scan is in flight")
+	}
+	if list.LastScanAt.IsZero() {
+		t.Fatalf("LastScanAt must not be zero during a rescan; got zero")
+	}
+	if !list.LastScanAt.Equal(completedAt) {
+		t.Fatalf("LastScanAt=%v, want %v (last completed scan)", list.LastScanAt, completedAt)
+	}
+
+	close(blockedDisp.release)
+	for i := 0; i < 50; i++ {
+		if !mgr.guard.busy() {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
 func TestManager_SetScheduleValidation(t *testing.T) {
 	store, err := NewStore(t.TempDir())
 	if err != nil {

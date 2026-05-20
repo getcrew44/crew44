@@ -21,6 +21,46 @@ The auto-optimizer (`Auto optimization` route in Crew44) invokes this skill on a
 - Before recommending a new skill or agent, inspect existing Partner/Crew44 skills and agent roles when available. Prefer updating or merging over duplication.
 - If the requested range is too large, perform a metadata-first pass, then sample or prioritize likely relevant sessions. Report any coverage limits.
 
+## Quality bar — surface less, but mean it
+
+You are judged on signal-to-noise, not volume. Default to NOT surfacing. An empty `suggestions` array is a valid and often correct response. If a candidate does not clearly clear the bar below, drop it.
+
+The cost of a false positive is high: the user has to read, judge, and reject it, and a single weak suggestion poisons trust in the entire scan. The cost of a missed signal is low: the same pattern will fire again next week if it is real.
+
+### Reject by default
+
+- **Framework or library boilerplate.** If the pattern is documented in the framework's own quickstart or "hello world" (Electron IPC main→preload→renderer, React state lifting, Express middleware order, Vite plugin shape, etc.), reject. Anyone reading one existing file in the repo learns it in under a minute.
+- **Patterns derivable from current project state.** If `grep`, `find`, or reading one existing file in the project teaches the same lesson, the candidate is redundant with code. Code is the source of truth; do not duplicate it into prose.
+- **Bug post-mortems whose fix already lives in code.** If the bug commits are merged, the invariant belongs as a code comment, a lint rule, a type, or a refactor — not as an agent memory. Ask: "would a future agent learn this just by reading the component?" If yes, reject and (optionally) propose `kind: documentation` for a code comment instead.
+- **Generic engineering advice.** "Write tests," "handle errors," "name things well," "read all files first," "test before styling." Not project knowledge.
+- **Single-window noise.** Two events in fewer than 3 days inside one file or component is normal iteration on something the user was actively editing, not a recurring pattern. Require either ≥3 distinct sessions across ≥7 days, OR an explicit user instruction/correction with a stated reason.
+- **Inferred preferences without a stated reason.** "User prefers em-dashes" inferred from 7 edits in one window is weaker than "User asked me to always use em-dashes in copy." Prefer the latter; hold the former.
+- **Already documented elsewhere.** Information already in `CLAUDE.md`, `AGENTS.md`, `README.md`, `package.json` scripts, design docs, or a SKILL.md you already have.
+- **Stale or one-off.** A decision tied to a specific past task with no recurrence signal.
+- **Anything that contains secrets, tokens, credentials, customer data, or proprietary content.** Discard outright.
+
+### Surface only when at least one of these is true
+
+- **The user said it explicitly.** A stated preference, correction, or instruction — especially one with a stated reason ("don't mock the DB in these tests because the prod migration broke last quarter"). User statements are higher signal than inferences from edits.
+- **The pattern survives the derivability test.** A reader of the current code could not learn this in 60 seconds from a single file. The knowledge is external (a deploy quirk, a vendor bug, an environment constraint) or relational (which agent owns what, who decides X, when freezes happen).
+- **A code-level fix would not subsume it.** If the right fix is "add a comment to the file," "extract a helper," or "add a lint rule," that is the right surfacing — propose `kind: documentation` or just discard; do not dress it up as a memory or skill.
+- **Evidence is dense.** ≥3 distinct sessions across ≥7 days for project memories and skills, OR a single explicit user instruction. Always cite the chat/turn IDs in `evidence.runs`.
+
+### False-positive examples (internalize these)
+
+- "When adding Electron IPC, edit `main.cjs` + `preload.js` + renderer." → Framework boilerplate documented in Electron's own quickstart. Any existing IPC handler in the repo teaches this in 30 seconds. **Reject.**
+- "Component X had 2 scroll bugs this week; preserve `scrollTop` and use `overflow:hidden`." → Bug post-mortem. Both fixes are already merged. The invariants belong as a code comment in the component file or as a refactor that makes the failure impossible. **Reject** — or propose a `documentation` candidate that adds the comment to the source file.
+- "User prefers TypeScript over JavaScript." → Derivable from `tsconfig.json` and the file extensions in the repo. **Reject.**
+- "Always read all relevant files before writing code." → Generic engineering advice. **Reject.**
+- "On May 14 the user asked Claude to fix the toolbar." → Session ephemera, no recurrence. **Reject.**
+
+### Good surfacings (mirror these)
+
+- **memory-project:** "Project uses pnpm workspaces; never run `npm install` at the repo root — it produces a `package-lock.json` that breaks the workspace resolver." Non-obvious, repeatedly rediscovered, not in framework docs, and cannot live in code (the fix is "don't run a command," not a code change).
+- **memory-user:** "Don't mock the database in integration tests — prior incident where a mocked test passed but the prod migration failed." Explicit correction with a stated reason, applies across projects.
+- **skill:** A 6-step locale-prep ritual the user walks through manually before every render — multi-step, project-specific, non-trivial, with evidence across ≥3 sessions, AND not derivable from any single existing file.
+- **strategy:** "Agent Aria is idle 38% of the week while Milo is queued 11m/task — route X to Aria for a +22% throughput estimate." Cross-agent, cross-day pattern with measurable lift; impossible to derive from any one session.
+
 ## When to use
 
 - The user gives a time range and asks what can be summarized as a skill.
@@ -79,7 +119,7 @@ Timestamps are usually ISO-8601 UTC in each JSONL record. Normalize the user's r
    - `agent-only`: a role definition is useful, but no new skill is needed yet;
    - `documentation`: knowledge should live in project docs, not Crew44 configuration;
    - `discard`: too narrow, stale, sensitive, or one-off.
-9. Reject candidates that are only a single task, contain secrets, depend on private credentials, encode stale one-time decisions, or cannot be triggered reliably.
+9. Apply the **Quality bar** section above to every candidate before listing it. Reject framework boilerplate, patterns derivable from current code in <60 seconds, bug post-mortems whose fix is already merged, single-window noise (n<3 sessions or window<7 days unless the user stated it explicitly), generic engineering advice, content already in CLAUDE.md/AGENTS.md/README, single-task or one-off decisions, and anything containing secrets or private credentials. When in doubt, drop.
 10. Group similar findings. For skill candidates, state trigger conditions, reusable procedure, evidence sessions, confidence, and whether it should become a new skill or update an existing one.
 11. For agent candidates, state mission, routing rule, required skills, evidence sessions, confidence, and why an agent boundary is justified. Recommend a new agent only when the pattern spans multiple sessions, has a stable responsibility boundary, needs its own routing rule, and benefits from a bundle of skills.
 12. If the user asks to create files, hand off to Coding Agent with selected candidate names, evidence summary, target agent location, target skill locations, and any manifest updates needed.
@@ -259,6 +299,19 @@ Reply with a short plain-English summary the user can skim, then a single fenced
 ### Honor surfaces and threshold
 
 The auto-optimizer's scan prompt lists which surfaces are enabled and the priority threshold. If `surfaces.memory=false` you must skip both `memory-project` and `memory-user`. If `threshold=high` you must skip `med` and `low` candidates. The daemon also re-validates server-side; emitting filtered candidates wastes tokens but does not harm the system.
+
+### Last-pass check before emitting
+
+For every candidate you are about to include, walk through this checklist. If any answer is "no" or "yes (for the wrong column)," drop the candidate.
+
+- Could a fresh agent learn this in under 60 seconds by reading one existing file in the repo? If yes → **drop**, it is derivable.
+- Is the fix already in code (merged commits, eslint rules, types)? If yes → **drop**, the code is the memory.
+- Is this documented in the framework's own quickstart? If yes → **drop**, it is boilerplate.
+- Does the evidence have ≥3 distinct sessions across ≥7 days, OR a direct user instruction with a reason? If no → **drop**, single-window noise.
+- Does the `body` name *why* it matters (an incident, a constraint, a measurable lift) — not just *what* the pattern is? If no → **rewrite or drop**.
+- Would shipping this to the user feel like a useful nudge from a senior partner, or like a generic checklist? If the latter → **drop**.
+
+A scan that emits 0–2 strong suggestions per week beats a scan that emits 5 weak ones. The user trusts the next scan based on the worst suggestion in this one.
 
 ## Privacy rules
 

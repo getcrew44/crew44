@@ -206,6 +206,21 @@ func TestBuildScanPromptRequiresBoundedMetadataFirstScanning(t *testing.T) {
 	}
 }
 
+func TestBuildScanPromptIncludesFalsePositiveExamples(t *testing.T) {
+	prompt := BuildScanPrompt(time.Date(2026, 5, 13, 22, 4, 0, 0, time.Local), DefaultSchedule())
+	for _, want := range []string{
+		"False-positive examples",
+		"Electron IPC",
+		"overlay textarea",
+		"Reject these even if they appear in 2 sessions",
+		"Return {\"suggestions\":[]} rather than a weak candidate",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("scan prompt missing %q:\n%s", want, prompt)
+		}
+	}
+}
+
 func TestScannerPostsIncrementalProjectChatCorpus(t *testing.T) {
 	since := time.Date(2026, 5, 12, 8, 0, 0, 0, time.UTC)
 	until := time.Date(2026, 5, 14, 8, 0, 0, 0, time.UTC)
