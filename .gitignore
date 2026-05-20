@@ -6,6 +6,14 @@
 node_modules/
 /packages/*/.expo/
 /packages/*/dist/
+
+# Expo prebuild output (CNG — source of truth is app.json; run `expo prebuild` to regenerate)
+/packages/mobile/ios/
+/packages/mobile/android/
+
+# Ruby / Bundler (Gemfile + Gemfile.lock are committed; installed gems are not)
+/packages/mobile/.bundle/
+/packages/mobile/vendor/bundle/
 /dist/
 /.electron-app/
 .gstack/

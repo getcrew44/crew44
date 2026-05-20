@@ -4,6 +4,42 @@ TypeScript Expo app for pairing with a Crew44 desktop daemon over the remote
 relay protocol. The app is iOS/Android focused; Expo web is not a target for
 this package.
 
+## Native Build Setup (One-Time Per Machine)
+
+The `ios/` and `android/` directories are not committed — they are regenerated
+from `app.json` via Expo's prebuild. Before the first native iOS build on a
+machine you need a modern Ruby + CocoaPods.
+
+```bash
+# Ruby via rbenv (pinned by .ruby-version to 3.2.2)
+brew install rbenv ruby-build
+echo 'eval "$(rbenv init - zsh)"' >> ~/.zshrc && exec zsh
+rbenv install 3.2.2
+
+# Install bundler + the pinned CocoaPods from Gemfile
+cd packages/mobile
+gem install bundler
+bundle install
+```
+
+Do not use `brew install cocoapods` — it bundles its own Ruby and breaks on
+Xcode updates. Do not use `sudo gem install cocoapods` on system Ruby 2.6 —
+it is end-of-life and ships incompatible native extensions.
+
+## Native iOS Build
+
+```bash
+cd packages/mobile
+npx expo prebuild --platform ios     # regenerates ios/ from app.json
+cd ios
+bundle exec pod install              # always via bundler, never bare `pod`
+cd ..
+npm run ios                          # builds + installs to simulator
+```
+
+For a physical device add `-- --device` to the last command (and sign in Xcode
+the first time).
+
 ## Run On A Phone
 
 From the repository root:
