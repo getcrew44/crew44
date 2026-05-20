@@ -14,6 +14,9 @@
     "mobile:start": "npm --workspace=@crew44/mobile run start --",
     "mobile:android": "npm --workspace=@crew44/mobile run android --",
     "mobile:ios": "npm --workspace=@crew44/mobile run ios --",
+    "mobile:build:ios": "npm --workspace=@crew44/mobile run build:ios",
+    "mobile:build:android": "npm --workspace=@crew44/mobile run build:android",
+    "mobile:build:all": "npm --workspace=@crew44/mobile run build:all",
     "test:mobile": "npm --workspace=@crew44/mobile run test",
     "test": "cd daemon && go test ./... && cd .. && vitest run && npm run test:mobile",
     "clean": "rm -rf bin dist .electron-app crew44-server crew44-daemon"
