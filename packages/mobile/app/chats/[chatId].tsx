@@ -4,6 +4,7 @@ import { FlatList, Keyboard, KeyboardAvoidingView, Platform, Pressable, StyleShe
 import { useMobileClient } from "@/client/MobileClientProvider";
 import { buildRenderableTimeline, mapBackendEvent, RenderableTimelineItem, TimelineItem } from "@/api/events";
 import { Agent, BackendEvent, Chat } from "@/api/types";
+import { AgentTargetPicker } from "@/ui/AgentTargetPicker";
 import { DesktopOfflineState } from "@/ui/DesktopOfflineState";
 import { BackButton, EmptyState, Header, LoadingState, Screen } from "@/ui/Screen";
 import { TimelineRow } from "@/ui/TimelineEvents";
@@ -124,6 +125,15 @@ export default function ChatScreen() {
     load();
     return () => cleanupRef.current();
   }, [load]);
+
+  React.useEffect(() => {
+    if (!chat || agents.length === 0) return;
+    const preferred = chat.current_agent_id || chat.main_agent_id || agents[0].id;
+    setTargetAgentId(current => {
+      if (current && agents.some(agent => agent.id === current)) return current;
+      return preferred;
+    });
+  }, [agents, chat]);
 
   React.useEffect(() => {
     const showSub = Keyboard.addListener("keyboardDidShow", () => {
@@ -273,6 +283,15 @@ export default function ChatScreen() {
                 ))}
               </View>
             ) : null}
+            {!streaming && agents.length > 0 ? (
+              <View style={styles.targetRow}>
+                <AgentTargetPicker
+                  agents={agents}
+                  value={targetAgentId || chat?.current_agent_id || chat?.main_agent_id || agents[0].id}
+                  onChange={setTargetAgentId}
+                />
+              </View>
+            ) : null}
             <View style={styles.composer}>
               <TextInput
                 value={draft}
@@ -334,6 +353,11 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     gap: 10,
     alignItems: "flex-end"
+  },
+  targetRow: {
+    paddingHorizontal: 12,
+    paddingTop: 8,
+    backgroundColor: colors.bg
   },
   mentionMenu: {
     marginHorizontal: 12,

@@ -26,7 +26,7 @@ describe('PairMobileDialog', () => {
     render(<PairMobileDialog onClose={() => {}} />);
 
     await waitFor(() => {
-      expect(createRemotePairing).toHaveBeenCalledWith('wss://relay.mindivelabs.com/relay');
+      expect(createRemotePairing).toHaveBeenCalledWith('wss://relay.crew44.io/relay');
     });
     expect(await screen.findByTestId('mobile-pair-qr')).toBeInTheDocument();
   });

@@ -16,6 +16,7 @@ export interface BaseTimelineItem {
   author: string;
   time: string;
   tsISO: string;
+  showHeader?: boolean;
 }
 
 export interface MessageItem extends BaseTimelineItem {
@@ -286,10 +287,16 @@ function groupConsecutiveTools(events: TimelineItem[]): TimelineItem[] {
   return out.map(event => (event.kind === "tool_group" && event.events.length === 1 ? event.events[0] : event));
 }
 
+function withHeaderState(event: TimelineItem, showHeader: boolean): TimelineItem {
+  if (event.showHeader === showHeader) return event;
+  return { ...event, showHeader };
+}
+
 export function buildRenderableTimeline(events: TimelineItem[]): RenderableTimelineItem[] {
   const prepared = groupConsecutiveTools(prepareEvents(events));
   const out: RenderableTimelineItem[] = [];
   let prevAgentActor = "";
+  let prevDisplayedActor = "";
   const isAgentActor = (id: string) => id && id !== "__human__";
 
   prepared.forEach((event, index) => {
@@ -307,6 +314,7 @@ export function buildRenderableTimeline(events: TimelineItem[]): RenderableTimel
           note: event.note
         });
         prevAgentActor = to;
+        prevDisplayedActor = "";
       } else if (from && to && from === to) {
         prevAgentActor = to;
       }
@@ -322,11 +330,20 @@ export function buildRenderableTimeline(events: TimelineItem[]): RenderableTimel
         to: event.author,
         synthetic: true
       });
+      prevDisplayedActor = "";
     }
 
-    out.push(event);
+    const actor = event.author;
+    const isHeaderless = !isAgentActor(actor) || event.kind === "tool_result";
+    const showHeader = isHeaderless ? true : prevDisplayedActor !== actor;
+    out.push(withHeaderState(event, showHeader));
     if (isAgentActor(event.author)) prevAgentActor = event.author;
-    if (!isAgentActor(event.author)) prevAgentActor = prevAgentActor || "";
+    if (!isAgentActor(event.author)) {
+      prevAgentActor = prevAgentActor || "";
+      prevDisplayedActor = "";
+    } else if (!isHeaderless && showHeader) {
+      prevDisplayedActor = actor;
+    }
     if (index === prepared.length - 1) return;
   });
   return out;

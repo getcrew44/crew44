@@ -80,4 +80,47 @@ describe("mapBackendEvent", () => {
     expect(rendered[0]).toMatchObject({ kind: "message", _thought: { reasoning: "checking" } });
     expect(rendered[1]).toMatchObject({ kind: "handover_divider", from: "agent_1", to: "agent_2" });
   });
+
+  it("marks consecutive agent tool calls as header continuations", () => {
+    const events = [
+      {
+        kind: "message",
+        seq: 1,
+        _seq: 1,
+        author: "agent_1",
+        role: "assistant",
+        body: "I will inspect it.",
+        time: "11:00",
+        tsISO: ""
+      },
+      {
+        kind: "tool",
+        seq: 2,
+        _seq: 2,
+        author: "agent_1",
+        tool: "exec_command",
+        path: "ls",
+        input: { command: "ls" },
+        result: "ok",
+        time: "11:00",
+        tsISO: ""
+      },
+      {
+        kind: "tool",
+        seq: 3,
+        _seq: 3,
+        author: "agent_1",
+        tool: "exec_command",
+        path: "pwd",
+        input: { command: "pwd" },
+        result: "ok",
+        time: "11:00",
+        tsISO: ""
+      }
+    ] satisfies TimelineItem[];
+
+    const rendered = buildRenderableTimeline(events);
+    expect(rendered[0]).toMatchObject({ kind: "message", showHeader: true });
+    expect(rendered[1]).toMatchObject({ kind: "tool_group", showHeader: false });
+  });
 });

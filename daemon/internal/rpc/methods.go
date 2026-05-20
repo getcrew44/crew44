@@ -3,6 +3,7 @@ package rpc
 import (
 	"context"
 	"encoding/json"
+	"sort"
 
 	"github.com/getcrew44/crew44/daemon/internal/app"
 	"github.com/getcrew44/crew44/daemon/internal/model"
@@ -442,12 +443,34 @@ func (s *Server) projectsGitDiff(_ context.Context, _ Peer, params json.RawMessa
 
 func (s *Server) projectsChatsList(_ context.Context, _ Peer, params json.RawMessage) (any, error) {
 	var body struct {
-		ID string `json:"id"`
+		ID     string `json:"id"`
+		Limit  int    `json:"limit"`
+		Offset int    `json:"offset"`
 	}
 	if err := decodeParams(params, &body); err != nil {
 		return nil, err
 	}
 	items, err := s.app.ListProjectChats(body.ID)
+	if err != nil {
+		return nil, err
+	}
+	sort.SliceStable(items, func(i, j int) bool {
+		return items[i].UpdatedAt.After(items[j].UpdatedAt)
+	})
+	if body.Offset < 0 {
+		body.Offset = 0
+	}
+	if body.Limit > 0 {
+		if body.Offset >= len(items) {
+			items = nil
+		} else {
+			end := body.Offset + body.Limit
+			if end > len(items) {
+				end = len(items)
+			}
+			items = items[body.Offset:end]
+		}
+	}
 	return map[string]any{"items": items}, err
 }
 

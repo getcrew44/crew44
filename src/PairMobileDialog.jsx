@@ -3,7 +3,7 @@ import { QRCodeSVG } from 'qrcode.react';
 import { createRemotePairing, deleteRemoteDevice } from './api.js';
 import { ghostBtn, primaryBtn, UI_FONT, MONO_FONT, Icon } from './components.jsx';
 
-export const DEFAULT_RELAY_URL = 'wss://relay.mindivelabs.com/relay';
+export const DEFAULT_RELAY_URL = 'wss://relay.crew44.io/relay';
 
 const iconButton = {
   width: 28,
