@@ -5,6 +5,7 @@ export interface PairingOffer {
   type: string;
   relay_url: string;
   server_id: string;
+  desktop_name?: string;
   daemon_pubkey: string;
   pairing_id: string;
   pairing_secret: string;
@@ -37,6 +38,7 @@ export function parsePairingOffer(text: string, now: Date = new Date()): Pairing
     type: PAIRING_TYPE,
     relay_url: requireString(obj.relay_url, "relay_url"),
     server_id: requireString(obj.server_id, "server_id"),
+    desktop_name: typeof obj.desktop_name === "string" && obj.desktop_name.trim() ? obj.desktop_name.trim() : undefined,
     daemon_pubkey: requireString(obj.daemon_pubkey, "daemon_pubkey"),
     pairing_id: requireString(obj.pairing_id, "pairing_id"),
     pairing_secret: requireString(obj.pairing_secret, "pairing_secret"),

@@ -74,8 +74,13 @@ export interface BackendEvent {
     note?: string;
   };
   error?: {
+    subtype?: string;
     code: string;
     message: string;
+    agent_id?: string;
+    agent_name?: string;
+    target_agent_id?: string;
+    target_agent_name?: string;
   };
 }
 

@@ -3,7 +3,9 @@ import { router, useLocalSearchParams } from "expo-router";
 import { FlatList, View } from "react-native";
 import { useMobileClient } from "@/client/MobileClientProvider";
 import { ChatIndexEntry, Project } from "@/api/types";
-import { Button, EmptyState, Header, LoadingState, Row, Screen } from "@/ui/Screen";
+import { DesktopOfflineState } from "@/ui/DesktopOfflineState";
+import { BackButton, Button, EmptyState, Header, LoadingState, Row, Screen } from "@/ui/Screen";
+import { goBackOrHome } from "@/ui/navigation";
 
 function chatId(chat: ChatIndexEntry): string {
   return chat.chat_id || chat.id || "";
@@ -11,7 +13,7 @@ function chatId(chat: ChatIndexEntry): string {
 
 export default function ProjectChatsScreen() {
   const { projectId } = useLocalSearchParams<{ projectId: string }>();
-  const { api } = useMobileClient();
+  const { api, status, error: connectionError, connectionIssue, reconnect, disconnect } = useMobileClient();
   const [projects, setProjects] = React.useState<Project[]>([]);
   const [chats, setChats] = React.useState<ChatIndexEntry[]>([]);
   const [loading, setLoading] = React.useState(true);
@@ -61,10 +63,28 @@ export default function ProjectChatsScreen() {
     }
   }, [api, project, projectId]);
 
+  if (status === "error" && !api) {
+    return (
+      <Screen>
+        <Header
+          title={project?.name || "Project"}
+          left={<BackButton onPress={goBackOrHome} />}
+        />
+        <DesktopOfflineState
+          title={connectionIssue === "relay" ? "Relay connection issue" : "Desktop offline"}
+          message={connectionError}
+          onRetry={reconnect}
+          onUnpair={disconnect}
+        />
+      </Screen>
+    );
+  }
+
   return (
     <Screen>
       <Header
         title={project?.name || "Project"}
+        left={<BackButton onPress={goBackOrHome} />}
         right={<Button label={creating ? "Creating..." : "New Chat"} disabled={creating} onPress={createChat} />}
       />
       {loading ? <LoadingState /> : error ? (

@@ -11,6 +11,7 @@ vi.mock('../api.js', () => ({
   listRuntimes: vi.fn(),
   listProjectChats: vi.fn(),
   listChats: vi.fn(),
+  listRemoteDevices: vi.fn(),
   getOnboardingStatus: vi.fn(),
   completeOnboarding: vi.fn(),
   getChat: vi.fn(),
@@ -56,6 +57,7 @@ beforeEach(() => {
   api.listSkills.mockResolvedValue([]);
   api.listRuntimes.mockResolvedValue([{ id: 'runtime-1', name: 'Test Desk' }]);
   api.listProjectChats.mockResolvedValue([runningChat]);
+  api.listRemoteDevices.mockResolvedValue([]);
   api.getOnboardingStatus.mockResolvedValue({ onboarding_required: false });
   api.getChat.mockResolvedValue(runningChat);
   api.streamChatEvents.mockImplementation(() => vi.fn());

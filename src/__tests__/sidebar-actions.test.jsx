@@ -40,6 +40,11 @@ describe('Sidebar empty states', () => {
     render(<Sidebar {...baseProps} deskName="Jordan's Mac" />);
     expect(screen.getByText("Jordan's Mac")).toBeInTheDocument();
   });
+
+  it('renames the mobile entry when a device is paired', () => {
+    render(<Sidebar {...baseProps} hasMobileDevice />);
+    expect(screen.getByTestId('nav-pair-mobile')).toHaveTextContent('Manage Mobile');
+  });
 });
 
 // ─── New project inline input ─────────────────────────────────────────────────

@@ -7,12 +7,21 @@ export function Screen({ children }: { children: React.ReactNode }) {
   return <SafeAreaView style={styles.screen}>{children}</SafeAreaView>;
 }
 
-export function Header({ title, right }: { title: string; right?: React.ReactNode }) {
+export function Header({ title, left, right }: { title: string; left?: React.ReactNode; right?: React.ReactNode }) {
   return (
     <View style={styles.header}>
+      {left}
       <Text style={styles.title}>{title}</Text>
       {right}
     </View>
+  );
+}
+
+export function BackButton({ onPress }: { onPress: () => void }) {
+  return (
+    <Pressable accessibilityRole="button" accessibilityLabel="Back" onPress={onPress} style={styles.backButton}>
+      <Text style={styles.backSymbol}>‹</Text>
+    </Pressable>
   );
 }
 
@@ -85,6 +94,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.bg
   },
   header: {
+    zIndex: 30,
     minHeight: 58,
     paddingHorizontal: spacing.page,
     paddingVertical: 12,
@@ -99,6 +109,18 @@ const styles = StyleSheet.create({
     color: colors.text,
     fontSize: 22,
     fontWeight: "700"
+  },
+  backButton: {
+    width: 34,
+    height: 38,
+    alignItems: "flex-start",
+    justifyContent: "center"
+  },
+  backSymbol: {
+    color: colors.text,
+    fontSize: 32,
+    lineHeight: 34,
+    fontWeight: "500"
   },
   button: {
     minHeight: 38,

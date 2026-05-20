@@ -4,11 +4,12 @@ import { EncryptedFrameTransport } from "./frameTransport";
 import { DHKeyPair, generateDHKeyPair, NoiseInitiator, NoiseKeySource, publicKeyFromPrivate } from "./noise";
 import { PairingOffer } from "./pairingOffer";
 import { attachRpcSocket, JsonRpcPeer } from "./rpc";
-import { openRelaySocket, sendBinary, sendJSON, waitForBinaryMessage } from "./relay";
+import { openRelaySocket, sendBinary, sendJSON, waitForBinaryMessage, waitForRelayReady } from "./relay";
 
 export interface PairedProfile {
   serverId: string;
   relayUrl: string;
+  desktopName?: string;
   daemonPubKey: string;
   deviceId: string;
   deviceName: string;
@@ -75,6 +76,7 @@ async function readEncryptedResponse(transport: EncryptedFrameTransport, socket:
 export async function registerPairing(offer: PairingOffer, deviceName: string): Promise<PairingResult> {
   const socket = await openRelaySocket(offer.relay_url, offer.server_id);
   try {
+    await waitForRelayReady(socket);
     sendJSON(socket, { type: "noise_init", mode: "pairing" });
     const remoteStatic = base64RawDecode(offer.daemon_pubkey);
     const noise = new NoiseInitiator("NK", remoteStatic, cryptoKeySource);
@@ -101,6 +103,7 @@ export async function registerPairing(offer: PairingOffer, deviceName: string): 
       profile: {
         serverId: offer.server_id,
         relayUrl: offer.relay_url,
+        desktopName: offer.desktop_name,
         daemonPubKey: offer.daemon_pubkey,
         deviceId: device.device_id,
         deviceName: device.name || deviceName,
@@ -119,6 +122,7 @@ export async function connectPairedDevice(
   onClose: (err: Error) => void
 ): Promise<JsonRpcPeer> {
   const socket = await openRelaySocket(profile.relayUrl, profile.serverId);
+  await waitForRelayReady(socket);
   sendJSON(socket, { type: "noise_init", mode: "device" });
 
   const localStatic = keyPairFromPrivateBase64(privateKey);

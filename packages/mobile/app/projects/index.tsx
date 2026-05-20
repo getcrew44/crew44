@@ -3,10 +3,12 @@ import { router } from "expo-router";
 import { FlatList, View } from "react-native";
 import { useMobileClient } from "@/client/MobileClientProvider";
 import { Project } from "@/api/types";
-import { Button, EmptyState, Header, LoadingState, Row, Screen } from "@/ui/Screen";
+import { DesktopOfflineState } from "@/ui/DesktopOfflineState";
+import { BackButton, Button, EmptyState, Header, LoadingState, Row, Screen } from "@/ui/Screen";
+import { goBackOrHome } from "@/ui/navigation";
 
 export default function ProjectsScreen() {
-  const { api, status, reconnect } = useMobileClient();
+  const { api, status, error: connectionError, connectionIssue, reconnect, disconnect } = useMobileClient();
   const [projects, setProjects] = React.useState<Project[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState("");
@@ -29,11 +31,28 @@ export default function ProjectsScreen() {
     if (api) load();
   }, [api, load, status]);
 
+  if (status === "error" && !api) {
+    return (
+      <Screen>
+        <Header
+          title="Projects"
+          left={<BackButton onPress={goBackOrHome} />}
+        />
+        <DesktopOfflineState
+          title={connectionIssue === "relay" ? "Relay connection issue" : "Desktop offline"}
+          message={connectionError}
+          onRetry={reconnect}
+          onUnpair={disconnect}
+        />
+      </Screen>
+    );
+  }
+
   return (
     <Screen>
       <Header
         title="Projects"
-        right={<Button label="Agents" variant="secondary" onPress={() => router.push("/agents")} />}
+        left={<BackButton onPress={goBackOrHome} />}
       />
       {loading ? <LoadingState /> : error ? (
         <View style={{ flex: 1 }}>

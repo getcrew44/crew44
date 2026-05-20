@@ -1,53 +1,112 @@
 import React from "react";
 import { router } from "expo-router";
 import { CameraView, useCameraPermissions } from "expo-camera";
-import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { useMobileClient } from "@/client/MobileClientProvider";
 import { Button, Header, Screen } from "@/ui/Screen";
 import { colors } from "@/ui/theme";
+
+const cameraIdleMs = 60000;
 
 export default function PairScreen() {
   const client = useMobileClient();
   const [permission, requestPermission] = useCameraPermissions();
   const [manualText, setManualText] = React.useState("");
   const [scannerActive, setScannerActive] = React.useState(true);
+  const [pairing, setPairing] = React.useState(false);
+  const [cameraPaused, setCameraPaused] = React.useState(false);
   const [error, setError] = React.useState("");
+  const scanInFlightRef = React.useRef(false);
+  const idleTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const unpairNotice = client.error.startsWith("Also unpair") ? client.error : "";
+  const pairError = error || (unpairNotice ? "" : client.error);
 
   React.useEffect(() => {
-    if (client.status === "online") router.replace("/projects");
+    if (client.status === "online") router.replace("/");
   }, [client.status]);
+
+  const stopIdleTimer = React.useCallback(() => {
+    if (idleTimerRef.current) {
+      clearTimeout(idleTimerRef.current);
+      idleTimerRef.current = null;
+    }
+  }, []);
+
+  const cameraRunning = Boolean(permission?.granted && scannerActive && !pairing && !cameraPaused);
+
+  React.useEffect(() => {
+    stopIdleTimer();
+    if (!cameraRunning) return undefined;
+    idleTimerRef.current = setTimeout(() => {
+      setCameraPaused(true);
+      setScannerActive(false);
+    }, cameraIdleMs);
+    return stopIdleTimer;
+  }, [cameraRunning, stopIdleTimer]);
 
   const pair = React.useCallback(async (raw: string) => {
     if (!raw.trim()) return;
+    if (scanInFlightRef.current) return;
+    scanInFlightRef.current = true;
+    stopIdleTimer();
     setScannerActive(false);
+    setPairing(true);
+    setCameraPaused(false);
     setError("");
     try {
       await client.pairWithQrText(raw.trim());
     } catch (err) {
       setError(err instanceof Error ? err.message : "Pairing failed");
+      scanInFlightRef.current = false;
+      setPairing(false);
       setScannerActive(true);
     }
-  }, [client]);
+  }, [client, stopIdleTimer]);
+
+  const resumeCamera = React.useCallback(() => {
+    if (!cameraPaused) return;
+    scanInFlightRef.current = false;
+    setError("");
+    setPairing(false);
+    setCameraPaused(false);
+    setScannerActive(true);
+  }, [cameraPaused]);
 
   return (
     <Screen>
       <Header title="Pair device" />
       <View style={styles.body}>
         <Text style={styles.copy}>Scan the QR code from Crew44's Pair Mobile dialog.</Text>
-        <View style={styles.cameraBox}>
+        <Pressable style={styles.cameraBox} onPress={resumeCamera}>
           {permission?.granted ? (
-            <CameraView
-              style={StyleSheet.absoluteFill}
-              barcodeScannerSettings={{ barcodeTypes: ["qr"] }}
-              onBarcodeScanned={scannerActive ? event => pair(event.data) : undefined}
-            />
+            cameraRunning ? (
+              <CameraView
+                style={StyleSheet.absoluteFill}
+                barcodeScannerSettings={{ barcodeTypes: ["qr"] }}
+                onBarcodeScanned={event => pair(event.data)}
+              />
+            ) : pairing ? (
+              <View style={styles.cameraEmpty}>
+                <ActivityIndicator color={colors.accent} />
+                <Text style={styles.copy}>Pairing...</Text>
+              </View>
+            ) : cameraPaused ? (
+              <View style={styles.cameraEmpty}>
+                <Text style={styles.copy}>Camera paused.</Text>
+                <Text style={styles.cameraHint}>Tap the scan area to resume.</Text>
+              </View>
+            ) : (
+              <View style={styles.cameraEmpty}>
+                <Text style={styles.copy}>Scanner paused.</Text>
+              </View>
+            )
           ) : (
             <View style={styles.cameraEmpty}>
               <Text style={styles.copy}>Camera permission is needed for QR pairing.</Text>
               <Button label="Allow camera" onPress={requestPermission} />
             </View>
           )}
-        </View>
+        </Pressable>
         <TextInput
           value={manualText}
           onChangeText={setManualText}
@@ -58,7 +117,8 @@ export default function PairScreen() {
           placeholderTextColor={colors.muted}
           style={styles.input}
         />
-        {error || client.error ? <Text style={styles.error}>{error || client.error}</Text> : null}
+        {pairError ? <Text style={styles.error}>{pairError}</Text> : null}
+        {unpairNotice ? <Text style={styles.notice}>{unpairNotice}</Text> : null}
         <Button
           label={client.status === "connecting" ? "Pairing..." : "Pair from pasted text"}
           disabled={client.status === "connecting"}
@@ -100,6 +160,11 @@ const styles = StyleSheet.create({
     padding: 20,
     gap: 12
   },
+  cameraHint: {
+    color: colors.muted,
+    fontSize: 12,
+    lineHeight: 18
+  },
   input: {
     minHeight: 92,
     borderRadius: 8,
@@ -114,6 +179,11 @@ const styles = StyleSheet.create({
   error: {
     color: colors.danger,
     fontSize: 13
+  },
+  notice: {
+    color: colors.muted,
+    fontSize: 13,
+    lineHeight: 18
   },
   linkButton: {
     alignItems: "center",

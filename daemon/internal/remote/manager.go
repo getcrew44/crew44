@@ -95,11 +95,13 @@ func (m *Manager) CreatePairing(_ context.Context, relayURL string) (any, error)
 	}
 
 	now := time.Now().UTC()
+	desktopName, _ := os.Hostname()
 	offer := PairingOffer{
 		Version:       1,
 		Type:          pairingType,
 		RelayURL:      relayURL,
 		ServerID:      m.identity.ServerID,
+		DesktopName:   desktopName,
 		DaemonPubKey:  m.identity.PublicKey,
 		PairingID:     newPairingID(),
 		PairingSecret: newSecret(),

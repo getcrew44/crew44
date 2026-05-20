@@ -10,6 +10,7 @@ function offer(overrides: Record<string, unknown> = {}) {
     type: PAIRING_TYPE,
     relay_url: "wss://relay.example.com/relay",
     server_id: "srv_test",
+    desktop_name: "Studio Mac",
     daemon_pubkey: "abc123",
     pairing_id: "pair_test",
     pairing_secret: "secret",
@@ -22,7 +23,8 @@ describe("parsePairingOffer", () => {
   it("accepts a valid Crew44 pairing offer", () => {
     expect(parsePairingOffer(offer(), now)).toMatchObject({
       type: PAIRING_TYPE,
-      server_id: "srv_test"
+      server_id: "srv_test",
+      desktop_name: "Studio Mac"
     });
   });
 
