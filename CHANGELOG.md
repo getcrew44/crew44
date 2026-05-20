@@ -2,6 +2,21 @@
 
 All notable changes to this project are documented here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.2] - 2026-05-20
+
+### Changed
+- **Auto-optimizer rules now gate on content quality, not session count.** Skill candidates need a complete reusable procedure (stable trigger + ordered steps) — one rich session is enough if the procedure is crystallized. Memory candidates need a durable fact or stated preference still true next week. Recurrence is supporting evidence, not a hard gate.
+- **"Auto optimization" view drops the Strategy surface.** Strategy-shaped signals (routing, scheduling, agent shape, cost) are still mined, but they now map to a skill or a memory — there is no separate Strategy tab, schedule checkbox, kind badge, or accepted-state path. Hero and privacy copy updated to match.
+- **Sidebar hides unfinished nav items.** The Search and Pair Mobile entries are commented out until those features ship; the JSX is preserved so re-enabling is a one-line revert.
+- **Scan prompt teaches the LLM the new bar.** The partner `session-skill-mining` skill and the inline scan prompt name what to reject (framework boilerplate, patterns derivable in <60s from one file, bug post-mortems whose fix is merged, generic engineering advice, content already in CLAUDE.md/AGENTS.md/README) and give concrete false-positive and good-surfacing examples.
+
+### Fixed
+- **"Last scan" stays put while a new scan runs.** Clicking "Scan now" no longer flips the Auto optimization counter to "never" mid-scan. The daemon now resolves the displayed scan via `LatestFinishedScanID`, so an in-flight scan (FinishedAt still zero) doesn't shadow the previous result. Covered by `TestManager_ListSuggestions_LastScanAtPreservedDuringRescan`.
+
+### Added
+- **Agent cards show runtime, model badge, and instruction preview.** The Crew view's agent grid surfaces the model in a small badge and a two-line clamped instruction so you can scan an agent's identity without opening it.
+- **Suggestion bodies and skill previews render inline markdown.** Auto optimization cards now parse `**bold**`, `` `code` ``, headings, and lists in suggestion bodies and skill `lines` previews; evidence run IDs are clickable to jump straight into the source chat.
+
 ## [0.5.1] - 2026-05-20
 
 ### Added
