@@ -3,6 +3,7 @@ const path = require('path');
 
 const productName = 'Crew44';
 const root = path.resolve(__dirname, '..', '..');
+const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
 const sourceApp = path.join(root, 'node_modules', 'electron', 'dist', 'Electron.app');
 const appRoot = path.join(root, '.electron-app');
 const targetApp = path.join(appRoot, `${productName}.app`);
@@ -58,6 +59,9 @@ function ensureDevApp() {
     CFBundleName: productName,
     CFBundleIdentifier: 'com.crew44.desktop',
     CFBundleIconFile: 'crew44.icns',
+    CFBundleShortVersionString: pkg.version,
+    CFBundleVersion: pkg.version,
+    NSHumanReadableCopyright: `Copyright © ${new Date().getFullYear()} Crew44`,
   };
 
   for (const [key, value] of Object.entries(replacements)) {
@@ -92,6 +96,8 @@ function ensureDevApp() {
     root,
     targetApp,
     executable,
+    version: pkg.version,
+    appRoot,
   };
 }
 

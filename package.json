@@ -10,6 +10,8 @@
   "scripts": {
     "dev": "mkdir -p bin && cd daemon && go build -o ../bin/crew44-daemon ./cmd/crew44-daemon && cd .. && node electron/scripts/dev.cjs",
     "build": "mkdir -p bin && cd daemon && go build -o ../bin/crew44-daemon ./cmd/crew44-daemon && cd .. && vite build && node electron/scripts/build.cjs",
+    "dist": "npm run build && node electron/scripts/dist.cjs",
+    "dist:unsigned": "npm run build && node electron/scripts/dist.cjs --skip-sign --skip-notarize",
     "web:dev": "node daemon/scripts/web-dev.cjs",
     "mobile:start": "npm --workspace=@crew44/mobile run start --",
     "mobile:android": "npm --workspace=@crew44/mobile run android --",
