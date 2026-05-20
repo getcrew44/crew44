@@ -75,10 +75,10 @@ machine's LAN IP:
 ws://<lan-ip>:8090/relay
 ```
 
-The desktop Pair Mobile dialog defaults to the Mindive Labs relay:
+The desktop Pair Mobile dialog defaults to the Crew44 relay:
 
 ```text
-wss://relay.mindivelabs.com/relay
+wss://relay.crew44.io/relay
 ```
 
 The normal development flow is:

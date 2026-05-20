@@ -14,8 +14,12 @@ export class CrewApi {
     return data.items || [];
   }
 
-  async listProjectChats(projectId: string): Promise<ChatIndexEntry[]> {
-    const data = await this.rpc.call<{ items?: ChatIndexEntry[] }>("projects.chats.list", { id: projectId });
+  async listProjectChats(projectId: string, options: { limit?: number; offset?: number } = {}): Promise<ChatIndexEntry[]> {
+    const data = await this.rpc.call<{ items?: ChatIndexEntry[] }>("projects.chats.list", {
+      id: projectId,
+      limit: options.limit,
+      offset: options.offset
+    });
     return data.items || [];
   }
 
