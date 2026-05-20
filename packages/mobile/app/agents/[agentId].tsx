@@ -3,12 +3,14 @@ import { router, useLocalSearchParams } from "expo-router";
 import { ScrollView, StyleSheet, Text, View } from "react-native";
 import { useMobileClient } from "@/client/MobileClientProvider";
 import { Agent } from "@/api/types";
-import { Button, EmptyState, Header, LoadingState, Screen } from "@/ui/Screen";
+import { DesktopOfflineState } from "@/ui/DesktopOfflineState";
+import { BackButton, EmptyState, Header, LoadingState, Screen } from "@/ui/Screen";
+import { goBackOrHome } from "@/ui/navigation";
 import { colors } from "@/ui/theme";
 
 export default function AgentDetailScreen() {
   const { agentId } = useLocalSearchParams<{ agentId: string }>();
-  const { api } = useMobileClient();
+  const { api, status, error: connectionError, connectionIssue, reconnect, disconnect } = useMobileClient();
   const [agent, setAgent] = React.useState<Agent | null>(null);
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState("");
@@ -26,11 +28,28 @@ export default function AgentDetailScreen() {
       .finally(() => setLoading(false));
   }, [agentId, api]);
 
+  if (status === "error" && !api) {
+    return (
+      <Screen>
+        <Header
+          title={agent?.name || "Agent"}
+          left={<BackButton onPress={goBackOrHome} />}
+        />
+        <DesktopOfflineState
+          title={connectionIssue === "relay" ? "Relay connection issue" : "Desktop offline"}
+          message={connectionError}
+          onRetry={reconnect}
+          onUnpair={disconnect}
+        />
+      </Screen>
+    );
+  }
+
   return (
     <Screen>
       <Header
         title={agent?.name || "Agent"}
-        right={<Button label="Back" variant="secondary" onPress={() => router.back()} />}
+        left={<BackButton onPress={goBackOrHome} />}
       />
       {loading ? <LoadingState /> : error || !agent ? (
         <EmptyState title="Could not load agent" body={error} />

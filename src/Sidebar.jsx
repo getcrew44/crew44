@@ -527,7 +527,7 @@ function DropItem({ icon, label, onClick }) {
   );
 }
 
-export default function Sidebar({ projects, currentChatId, route, setRoute, onPick, deskName, backendOnline, onNewProject, onNewChat, onRenameProject, onShowInFinder, onCreateProject, onRemoveProject, onArchiveChat, onResetOnboarding, onPairMobile, onDroppedProjectFolders }) {
+export default function Sidebar({ projects, currentChatId, route, setRoute, onPick, deskName, backendOnline, onNewProject, onNewChat, onRenameProject, onShowInFinder, onCreateProject, onRemoveProject, onArchiveChat, onResetOnboarding, onPairMobile, hasMobileDevice = false, onDroppedProjectFolders }) {
   const [openIds, setOpenIds] = React.useState(() => new Set(projects.map(p => p.id)));
   const [creatingProject, setCreatingProject] = React.useState(false);
   const [newProjectName, setNewProjectName] = React.useState('');
@@ -622,8 +622,7 @@ export default function Sidebar({ projects, currentChatId, route, setRoute, onPi
           onClick={() => setRoute('agents')}
           testId="nav-agents"
         />
-        {/* Pair Mobile — feature incomplete, hidden until ready */}
-        {/* <NavItem icon="phone" label="Pair Mobile" active={false} onClick={onPairMobile} testId="nav-pair-mobile" /> */}
+        <NavItem icon="phone" label={hasMobileDevice ? 'Manage Mobile' : 'Pair Mobile'} active={false} onClick={onPairMobile} testId="nav-pair-mobile" />
         <NavItem icon="auto"   label="Auto optimization" active={route === 'auto'}   onClick={() => setRoute('auto')} testId="nav-auto" />
       </div>
 

@@ -142,7 +142,7 @@ describe('RichText', () => {
 // ─── Icon ──────────────────────────────────────────────────────────────────────
 describe('Icon', () => {
   it('renders an svg for each known name', () => {
-    for (const name of ['new', 'agents', 'auto', 'search', 'folder', 'folder-open', 'gear', 'phone', 'chev', 'plus', 'trash']) {
+    for (const name of ['new', 'agents', 'auto', 'search', 'folder', 'folder-open', 'gear', 'phone', 'chev', 'plus', 'trash', 'edit']) {
       const { container } = render(<Icon name={name} />);
       expect(container.querySelector('svg')).toBeInTheDocument();
     }

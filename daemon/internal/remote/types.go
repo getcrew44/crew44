@@ -28,6 +28,7 @@ type PairingOffer struct {
 	Type          string    `json:"type"`
 	RelayURL      string    `json:"relay_url"`
 	ServerID      string    `json:"server_id"`
+	DesktopName   string    `json:"desktop_name,omitempty"`
 	DaemonPubKey  string    `json:"daemon_pubkey"`
 	PairingID     string    `json:"pairing_id"`
 	PairingSecret string    `json:"pairing_secret"`

@@ -3,6 +3,7 @@ package remote
 import (
 	"context"
 	"encoding/json"
+	"log"
 	"net/http"
 	"net/url"
 	"sync"
@@ -23,6 +24,11 @@ type relayControlMessage struct {
 	Type         string `json:"type"`
 	ConnectionID string `json:"connection_id"`
 }
+
+const (
+	relayControlWriteWait  = 10 * time.Second
+	relayControlPingPeriod = 10 * time.Second
+)
 
 func NewRelayClient(manager *Manager) *RelayClient {
 	return &RelayClient{
@@ -85,6 +91,9 @@ func (c *RelayClient) runControl(ctx context.Context, relayURL string) error {
 		return err
 	}
 	defer conn.Close()
+	heartbeatDone := make(chan struct{})
+	go keepRelayControlAlive(ctx, conn, heartbeatDone, relayURL)
+	defer close(heartbeatDone)
 
 	for {
 		_, data, err := conn.ReadMessage()
@@ -97,6 +106,25 @@ func (c *RelayClient) runControl(ctx context.Context, relayURL string) error {
 		}
 		if msg.Type == "client_connected" && msg.ConnectionID != "" {
 			go c.openData(ctx, relayURL, msg.ConnectionID)
+		}
+	}
+}
+
+func keepRelayControlAlive(ctx context.Context, conn *websocket.Conn, done <-chan struct{}, relayURL string) {
+	ticker := time.NewTicker(relayControlPingPeriod)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			if err := conn.WriteControl(websocket.PingMessage, nil, time.Now().Add(relayControlWriteWait)); err != nil {
+				log.Printf("remote relay control heartbeat failed relay_url=%s err=%v", relayURL, err)
+				_ = conn.Close()
+				return
+			}
+		case <-done:
+			return
+		case <-ctx.Done():
+			return
 		}
 	}
 }

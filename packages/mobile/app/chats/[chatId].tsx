@@ -1,23 +1,69 @@
 import React from "react";
-import { router, useLocalSearchParams } from "expo-router";
-import { FlatList, KeyboardAvoidingView, Platform, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { useLocalSearchParams } from "expo-router";
+import { FlatList, Keyboard, KeyboardAvoidingView, Platform, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { useMobileClient } from "@/client/MobileClientProvider";
-import { mapBackendEvent, TimelineItem } from "@/api/events";
-import { BackendEvent, Chat } from "@/api/types";
-import { Button, EmptyState, Header, LoadingState, Screen } from "@/ui/Screen";
+import { buildRenderableTimeline, mapBackendEvent, RenderableTimelineItem, TimelineItem } from "@/api/events";
+import { Agent, BackendEvent, Chat } from "@/api/types";
+import { DesktopOfflineState } from "@/ui/DesktopOfflineState";
+import { BackButton, EmptyState, Header, LoadingState, Screen } from "@/ui/Screen";
+import { TimelineRow } from "@/ui/TimelineEvents";
+import { goBackOrHome } from "@/ui/navigation";
 import { colors } from "@/ui/theme";
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function mentionBounds(value: string, cursor: number) {
+  const before = value.slice(0, cursor);
+  const match = before.match(/(^|\s)@([^\s@]*)$/);
+  if (!match) return null;
+  const start = before.length - match[0].length + match[1].length;
+  return { start, end: cursor, query: match[2] || "" };
+}
+
+function targetAgentFromText(value: string, agents: Agent[]): string {
+  const sorted = agents.filter(agent => agent.name).sort((a, b) => b.name.length - a.name.length);
+  for (const agent of sorted) {
+    const mentionRe = new RegExp(`(^|\\s)@${escapeRegExp(agent.name)}(?=$|\\s|[.,!?;:])`);
+    if (mentionRe.test(value)) return agent.id;
+  }
+  return "";
+}
 
 export default function ChatScreen() {
   const { chatId } = useLocalSearchParams<{ chatId: string }>();
-  const { api } = useMobileClient();
+  const { api, status, error: connectionError, connectionIssue, reconnect, disconnect } = useMobileClient();
   const [chat, setChat] = React.useState<Chat | null>(null);
+  const [agents, setAgents] = React.useState<Agent[]>([]);
   const [items, setItems] = React.useState<TimelineItem[]>([]);
   const [draft, setDraft] = React.useState("");
+  const [cursor, setCursor] = React.useState(0);
+  const [targetAgentId, setTargetAgentId] = React.useState("");
   const [loading, setLoading] = React.useState(true);
   const [streaming, setStreaming] = React.useState(false);
   const [error, setError] = React.useState("");
+  const listRef = React.useRef<FlatList<RenderableTimelineItem>>(null);
+  const shouldStickToBottomRef = React.useRef(true);
+  const didInitialScrollRef = React.useRef(false);
   const lastSeq = React.useRef(0);
   const cleanupRef = React.useRef<() => void>(() => {});
+
+  const activeMention = React.useMemo(() => mentionBounds(draft, cursor), [draft, cursor]);
+  const mentionOptions = React.useMemo(() => {
+    if (!activeMention) return [];
+    const query = activeMention.query.toLowerCase();
+    return agents
+      .filter(agent => agent.name.toLowerCase().includes(query))
+      .slice(0, 6);
+  }, [activeMention, agents]);
+  const renderItems = React.useMemo(() => buildRenderableTimeline(items), [items]);
+
+  const scrollToBottom = React.useCallback((animated = true) => {
+    requestAnimationFrame(() => {
+      listRef.current?.scrollToEnd({ animated });
+    });
+  }, []);
 
   const appendEvent = React.useCallback((event: BackendEvent) => {
     lastSeq.current = Math.max(lastSeq.current, event.seq);
@@ -54,12 +100,16 @@ export default function ChatScreen() {
     setError("");
     cleanupRef.current();
     try {
-      const [nextChat, events] = await Promise.all([
+      const [nextChat, events, nextAgents] = await Promise.all([
         api.getChat(chatId),
-        api.listEvents(chatId, 0)
+        api.listEvents(chatId, 0),
+        api.listAgents()
       ]);
       setChat(nextChat);
+      setAgents(nextAgents);
       const mapped = events.map(mapBackendEvent).filter((item): item is TimelineItem => Boolean(item));
+      didInitialScrollRef.current = false;
+      shouldStickToBottomRef.current = true;
       setItems(mapped);
       lastSeq.current = events.reduce((seq, event) => Math.max(seq, event.seq), 0);
       subscribe(lastSeq.current);
@@ -75,19 +125,67 @@ export default function ChatScreen() {
     return () => cleanupRef.current();
   }, [load]);
 
+  React.useEffect(() => {
+    const showSub = Keyboard.addListener("keyboardDidShow", () => {
+      if (shouldStickToBottomRef.current) scrollToBottom(true);
+    });
+    const frameSub = Keyboard.addListener("keyboardDidChangeFrame", () => {
+      if (shouldStickToBottomRef.current) scrollToBottom(false);
+    });
+    return () => {
+      showSub.remove();
+      frameSub.remove();
+    };
+  }, [scrollToBottom]);
+
+  React.useEffect(() => {
+    if (!items.length) return;
+    if (!didInitialScrollRef.current || shouldStickToBottomRef.current) {
+      scrollToBottom(!didInitialScrollRef.current ? false : true);
+      didInitialScrollRef.current = true;
+    }
+  }, [items.length, scrollToBottom]);
+
+  const handleScroll = React.useCallback((event: {
+    nativeEvent: {
+      contentOffset: { y: number };
+      layoutMeasurement: { height: number };
+      contentSize: { height: number };
+    };
+  }) => {
+    const { contentOffset, layoutMeasurement, contentSize } = event.nativeEvent;
+    const distanceFromBottom = contentSize.height - (contentOffset.y + layoutMeasurement.height);
+    shouldStickToBottomRef.current = distanceFromBottom < 48;
+  }, []);
+
+  const selectMention = React.useCallback((agent: Agent) => {
+    if (!activeMention) return;
+    const next = `${draft.slice(0, activeMention.start)}@${agent.name} ${draft.slice(activeMention.end)}`;
+    const nextCursor = activeMention.start + agent.name.length + 2;
+    setDraft(next);
+    setCursor(nextCursor);
+    setTargetAgentId(agent.id);
+  }, [activeMention, draft]);
+
   const send = React.useCallback(async () => {
     if (!api || !chatId || !chat || !draft.trim()) return;
     const text = draft.trim();
     const steeringActiveRun = streaming;
     setDraft("");
+    setCursor(0);
+    setTargetAgentId("");
+    shouldStickToBottomRef.current = true;
     if (!steeringActiveRun) {
+      const optimisticSeq = -Date.now();
       const optimistic: TimelineItem = {
         kind: "message",
-        seq: -Date.now(),
+        seq: optimisticSeq,
+        _seq: optimisticSeq,
         author: "__human__",
         role: "user",
-        content: text,
-        time: "now"
+        body: text,
+        time: "now",
+        tsISO: new Date().toISOString()
       };
       setItems(prev => [...prev, optimistic]);
     }
@@ -95,14 +193,15 @@ export default function ChatScreen() {
       if (steeringActiveRun) {
         await api.interruptMessage(chatId, text);
       } else {
-        await api.postMessage(chatId, text, chat.current_agent_id || chat.main_agent_id);
+        const mentionedTarget = targetAgentFromText(text, agents);
+        await api.postMessage(chatId, text, mentionedTarget || targetAgentId || chat.current_agent_id || chat.main_agent_id);
         subscribe(lastSeq.current);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to send message");
       if (!steeringActiveRun) setStreaming(false);
     }
-  }, [api, chat, chatId, draft, streaming, subscribe]);
+  }, [agents, api, chat, chatId, draft, streaming, subscribe, targetAgentId]);
 
   const cancel = React.useCallback(async () => {
     if (!api || !chatId) return;
@@ -111,11 +210,28 @@ export default function ChatScreen() {
     setStreaming(false);
   }, [api, chatId]);
 
+  if (status === "error" && !api) {
+    return (
+      <Screen>
+        <Header
+          title={chat?.title || "Chat"}
+          left={<BackButton onPress={goBackOrHome} />}
+        />
+        <DesktopOfflineState
+          title={connectionIssue === "relay" ? "Relay connection issue" : "Desktop offline"}
+          message={connectionError}
+          onRetry={reconnect}
+          onUnpair={disconnect}
+        />
+      </Screen>
+    );
+  }
+
   return (
     <Screen>
       <Header
         title={chat?.title || "Chat"}
-        right={<Button label="Back" variant="secondary" onPress={() => router.back()} />}
+        left={<BackButton onPress={goBackOrHome} />}
       />
       {loading ? <LoadingState /> : error && items.length === 0 ? (
         <EmptyState title="Could not load chat" body={error} />
@@ -126,82 +242,67 @@ export default function ChatScreen() {
           keyboardVerticalOffset={12}
         >
           <FlatList
-            data={items}
-            keyExtractor={(item, index) => `${item.seq}:${index}`}
-            renderItem={({ item }) => <TimelineRow item={item} />}
+            ref={listRef}
+            data={renderItems}
+            keyExtractor={(item, index) => `${item.kind}:${item._seq}:${index}`}
+            renderItem={({ item }) => <TimelineRow item={item} agents={agents} />}
             contentContainerStyle={styles.timeline}
             ListEmptyComponent={<EmptyState title="No messages yet" body="Send the first message to this crew." />}
+            onContentSizeChange={() => {
+              if (!didInitialScrollRef.current || shouldStickToBottomRef.current) {
+                scrollToBottom(!didInitialScrollRef.current ? false : true);
+                didInitialScrollRef.current = true;
+              }
+            }}
+            onLayout={() => scrollToBottom(false)}
+            onScroll={handleScroll}
+            scrollEventThrottle={80}
           />
           {error ? <Text style={styles.error}>{error}</Text> : null}
           {streaming ? <Text style={styles.streaming}>Agent is working...</Text> : null}
-          <View style={styles.composer}>
-            <TextInput
-              value={draft}
-              onChangeText={setDraft}
-              multiline
-              placeholder={streaming ? "Steer this run" : "Message the crew"}
-              placeholderTextColor={colors.muted}
-              style={styles.input}
-            />
-            <Pressable
-              onPress={send}
-              disabled={!draft.trim()}
-              style={[styles.sendButton, !draft.trim() && styles.disabled]}
-            >
-              <Text style={styles.sendText}>{streaming ? "Steer" : "Send"}</Text>
-            </Pressable>
-            {streaming ? (
-              <Pressable onPress={cancel} style={styles.stopButton}>
-                <Text style={styles.stopText}>Stop</Text>
-              </Pressable>
+          <View>
+            {mentionOptions.length > 0 ? (
+              <View style={styles.mentionMenu}>
+                {mentionOptions.map(agent => (
+                  <Pressable key={agent.id} style={styles.mentionItem} onPress={() => selectMention(agent)}>
+                    <View style={styles.mentionAvatar}>
+                      <Text style={styles.mentionAvatarText}>{(agent.name || "?")[0].toUpperCase()}</Text>
+                    </View>
+                    <Text style={styles.mentionName}>{agent.name}</Text>
+                  </Pressable>
+                ))}
+              </View>
             ) : null}
+            <View style={styles.composer}>
+              <TextInput
+                value={draft}
+                onChangeText={text => {
+                  setDraft(text);
+                  setCursor(text.length);
+                }}
+                onSelectionChange={event => setCursor(event.nativeEvent.selection.start)}
+                multiline
+                placeholder={streaming ? "Steer this run" : "Message the crew"}
+                placeholderTextColor={colors.muted}
+                style={styles.input}
+              />
+              <Pressable
+                onPress={send}
+                disabled={!draft.trim()}
+                style={[styles.sendButton, !draft.trim() && styles.disabled]}
+              >
+                <Text style={styles.sendText}>{streaming ? "Steer" : "Send"}</Text>
+              </Pressable>
+              {streaming ? (
+                <Pressable onPress={cancel} style={styles.stopButton}>
+                  <Text style={styles.stopText}>Stop</Text>
+                </Pressable>
+              ) : null}
+            </View>
           </View>
         </KeyboardAvoidingView>
       )}
     </Screen>
-  );
-}
-
-function TimelineRow({ item }: { item: TimelineItem }) {
-  if (item.kind === "message") {
-    const mine = item.role === "user";
-    const flag = item.userSteer ? "Steer" : "";
-    return (
-      <View style={[styles.bubble, mine ? styles.userBubble : styles.agentBubble]}>
-        <Text style={styles.meta}>{mine ? "You" : item.author} · {item.time}{flag ? ` · ${flag}` : ""}</Text>
-        <Text style={styles.messageText}>{item.content}</Text>
-      </View>
-    );
-  }
-  if (item.kind === "thinking") {
-    return (
-      <View style={styles.eventBox}>
-        <Text style={styles.meta}>Thinking · {item.time}</Text>
-        <Text style={styles.eventText}>{item.content}</Text>
-      </View>
-    );
-  }
-  if (item.kind === "tool" || item.kind === "tool_result") {
-    return (
-      <View style={styles.eventBox}>
-        <Text style={styles.meta}>{item.kind === "tool" ? item.name : `${item.name} result`} · {item.time}</Text>
-        <Text style={styles.eventText} numberOfLines={6}>{item.kind === "tool" ? item.detail : item.output}</Text>
-      </View>
-    );
-  }
-  if (item.kind === "handover") {
-    return (
-      <View style={styles.eventBox}>
-        <Text style={styles.meta}>{item.label} · {item.time}</Text>
-        {item.note ? <Text style={styles.eventText}>{item.note}</Text> : null}
-      </View>
-    );
-  }
-  return (
-    <View style={[styles.eventBox, styles.errorBox]}>
-      <Text style={styles.meta}>Error · {item.time}</Text>
-      <Text style={styles.eventText}>{item.message}</Text>
-    </View>
   );
 }
 
@@ -212,48 +313,6 @@ const styles = StyleSheet.create({
   timeline: {
     padding: 18,
     gap: 10
-  },
-  bubble: {
-    borderRadius: 8,
-    padding: 12,
-    borderWidth: 1,
-    maxWidth: "92%"
-  },
-  userBubble: {
-    alignSelf: "flex-end",
-    backgroundColor: "#EDF4EC",
-    borderColor: "#D1E5CF"
-  },
-  agentBubble: {
-    alignSelf: "flex-start",
-    backgroundColor: colors.panel,
-    borderColor: colors.border
-  },
-  meta: {
-    color: colors.muted,
-    fontSize: 11,
-    marginBottom: 5,
-    fontWeight: "600"
-  },
-  messageText: {
-    color: colors.text,
-    fontSize: 15,
-    lineHeight: 21
-  },
-  eventBox: {
-    backgroundColor: colors.soft,
-    borderColor: colors.border,
-    borderWidth: 1,
-    borderRadius: 8,
-    padding: 11
-  },
-  errorBox: {
-    borderColor: "#E7B8AA"
-  },
-  eventText: {
-    color: colors.text,
-    fontSize: 13,
-    lineHeight: 19
   },
   error: {
     color: colors.danger,
@@ -275,6 +334,42 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     gap: 10,
     alignItems: "flex-end"
+  },
+  mentionMenu: {
+    marginHorizontal: 12,
+    marginBottom: 8,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.panel,
+    overflow: "hidden"
+  },
+  mentionItem: {
+    minHeight: 46,
+    paddingHorizontal: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.border
+  },
+  mentionAvatar: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    backgroundColor: colors.text,
+    alignItems: "center",
+    justifyContent: "center"
+  },
+  mentionAvatarText: {
+    color: "#FCFBF7",
+    fontSize: 12,
+    fontWeight: "700"
+  },
+  mentionName: {
+    color: colors.text,
+    fontSize: 14,
+    fontWeight: "600"
   },
   input: {
     flex: 1,

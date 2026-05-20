@@ -68,6 +68,10 @@ export class CrewApi {
     return this.rpc.call("chats.cancel", { id: chatId });
   }
 
+  async deleteRemoteDevice(deviceId: string): Promise<unknown> {
+    return this.rpc.call("remote.devices.delete", { device_id: deviceId });
+  }
+
   subscribeChatEvents(
     chatId: string,
     after: number,
