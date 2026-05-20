@@ -1,7 +1,7 @@
 {
   "name": "crew44",
   "productName": "Crew44",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "main": "electron/main.cjs",
   "type": "module",
   "workspaces": [

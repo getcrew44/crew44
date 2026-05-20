@@ -2,6 +2,15 @@
 
 All notable changes to this project are documented here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.1] - 2026-05-20
+
+### Added
+- **`using-superpowers` skill in the default coding agent preset** — the meta-skill from obra/superpowers ships with the default crew so the coding agent invokes its skills before every response.
+
+### Fixed
+- **Isolated `claude` can auto-refresh its OAuth token** — the spawned (isolated) claude now receives `CLAUDE_CODE_OAUTH_REFRESH_TOKEN` + `CLAUDE_CODE_OAUTH_SCOPES` alongside the access token, so an expired 12h token gets swapped for a fresh one in-process instead of 401'ing crew44 sessions until the user reopens the host Claude Code app. Refresh+scopes are treated as an atomic pair at both the parser and the injection site, and parent-env overrides are honored for the pair too.
+- **Isolated `claude` can read `~/.crew44` again** — dropped the `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1` injection that the previous fix added. Setting that var alongside the OAuth refresh credential flipped the spawned claude into its managed/enterprise-deployment posture, tightening the default permission policy and blocking the agent from filesystem paths that worked fine on `main`. The scrub only stripped ~7 credential vars from Bash/hook/MCP child envs, and `CLAUDE_CODE_*` vars are already filtered out of the parent env by backendagent before launch — not worth losing normal filesystem reach.
+
 ## [0.5.0] - 2026-05-18
 
 ### Added
