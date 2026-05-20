@@ -23,6 +23,7 @@ func (s *Server) registerMethods() {
 		"runtimes.rescan":                  s.runtimesRescan,
 		"runtimes.get":                     s.runtimesGet,
 		"runtimes.update":                  s.runtimesUpdate,
+		"runtimes.models":                  s.runtimesModels,
 		"agents.list":                      s.agentsList,
 		"agents.create":                    s.agentsCreate,
 		"agents.get":                       s.agentsGet,
@@ -156,6 +157,20 @@ func (s *Server) runtimesGet(_ context.Context, _ Peer, params json.RawMessage) 
 		return nil, err
 	}
 	return s.app.GetRuntime(body.ID)
+}
+
+func (s *Server) runtimesModels(ctx context.Context, _ Peer, params json.RawMessage) (any, error) {
+	var body struct {
+		ID string `json:"id"`
+	}
+	if err := decodeParams(params, &body); err != nil {
+		return nil, err
+	}
+	items, err := s.app.ListRuntimeModels(ctx, body.ID)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{"items": items}, nil
 }
 
 func (s *Server) runtimesUpdate(_ context.Context, _ Peer, params json.RawMessage) (any, error) {

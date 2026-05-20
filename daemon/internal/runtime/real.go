@@ -33,6 +33,9 @@ func (RealEngine) Run(ctx context.Context, request RunRequest, emit func(StreamE
 			modelName = value
 		}
 	}
+	if modelName == "" {
+		modelName = backendagent.DefaultModelID(request.Runtime.Provider)
+	}
 
 	session, err := backend.Execute(ctx, request.Prompt, backendagent.ExecOptions{
 		Cwd:             request.WorkDir,

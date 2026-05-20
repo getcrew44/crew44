@@ -17,13 +17,11 @@ import (
 // Model describes a single LLM model exposed by an agent provider.
 // The dropdown groups by Provider when the ID uses the
 // `provider/model` form (e.g. "openai/gpt-4o" from opencode).
-// Default is a *display* hint: the UI badges the entry the
-// runtime advertises as its preferred pick (e.g. Claude Code's
-// shipped default, or hermes' currentModelId). It has no effect
-// at execution time — when agent.model is empty the daemon passes
-// "" to the backend so each provider's own CLI resolves its own
-// default, which is always closer to what the user's account /
-// environment actually supports than a static guess here.
+// Default marks the entry the catalog considers canonical for its
+// provider. It serves both as a display hint (the UI badges and
+// pre-selects this entry) and as the execution-time fallback when
+// neither agent.Model nor runtime metadata pin a model — see
+// DefaultModelID and runtime/real.go for the resolution chain.
 type Model struct {
 	ID       string `json:"id"`
 	Label    string `json:"label"`
@@ -98,6 +96,30 @@ func ListModels(ctx context.Context, providerType, executablePath string) ([]Mod
 	}
 }
 
+// DefaultModelID returns the ID of the catalog model flagged as
+// Default for the given provider, or "" if no entry is marked. Used
+// at execution time as a final fallback when neither the agent nor
+// the runtime metadata pin a model — so callers spawning codex /
+// claude get the product-spec default ("gpt-5.5", "claude-opus-4-7")
+// instead of whatever the CLI's own implicit default happens to be.
+func DefaultModelID(providerType string) string {
+	var catalog []Model
+	switch providerType {
+	case "claude":
+		catalog = claudeStaticModels()
+	case "codex":
+		catalog = codexStaticModels()
+	default:
+		return ""
+	}
+	for _, m := range catalog {
+		if m.Default {
+			return m.ID
+		}
+	}
+	return ""
+}
+
 // ModelSelectionSupported reports whether setting `agent.model` has
 // any effect for the given provider. Today every provider in the
 // registry honours `opts.Model` end-to-end: Hermes routes it through
@@ -137,29 +159,25 @@ func cachedDiscovery(key string, fn func() ([]Model, error)) ([]Model, error) {
 // ── Static catalogs ──
 
 // claudeStaticModels reflects the Claude Code CLI's accepted --model
-// values. Keep this list short and current; stale entries here
-// mislead users more than they help. Default = Sonnet because it's
-// the everyday workhorse (Opus is reserved for advisor-style flows).
+// values exposed in the agent-creation dropdown. Default = Opus 4.7
+// per product spec.
 func claudeStaticModels() []Model {
 	return []Model{
-		{ID: "claude-sonnet-4-6", Label: "Claude Sonnet 4.6", Provider: "anthropic", Default: true},
-		{ID: "claude-opus-4-7", Label: "Claude Opus 4.7", Provider: "anthropic"},
+		{ID: "claude-opus-4-7", Label: "Claude Opus 4.7", Provider: "anthropic", Default: true},
+		{ID: "claude-sonnet-4-6", Label: "Claude Sonnet 4.6", Provider: "anthropic"},
 		{ID: "claude-haiku-4-5-20251001", Label: "Claude Haiku 4.5", Provider: "anthropic"},
-		{ID: "claude-opus-4-6", Label: "Claude Opus 4.6", Provider: "anthropic"},
-		{ID: "claude-sonnet-4-5", Label: "Claude Sonnet 4.5", Provider: "anthropic"},
 	}
 }
 
+// codexStaticModels reflects the Codex CLI's accepted --model values
+// exposed in the agent-creation dropdown. Default = GPT-5.5 per
+// product spec.
 func codexStaticModels() []Model {
 	return []Model{
 		{ID: "gpt-5.5", Label: "GPT-5.5", Provider: "openai", Default: true},
-		{ID: "gpt-5.5-mini", Label: "GPT-5.5 mini", Provider: "openai"},
 		{ID: "gpt-5.4", Label: "GPT-5.4", Provider: "openai"},
 		{ID: "gpt-5.4-mini", Label: "GPT-5.4 mini", Provider: "openai"},
 		{ID: "gpt-5.3-codex", Label: "GPT-5.3 Codex", Provider: "openai"},
-		{ID: "gpt-5", Label: "GPT-5", Provider: "openai"},
-		{ID: "o3", Label: "o3", Provider: "openai"},
-		{ID: "o3-mini", Label: "o3-mini", Provider: "openai"},
 	}
 }
 

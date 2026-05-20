@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	backendagent "github.com/getcrew44/crew44/daemon/internal/backendagent"
 	"github.com/getcrew44/crew44/daemon/internal/broker"
 	"github.com/getcrew44/crew44/daemon/internal/id"
 	"github.com/getcrew44/crew44/daemon/internal/model"
@@ -381,6 +382,17 @@ func (a *App) UpdateRuntime(id string, patch map[string]any) (model.RuntimeRecor
 	return a.GetRuntime(id)
 }
 
+// ListRuntimeModels returns the static catalog of models supported
+// by the given runtime's provider, used to populate the model
+// dropdown in the agent-creation form.
+func (a *App) ListRuntimeModels(ctx context.Context, runtimeID string) ([]backendagent.Model, error) {
+	record, err := a.store.GetRuntime(runtimeID)
+	if err != nil {
+		return nil, a.mapError(err)
+	}
+	return backendagent.ListModels(ctx, record.Provider, record.BinaryPath)
+}
+
 func (a *App) ListAgents() ([]model.AgentConfig, error) {
 	agents, err := a.store.ListAgents()
 	if err != nil {
@@ -436,13 +448,24 @@ func (a *App) UpdateAgent(agent model.AgentConfig) (model.AgentConfig, error) {
 	if agent.Instruction != "" {
 		current.Instruction = agent.Instruction
 	}
+	runtimeChanged := false
 	if agent.RuntimeID != "" {
 		if _, err := a.requireAvailableRuntime(agent.RuntimeID); err != nil {
 			return model.AgentConfig{}, err
 		}
+		runtimeChanged = agent.RuntimeID != current.RuntimeID
 		current.RuntimeID = agent.RuntimeID
 	}
-	if agent.Model != "" {
+	// When the runtime changes, drop any model from the payload — IDs are
+	// provider-specific (gpt-5.5 vs claude-opus-4-7), so the stale value
+	// carried in the partial-update payload would be passed to the new
+	// backend and either error or silently misroute. The runtime engine
+	// then falls back to the new runtime's catalog default at execution.
+	// Callers that want to pin a model on the new runtime must issue a
+	// second update.
+	if runtimeChanged {
+		current.Model = ""
+	} else if agent.Model != "" {
 		current.Model = agent.Model
 	}
 	current.UpdatedAt = time.Now().UTC()
