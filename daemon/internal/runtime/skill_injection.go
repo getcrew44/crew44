@@ -51,8 +51,21 @@ func prepareSkillEnvironment(request RunRequest) (preparedSkillEnvironment, erro
 			"CLAUDE_CONFIG_DIR": claudeConfigDir,
 			"HOME":              homeDir,
 		}
-		if token := readClaudeOAuthToken(); token != "" {
-			env["CLAUDE_CODE_OAUTH_TOKEN"] = token
+		// Inject the host OAuth credential so the spawned claude reuses the
+		// host login. The refresh token + scopes let claude exchange an
+		// expired access token for a fresh one mid-session — without them
+		// the 12h access-token TTL turns the spawned claude into a 401 the
+		// next morning.
+		cred := readClaudeOAuthCredential()
+		if cred.AccessToken != "" {
+			env["CLAUDE_CODE_OAUTH_TOKEN"] = cred.AccessToken
+		}
+		// CLAUDE_CODE_OAUTH_REFRESH_TOKEN must be paired with
+		// CLAUDE_CODE_OAUTH_SCOPES per the env-vars docs — injecting one
+		// without the other is a broken auth env that claude can't use.
+		if cred.RefreshToken != "" && cred.Scopes != "" {
+			env["CLAUDE_CODE_OAUTH_REFRESH_TOKEN"] = cred.RefreshToken
+			env["CLAUDE_CODE_OAUTH_SCOPES"] = cred.Scopes
 		}
 		return preparedSkillEnvironment{
 			Env:       env,

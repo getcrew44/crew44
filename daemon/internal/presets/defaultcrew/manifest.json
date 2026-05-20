@@ -18,6 +18,7 @@
       "instruction_file": "agents/coding.md",
       "is_default": false,
       "skill_refs": [
+        "coding/using-superpowers",
         "coding/brainstorming",
         "coding/executing-plans",
         "coding/finishing-a-development-branch",

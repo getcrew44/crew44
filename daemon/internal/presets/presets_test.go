@@ -24,6 +24,7 @@ func TestDefaultCrewCodingAgentUsesExpectedPresetSkills(t *testing.T) {
 	}
 
 	want := []string{
+		"coding/using-superpowers",
 		"coding/brainstorming",
 		"coding/executing-plans",
 		"coding/finishing-a-development-branch",
