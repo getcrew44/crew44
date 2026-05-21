@@ -249,15 +249,22 @@ func availableAgents(currentAgentID string, agents []model.AgentConfig) string {
 			continue
 		}
 		count++
-		fmt.Fprintf(&b, "- uuid: %s\n  name: %s\n  description: %s\n", agent.ID, agent.Name, handoverDescription(agent.Instruction))
+		fmt.Fprintf(&b, "- uuid: %s\n  name: %s\n  description: %s\n", agent.ID, agent.Name, agentBriefDescription(agent))
 	}
 	if count == 0 {
 		b.WriteString("- none")
 	}
 	b.WriteString("\n\nRules:\n")
 	b.WriteString("- Use only UUIDs listed above as handover targets.\n")
-	b.WriteString("- Do not hand over to yourself.\n")
-	b.WriteString("- If you are receiving a handover, perform the Handover Task directly. Do not describe the handover.")
+	b.WriteString("- You should handover task to other agents if they're more capable. Do not hand over to yourself.\n")
+	b.WriteString("- Make the handover decision yourself. Do not ask the user whether to hand over.\n")
+	b.WriteString("- If you are receiving a handover, perform the Handover Task directly. Do not describe the handover.\n")
+	b.WriteString("\nRouting:\n")
+	b.WriteString("- Compare every request against the listed agents' descriptions. If another listed agent's scope clearly fits the request better than yours, hand off rather than attempting the work yourself.\n")
+	b.WriteString("- Route the moment you recognize the scope match. Do not partial-answer first and then hand over — the partial answer competes with the specialist's framing and wastes the user's turn.\n")
+	b.WriteString("- When handing over, include the user's goal, the relevant context, and the specific deliverable expected of the next agent.\n")
+	b.WriteString("- Before handing over, save any meaningful intermediate work (plans, drafts, partial diffs, notes, scope statements, design sketches) to a local file under the project workdir at `tmp/handover/<short-slug>.md` and reference that path in the handover note. Other agents read files; they cannot see your scrollback.\n")
+	b.WriteString("- Handle directly only when the request fits your scope or when no listed agent clearly fits better.")
 	return strings.TrimSpace(b.String())
 }
 
@@ -267,16 +274,11 @@ func handoverProtocol() string {
 		"\nReplace agent_uuid with the target agent uuid from the list above. Replace the sentence with a concise instruction for the next agent. Do not put any other text on that output line."
 }
 
-func handoverDescription(instruction string) string {
-	description := strings.Join(strings.Fields(instruction), " ")
-	if description == "" {
-		return "No description provided."
+func agentBriefDescription(agent model.AgentConfig) string {
+	if d := model.EffectiveAgentDescription(agent); d != "" {
+		return d
 	}
-	const maxDescriptionLen = 240
-	if len(description) <= maxDescriptionLen {
-		return description
-	}
-	return strings.TrimSpace(description[:maxDescriptionLen]) + "..."
+	return "No description provided."
 }
 
 func valueOrNone(value string) string {
