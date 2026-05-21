@@ -2,6 +2,19 @@
 
 All notable changes to this project are documented here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.6] - 2026-05-21
+
+### Added
+- **Agent descriptions.** Each agent now has a `Description` field separate from its `Instruction`, used by peer agents to decide whether to hand off. The default-crew presets (partner / coding / product / designer) ship explicit descriptions; legacy agents without one get a derived value distilled from the first paragraph of their instruction (rune-capped at 240 chars) and a lazy backfill the next time they are saved. The create-agent dialog gains an optional Description textarea and the agent detail view gains a Description tab with a Revert button that previews the derived fallback for legacy agents.
+- **Shared handover routing rules.** The handover list in every agent's system prompt now shows each peer's effective description and a uniform `Routing:` block — compare the request against listed agents' descriptions, route the moment the scope matches, and save intermediate work before handing off. Coding / Product / Designer each gain a "designed scope" paragraph so specialists hold their own work instead of bouncing requests back to the partner.
+- **Auto-summarized chat titles.** When the user sends the first message in a new chat, the daemon dispatches a one-shot LLM call (in parallel with the first turn, with a 30s timeout) that writes back a tight 3-6 word title via the chat's own runtime. Manual renames lock the title via a new `TitleSetByUser` flag, so a user-set title always wins over auto-summarization.
+- **Right-click context menu on sidebar chats.** Right-clicking any chat row opens a menu with Rename (swaps the row to an inline input — Enter saves, Esc cancels, blur saves) and Archive (fires immediately). The optimistic rename keeps the sidebar entry's title up to date before the daemon round-trips, and errors roll back via the toast pipeline. The existing hover-X-then-confirm archive flow stays for users who learned it.
+- **`@file` and `/skill` pickers in the new task composer.** The new task composer previously only suggested agent mentions; `@` now offers agents and files (gated on the selected project having a workdir) and `/` offers the selected lead's allowed skills, mirroring the TaskView composer. Suggestion-bounds parsing moves into `composerMentions.jsx` so both composers share one implementation.
+- **Platform-aware conversation find.** Conversation-file lookups now honor the runtime's platform conventions instead of assuming POSIX paths, so Cursor / Hermes / OpenClaw sessions resolve correctly on Windows.
+
+### Changed
+- **Handover scratch files moved to chat session storage.** Agents handing off now write intermediate work (plans, drafts, partial diffs, notes) to `~/.crew44/chats/chat-<id>/handover/<short-slug>.md` instead of `tmp/handover/` under the project workdir. Files now sit next to `events.jsonl` and `summary.md`, are reachable by the receiving agent via an absolute path in the handover note, and get cleaned up when the chat is deleted.
+
 ## [0.5.5] - 2026-05-21
 
 ### Added
