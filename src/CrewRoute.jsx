@@ -1177,6 +1177,7 @@ function AgentDetail({ agent, skills, runtimes, agentsMap, onBack, onSave, onRef
   const [description, setDescription] = React.useState(
     agent.description || deriveAgentDescription(agent.instruction || '')
   );
+  const [descriptionDirty, setDescriptionDirty] = React.useState(false);
   const [saving, setSaving] = React.useState(false);
   const [confirmDelete, setConfirmDelete] = React.useState(false);
   const [models, setModels] = React.useState([]);
@@ -1204,7 +1205,10 @@ function AgentDetail({ agent, skills, runtimes, agentsMap, onBack, onSave, onRef
   const handleSave = async () => {
     setSaving(true);
     try {
-      await api.updateAgent(agent.id, { ...agent, instruction, description });
+      const payload = { ...agent, instruction };
+      if (descriptionDirty) payload.description = description;
+      else delete payload.description;
+      await api.updateAgent(agent.id, payload);
       onSave?.();
     } catch (err) {
       console.error('Save failed:', err);
@@ -1412,7 +1416,10 @@ function AgentDetail({ agent, skills, runtimes, agentsMap, onBack, onSave, onRef
                     <div style={{ flex: 1 }} />
                     <button
                       style={ghostBtn}
-                      onClick={() => setDescription(agent.description || deriveAgentDescription(agent.instruction || ''))}
+                      onClick={() => {
+                        setDescription(agent.description || deriveAgentDescription(agent.instruction || ''));
+                        setDescriptionDirty(false);
+                      }}
                     >
                       Revert
                     </button>
@@ -1427,7 +1434,10 @@ function AgentDetail({ agent, skills, runtimes, agentsMap, onBack, onSave, onRef
                 <textarea
                   data-testid="agent-description-input"
                   value={description}
-                  onChange={e => setDescription(e.target.value)}
+                  onChange={e => {
+                    setDescription(e.target.value);
+                    setDescriptionDirty(true);
+                  }}
                   rows={3}
                   style={{
                     width: '100%', border: 'none', outline: 'none', resize: 'vertical',

@@ -414,6 +414,29 @@ describe('TaskView', () => {
     expect(await screen.findByTestId('conversation-find-input')).toHaveFocus();
   });
 
+  it('highlights conversation find matches inside fenced code blocks', async () => {
+    mockNavigatorPlatform('MacIntel');
+    api.streamChatEvents.mockImplementation(() => vi.fn());
+    render(<TaskView chatId="chat-1" agentsMap={agentsMap} />);
+
+    await screen.findByTestId('composer-input');
+    const stream = api.streamChatEvents.mock.calls[0];
+    await emitEvent(stream, {
+      seq: 3,
+      type: 'message',
+      ts: '2026-05-12T10:02:00Z',
+      actor_agent_id: 'agent-1',
+      message: { role: 'assistant', content: '```js\nconst alpha = 1;\n```' },
+    });
+
+    fireEvent.keyDown(window, { key: 'f', metaKey: true });
+    const findInput = await screen.findByTestId('conversation-find-input');
+    fireEvent.change(findInput, { target: { value: 'alpha' } });
+
+    expect(await screen.findByTestId('conversation-search-match')).toHaveTextContent('alpha');
+    expect(screen.getByTestId('conversation-find-status')).toHaveTextContent('1 / 1');
+  });
+
   it('moves the running cancel action into the composer stop button', async () => {
     api.getChat.mockResolvedValue({ ...chat, stream: { status: 'streaming' } });
     api.streamChatEvents.mockImplementation(() => vi.fn());

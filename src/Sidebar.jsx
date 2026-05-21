@@ -306,7 +306,7 @@ function SessionProgress({ title }) {
 // Session row context menu — opened via right-click on a chat row. Items
 // mirror ProjectMenu's visual treatment. Positioned at the mouse cursor
 // (point) rather than below an anchor so right-clicks feel native.
-function SessionMenu({ point, onClose, onRename, onArchive }) {
+function SessionMenu({ point, onClose, onRename, onArchive, canArchive = true }) {
   const ref = React.useRef(null);
 
   React.useEffect(() => {
@@ -326,13 +326,15 @@ function SessionMenu({ point, onClose, onRename, onArchive }) {
       icon: <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M2 10.5l.8-3 6-6a1.2 1.2 0 0 1 1.7 1.7l-6 6-2.5.3z" stroke="currentColor" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round"/></svg>,
       action: () => { onClose(); onRename?.(); },
     },
-    { divider: true },
-    {
+    ...(canArchive ? [
+      { divider: true },
+      {
       label: 'Archive',
       icon: <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><rect x="1.5" y="2" width="10" height="2.5" rx="0.8" stroke="currentColor" strokeWidth="1"/><path d="M2.5 4.5v5a1 1 0 0 0 1 1h5a1 1 0 0 0 1-1v-5" stroke="currentColor" strokeWidth="1"/><path d="M5 7.5h3" stroke="currentColor" strokeWidth="1" strokeLinecap="round"/></svg>,
       danger: true,
       action: () => { onClose(); onArchive?.(); },
-    },
+      },
+    ] : []),
   ];
 
   return (
@@ -498,6 +500,7 @@ function SessionItem({ session, active, onPick, onArchive, onRename }) {
           onClose={() => setMenuPoint(null)}
           onRename={beginRename}
           onArchive={() => onArchive?.()}
+          canArchive={!isRunning}
         />
       )}
     </>

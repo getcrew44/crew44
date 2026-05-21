@@ -195,7 +195,7 @@ const CODE_BLOCK_STYLE = {
   overflowX: 'auto',
 };
 
-function CodeBlock({ lines, margin }) {
+function CodeBlock({ lines, margin, searchQuery = '', getSearchMatchIndex, activeSearchMatchIndex = 0 }) {
   const [copied, setCopied] = React.useState(false);
   const [hovered, setHovered] = React.useState(false);
   const text = lines.join('\n');
@@ -212,7 +212,14 @@ function CodeBlock({ lines, margin }) {
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
     >
-      <pre style={CODE_BLOCK_STYLE}>{text}</pre>
+      <pre style={CODE_BLOCK_STYLE}>
+        {lines.map((line, index) => (
+          <React.Fragment key={index}>
+            {index > 0 && '\n'}
+            {renderSearchHighlights(line, searchQuery, `code-${index}-`, getSearchMatchIndex, activeSearchMatchIndex)}
+          </React.Fragment>
+        ))}
+      </pre>
       {(hovered || copied) && (
         <button
           type="button"
@@ -337,7 +344,14 @@ export function RichText({ text, searchQuery = '', getSearchMatchIndex, activeSe
           }} />
         );
         if (b.kind === 'code') return (
-          <CodeBlock key={i} lines={b.lines} margin={i === 0 ? '0 0 8px' : '8px 0'} />
+          <CodeBlock
+            key={i}
+            lines={b.lines}
+            margin={i === 0 ? '0 0 8px' : '8px 0'}
+            searchQuery={searchQuery}
+            getSearchMatchIndex={getSearchMatchIndex}
+            activeSearchMatchIndex={activeSearchMatchIndex}
+          />
         );
         if (b.kind === 'p') return (
           <p key={i} style={{ margin: i === 0 ? '0 0 8px' : '8px 0' }}>

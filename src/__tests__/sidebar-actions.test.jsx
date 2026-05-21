@@ -442,4 +442,25 @@ describe('Sidebar session context menu', () => {
     fireEvent.keyDown(document, { key: 'Escape' });
     expect(screen.queryByTestId('session-menu')).not.toBeInTheDocument();
   });
+
+  it('does not offer Archive from the context menu for a running session', () => {
+    const onArchive = vi.fn();
+    render(
+      <Sidebar
+        {...baseProps}
+        projects={[{
+          id: 'p1', name: 'first-project', workdir: '/tmp/p1',
+          sessions: [{ id: 'c-run', title: 'streaming', status: 'running', age: '0m' }],
+        }]}
+        onArchiveChat={onArchive}
+        onRenameChat={vi.fn()}
+      />
+    );
+
+    fireEvent.contextMenu(screen.getByTestId('chat-c-run'));
+
+    const menu = screen.getByTestId('session-menu');
+    expect(within(menu).getByText('Rename')).toBeInTheDocument();
+    expect(within(menu).queryByText('Archive')).not.toBeInTheDocument();
+  });
 });

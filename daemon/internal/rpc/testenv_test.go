@@ -94,6 +94,9 @@ type captureRunRequestEngine struct {
 }
 
 func (e *captureRunRequestEngine) Run(_ context.Context, request runtime.RunRequest, emit func(runtime.StreamEvent) error) (runtime.RunResult, error) {
+	if strings.HasPrefix(request.Agent.Instruction, app.ChatTitleSummarySentinel) {
+		return runtime.RunResult{}, nil
+	}
 	e.requests <- request
 	if err := emit(runtime.StreamEvent{
 		Type: model.EventTypeMessage,
