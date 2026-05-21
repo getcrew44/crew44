@@ -249,6 +249,20 @@ describe('TaskView', () => {
     ]);
   });
 
+  it('keeps the composer shell transparent while the input surface stays framed', async () => {
+    render(<TaskView chatId="chat-1" agentsMap={agentsMap} />);
+
+    const inputSurface = await screen.findByTestId('composer-column');
+    expect(inputSurface.parentElement).toHaveStyle({
+      background: 'transparent',
+      position: 'relative',
+    });
+    expect(inputSurface).toHaveStyle({
+      background: '#FFFEF8',
+      border: '1px solid #DCD3BC',
+    });
+  });
+
   it('removes an attachment before sending', async () => {
     window.electronAPI.openFileDialog.mockResolvedValue({
       canceled: false,

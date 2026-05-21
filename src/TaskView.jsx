@@ -2594,10 +2594,27 @@ function Composer({ onSend, isStreaming, onCancel, pendingSteers = [], onCancelS
 
   return (
     <div style={{
-      borderTop: '1px solid #ECE6D5',
-      background: '#FCFAF1',
-      padding: '10px 36px 14px',
+      // Sit flush on the conversation timeline's background — no divider
+      // strip, no #FCFAF1 fill. The inner rounded "Steer the crew" box
+      // below keeps its own border/radius so the input is still a clear
+      // affordance. A fade overlay sits just above the composer so that
+      // timeline content visually fades out as it approaches the input.
+      background: 'transparent',
+      padding: '4px 36px 14px',
+      position: 'relative',
     }}>
+      <div
+        aria-hidden="true"
+        style={{
+          position: 'absolute',
+          bottom: '100%',
+          left: 0,
+          right: 0,
+          height: 28,
+          background: 'linear-gradient(to bottom, rgba(250, 245, 232, 0), #FAF5E8)',
+          pointerEvents: 'none',
+        }}
+      />
       {pendingSteers.length > 0 && (
         <div style={{ ...conversationColumn, marginBottom: 8, display: 'flex', flexDirection: 'column', gap: 2 }}>
           {pendingSteers.map((item, index) => (

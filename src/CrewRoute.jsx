@@ -1,6 +1,7 @@
 import React from 'react';
 import { Avatar, Icon, Toggle, ghostBtn, primaryBtn, card, MONO_FONT, UI_FONT } from './components.jsx';
 import { relativeTime } from './utils.js';
+import { runtimeIconUrl } from './runtime-icons/index.js';
 import * as api from './api.js';
 
 const CONTENT_MAX_WIDTH = 720;
@@ -22,17 +23,43 @@ function StatusDot({ on }) {
   );
 }
 
-function RuntimeBadge({ engine }) {
-  const ch = (engine || '?')[0].toUpperCase();
+function RuntimeBadge({ runtime, available = true }) {
+  const iconUrl = runtimeIconUrl(runtime);
+  const letter = (runtime?.provider || runtime?.name || runtime?.id || '?')[0].toUpperCase();
   return (
     <span style={{
       width: 22, height: 22, borderRadius: 6,
-      background: '#F0EAD8', border: '1px solid #E6DFCC',
+      // Letter fallback keeps the solid tile so it reads as an avatar.
+      // Real product icons get a transparent fill but a faint border so every
+      // brand mark sits inside the same visual frame regardless of how thin
+      // or chunky the underlying glyph is.
+      background: iconUrl ? 'transparent' : '#F0EAD8',
+      border: '1px solid #E6DFCC',
       display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-      fontFamily: MONO_FONT, fontSize: 11, fontWeight: 600, color: '#5C544B',
-    }}>{ch}</span>
+      flexShrink: 0, overflow: 'hidden',
+    }}>
+      {iconUrl ? (
+        <img src={iconUrl} alt="" width={14} height={14} style={{ display: 'block', opacity: available ? 1 : 0.45 }} />
+      ) : (
+        <span style={{ fontFamily: MONO_FONT, fontSize: 11, fontWeight: 600, color: '#5C544B' }}>{letter}</span>
+      )}
+    </span>
   );
 }
+
+const SUPPORTED_RUNTIMES = [
+  { id: 'claude', name: 'Claude Code' },
+  { id: 'codex', name: 'Codex' },
+  { id: 'cursor', name: 'Cursor Agent' },
+  { id: 'gemini', name: 'Gemini CLI' },
+  { id: 'hermes', name: 'Hermes' },
+  { id: 'kimi', name: 'Kimi' },
+  { id: 'opencode', name: 'OpenCode' },
+  { id: 'openclaw', name: 'OpenClaw' },
+  { id: 'pi', name: 'Pi' },
+  { id: 'qoder', name: 'Qoder' },
+  { id: 'qwen', name: 'Qwen Code' },
+];
 
 function PropRow({ label, value }) {
   return (
@@ -74,6 +101,7 @@ function RuntimesSection({ runtimes, onDataRefresh, onToast }) {
   const [rescanning, setRescanning] = React.useState(false);
   const grid = '1.4fr 0.8fr 0.6fr 1fr';
   const display = runtimes.length > 0 ? runtimes : [];
+  const detectedProviders = new Set(display.map(r => r.provider || r.id));
 
   const handleRescan = async () => {
     if (rescanning) return;
@@ -114,7 +142,7 @@ function RuntimesSection({ runtimes, onDataRefresh, onToast }) {
         {display.map(r => (
           <div key={r.id} style={{ ...tableRow, gridTemplateColumns: grid }}>
             <span style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              <RuntimeBadge engine={r.provider || r.name} />
+              <RuntimeBadge runtime={r} />
               <span style={{ fontWeight: 500 }}>{r.name || r.id}</span>
             </span>
             <StatusDot on={r.status === 'available'} />
@@ -123,7 +151,95 @@ function RuntimesSection({ runtimes, onDataRefresh, onToast }) {
           </div>
         ))}
       </div>
+      <SupportedRuntimes detectedProviders={detectedProviders} />
     </section>
+  );
+}
+
+function SupportedRuntimes({ detectedProviders }) {
+  const notInstalled = SUPPORTED_RUNTIMES.filter(r => !detectedProviders.has(r.id));
+  const nothingDetected = detectedProviders.size === 0;
+  // Collapse the list once the user has 2+ runtimes — at that point the table
+  // above is the primary read and this becomes a "what else exists" tail.
+  const [expanded, setExpanded] = React.useState(detectedProviders.size < 2);
+
+  if (notInstalled.length === 0) {
+    return (
+      <div style={{
+        marginTop: 14,
+        display: 'inline-flex', alignItems: 'center', gap: 8,
+        padding: '8px 12px', borderRadius: 8,
+        background: '#F3EFE0', border: '1px solid #E6DFCC',
+        fontSize: 12.5, color: '#5C544B',
+      }}>
+        <span style={{
+          width: 14, height: 14, borderRadius: '50%',
+          background: '#5B9C5F', color: '#FCFBF7',
+          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+          fontSize: 9, fontWeight: 700,
+        }}>✓</span>
+        All {SUPPORTED_RUNTIMES.length} supported runtimes installed.
+      </div>
+    );
+  }
+
+  // When no runtimes are detected at all, this list is the whole story — keep
+  // the original "Supported runtimes" label. Once anything is installed, the
+  // table above owns the primary read and this becomes "what else is there".
+  const label = nothingDetected ? 'Supported runtimes' : 'Other supported runtimes';
+
+  return (
+    <div style={{ marginTop: 18 }}>
+      <button
+        type="button"
+        onClick={() => setExpanded(v => !v)}
+        aria-expanded={expanded}
+        style={{
+          display: 'flex', alignItems: 'center', gap: 8, marginBottom: expanded ? 10 : 0,
+          background: 'transparent', border: 'none', padding: 0,
+          cursor: 'pointer', textAlign: 'left',
+        }}
+      >
+        <span style={{
+          color: '#A89F92', display: 'flex',
+          transform: expanded ? 'rotate(90deg)' : 'none',
+          transition: 'transform 0.15s',
+        }}>
+          <Icon name="chev" size={11} />
+        </span>
+        <span style={{
+          fontSize: 11.5, color: '#A89F92',
+          textTransform: 'uppercase', letterSpacing: 0.4, fontWeight: 500,
+        }}>{label}</span>
+        <span style={{ fontSize: 12.5, color: '#A89F92' }}>{notInstalled.length}</span>
+        <span style={{ fontSize: 12.5, color: '#807972' }}>· not installed</span>
+      </button>
+      {expanded && (
+        <div style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))',
+          gap: 6,
+        }}>
+          {notInstalled.map(runtime => (
+            <span
+              key={runtime.id}
+              title="Supported, not installed"
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 8,
+                padding: '6px 10px', borderRadius: 7,
+                fontSize: 12.5, color: '#A89F92',
+                minWidth: 0,
+              }}
+            >
+              <RuntimeBadge runtime={runtime} available={false} />
+              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {runtime.name}
+              </span>
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 
