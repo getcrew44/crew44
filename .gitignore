@@ -18,6 +18,7 @@ node_modules/
 /packages/mobile/vendor/bundle/
 /dist/
 /.electron-app/
+/release/
 .gstack/
 /mocks/
 
@@ -38,6 +39,7 @@ node_modules/
 .env
 .env.local
 .env.*.local
+.npmrc
 
 # Logs
 *.log

@@ -87,9 +87,14 @@ Scan the QR code from the desktop **Pair Mobile** dialog. See [`docs/mobile-pair
 ### Build a packaged desktop app
 
 ```bash
-npm run build
-# produces .electron-app/Crew44.app
+npm run dist:mac          # signed + notarized DMG → release/Crew44-<version>-arm64.dmg
+npm run dist:mac:unsigned # unsigned DMG, no Apple credentials needed
+npm run dist:win          # Windows installer + portable → release/Crew44-Setup-<version>.exe
 ```
+
+Powered by `electron-builder` for packaging, with a custom signing/DMG step (`electron/scripts/dist-mac.cjs`) that uses `codesign` + `hdiutil` + `xcrun notarytool` directly — faster than electron-builder's built-in signing and avoids network dependencies that are flaky from some regions.
+
+**If Electron or electron-builder downloads fail or stall** (e.g., from China), copy `.npmrc.example` to `.npmrc` — it routes binary fetches through npmmirror.com.
 
 ## What's interesting under the hood
 
