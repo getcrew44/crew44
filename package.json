@@ -60,15 +60,19 @@
       "icon": "electron/assets/crew44.ico",
       "target": [
         {
-          "target": "portable",
+          "target": "nsis",
           "arch": [
             "x64"
           ]
         }
       ]
     },
-    "portable": {
-      "artifactName": "${productName}-${version}-${arch}.${ext}"
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "artifactName": "${productName}-Setup-${version}-${arch}.${ext}",
+      "shortcutName": "Crew44"
     },
     "linux": {
       "category": "Development",
