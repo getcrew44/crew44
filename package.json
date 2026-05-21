@@ -26,7 +26,11 @@
     "mobile:build:ios": "npm --workspace=@crew44/mobile run build:ios",
     "mobile:build:android": "npm --workspace=@crew44/mobile run build:android",
     "mobile:build:all": "npm --workspace=@crew44/mobile run build:all",
+    "mobile:typecheck": "npm --workspace=@crew44/mobile run typecheck",
+    "test:web": "vitest run",
     "test:mobile": "npm --workspace=@crew44/mobile run test",
+    "desktop:smoke:linux": "npm run build:daemon:linux && vite build && electron-builder --dir --linux --x64",
+    "desktop:smoke:win": "npm run build:daemon:win && vite build && electron-builder --dir --win --x64",
     "test": "cd daemon && go test ./... && cd .. && vitest run && npm run test:mobile",
     "clean": "rm -rf bin dist release .electron-app crew44-server crew44-daemon"
   },
