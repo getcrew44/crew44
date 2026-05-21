@@ -2,6 +2,21 @@
 
 All notable changes to this project are documented here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.5] - 2026-05-21
+
+### Added
+- **Qoder runtime support.** Crew44 detects and runs `qodercli --acp`, speaking the standard Agent Client Protocol (ACP) over stdio. Skills under `.qoder/skills` are auto-injected. Set `CREW44_QODER_PATH` to override the binary location and `CREW44_QODER_MODEL` to hint a default model.
+- **Qwen Code runtime support.** Crew44 detects and runs Alibaba's `qwen` CLI (a Gemini-CLI fork that ships the identical `-p / --yolo / -o stream-json / -m / -r` invocation). Ships a static Qwen3-Coder model catalog (`qwen3-coder-plus` default, plus `qwen3-coder-next` preview, `qwen3-coder-480b-a35b-instruct`, `qwen3-coder-30b-a3b-instruct`, and `qwen3.5-plus`). Set `CREW44_QWEN_PATH` / `CREW44_QWEN_MODEL` to override.
+- **Scanner now detects the full supported CLI set.** Previously only Claude Code and Codex appeared in the runtime list. The scanner now surfaces Cursor Agent, Gemini CLI, Hermes, Kimi, OpenCode, OpenClaw, and Pi as first-class entries — each with a `CREW44_<NAME>_PATH` / `CREW44_<NAME>_MODEL` override and a display name in the UI.
+
+### Changed
+- **Pi sessions now live at `~/.crew44/pi-sessions`.** Aligned with the rest of the project's state directory under `~/.crew44/`. Internal identifiers used by the daemon (ACP client names, model-discovery temp directories, MCP config temp file prefix, OpenClaw session ID prefix) also use the `crew44` namespace.
+- **Dropped Kiro backend.** The `kiro` runtime is no longer registered or detected. The slot in the model-discovery dispatch is now used by Qoder.
+
+### Fixed
+- **Windows: freshly-installed CLIs become visible without restarting Crew44.** The daemon used to inherit a stale PATH from Electron (which inherits from `explorer.exe` and never sees `WM_SETTINGCHANGE`), so installing `claude.exe` or `codex.cmd` while Crew44 was running did nothing — clicking "Rescan" could not find them. `LocalScanner.Scan()` now re-reads `HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Environment\Path` and `HKCU\Environment\Path` from the registry on every scan and merges them into the daemon's PATH (with case-insensitive dedup and `REG_EXPAND_SZ` expansion) so subsequent `exec.LookPath` calls see post-install changes.
+- **Gemini version detection no longer breaks on Windows.** The gemini npm shim prefixes `Active code page: 65001` from a fresh `cmd.exe`; the semver regex now skips that line instead of failing the version check. Removed a dead `CheckMinCLIVersion` path that referenced a CLI Crew44 does not ship.
+
 ## [0.5.4] - 2026-05-20
 
 ### Added
