@@ -979,6 +979,9 @@ func (a *App) UpdateChat(chat model.ChatRecord) (model.ChatRecord, error) {
 	}
 	if chat.Title != "" {
 		current.Title = model.NormalizeChatTitle(chat.Title)
+		// Any title that lands here came from a user-driven rename
+		// (RPC chats.update). Lock it against the auto-summarizer.
+		current.TitleSetByUser = true
 	}
 	if chat.Status != "" {
 		current.Status = chat.Status
@@ -989,6 +992,33 @@ func (a *App) UpdateChat(chat model.ChatRecord) (model.ChatRecord, error) {
 		return model.ChatRecord{}, err
 	}
 	return current, nil
+}
+
+// applyAutoChatTitle writes a machine-derived title onto the chat, but only
+// when the user has not explicitly renamed it. Returns the resulting chat
+// (or the unchanged record when the auto-title was rejected). Errors from
+// the store flow back to the caller; a locked title is not an error.
+func (a *App) applyAutoChatTitle(chatID, title string) (model.ChatRecord, bool, error) {
+	title = model.NormalizeChatTitle(title)
+	if title == "" {
+		return model.ChatRecord{}, false, nil
+	}
+	current, err := a.store.GetChat(chatID)
+	if err != nil {
+		return model.ChatRecord{}, false, a.mapError(err)
+	}
+	if current.TitleSetByUser {
+		return current, false, nil
+	}
+	if current.Title == title {
+		return current, false, nil
+	}
+	current.Title = title
+	current.UpdatedAt = time.Now().UTC()
+	if err := a.store.SaveChat(current); err != nil {
+		return model.ChatRecord{}, false, err
+	}
+	return current, true, nil
 }
 
 func (a *App) DeleteChat(id string) error {
