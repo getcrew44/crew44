@@ -27,9 +27,13 @@ the following runtimes to be detected when their CLIs are installed:
 - `codex`
 - `cursor` (cursor-agent)
 - `gemini`
+- `hermes`
+- `kimi`
 - `opencode`
 - `openclaw`
-- `kimi`
+- `pi`
+- `qoder` (qodercli)
+- `qwen`
 
 ## Test Commands
 

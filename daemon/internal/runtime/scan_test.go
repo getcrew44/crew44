@@ -40,6 +40,8 @@ func TestLocalScannerDetectsAllProviders(t *testing.T) {
 	//   opencode:      "opencode 0.21.4"
 	//   openclaw:      "openclaw 2026.5.5 abc123" (CalVer)
 	//   pi:            "pi 0.5.0"
+	//   qodercli:      "qodercli/0.9.0"
+	//   qwen:          "@qwen-code/qwen-code 0.2.8"
 	fixtures := map[string]fixture{
 		"claude":   {bin: "claude", version: "2.1.146 (Claude Code)"},
 		"codex":    {bin: "codex", version: "codex-cli 0.125.0"},
@@ -50,6 +52,8 @@ func TestLocalScannerDetectsAllProviders(t *testing.T) {
 		"opencode": {bin: "opencode", version: "opencode 0.21.4"},
 		"openclaw": {bin: "openclaw", version: "openclaw 2026.5.5 abc123"},
 		"pi":       {bin: "pi", version: "pi 0.5.0"},
+		"qoder":    {bin: "qodercli", version: "qodercli/0.9.0"},
+		"qwen":     {bin: "qwen", version: "@qwen-code/qwen-code 0.2.8"},
 	}
 
 	binDir := t.TempDir()
@@ -132,6 +136,8 @@ func TestDisplayRuntimeNamesAreSet(t *testing.T) {
 		"opencode": "OpenCode",
 		"openclaw": "OpenClaw",
 		"pi":       "Pi",
+		"qoder":    "Qoder",
+		"qwen":     "Qwen Code",
 	}
 	for _, spec := range localProviderSpecs {
 		got := displayRuntimeName(spec.Provider)

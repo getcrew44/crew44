@@ -75,6 +75,12 @@ func ListModels(ctx context.Context, providerType, executablePath string) ([]Mod
 		return cachedDiscovery(providerType, func() ([]Model, error) {
 			return discoverKimiModels(ctx, executablePath)
 		})
+	case "qoder":
+		return cachedDiscovery(providerType, func() ([]Model, error) {
+			return discoverQoderModels(ctx, executablePath)
+		})
+	case "qwen":
+		return qwenStaticModels(), nil
 	case "opencode":
 		return cachedDiscovery(providerType, func() ([]Model, error) {
 			return discoverOpenCodeModels(ctx, executablePath)
@@ -457,6 +463,38 @@ func discoverKimiModels(ctx context.Context, executablePath string) ([]Model, er
 		clientName:   "crew44-model-discovery",
 		tmpdirPrefix: "crew44-kimi-discovery-",
 	})
+}
+
+// discoverQoderModels spins up `qodercli --acp` and parses the model
+// catalog block from session/new. Qoder follows the standard ACP
+// `models.availableModels` schema so the shared discoverACPModels helper
+// covers it without per-provider parsing.
+//
+// Unlike hermes/kimi (subcommand `acp`), Qoder takes a flag (`--acp`),
+// so we pass it via acpArgs — the same path Copilot uses with `--acp`.
+func discoverQoderModels(ctx context.Context, executablePath string) ([]Model, error) {
+	return discoverACPModels(ctx, executablePath, acpDiscoveryProvider{
+		defaultBin:   "qodercli",
+		clientName:   "crew44-model-discovery",
+		tmpdirPrefix: "crew44-qoder-discovery-",
+		acpArgs:      []string{"--acp"},
+	})
+}
+
+// qwenStaticModels returns the published Qwen3-Coder catalog the Qwen
+// Code CLI accepts via `-m`. Users can switch to any other model by
+// editing `~/.qwen/settings.json` and selecting it via the `/model`
+// slash command in interactive mode; this static list is a reasonable
+// dropdown starting point matching what Alibaba Cloud's Coding Plan
+// exposes today.
+func qwenStaticModels() []Model {
+	return []Model{
+		{ID: "qwen3-coder-plus", Label: "Qwen3 Coder Plus", Provider: "alibaba", Default: true},
+		{ID: "qwen3-coder-next", Label: "Qwen3 Coder Next (preview)", Provider: "alibaba"},
+		{ID: "qwen3-coder-480b-a35b-instruct", Label: "Qwen3 Coder 480B A35B Instruct", Provider: "alibaba"},
+		{ID: "qwen3-coder-30b-a3b-instruct", Label: "Qwen3 Coder 30B A3B Instruct", Provider: "alibaba"},
+		{ID: "qwen3.5-plus", Label: "Qwen3.5 Plus", Provider: "alibaba"},
+	}
 }
 
 // discoverCopilotModels spins up `copilot --acp` and reads the

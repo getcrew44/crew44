@@ -129,6 +129,8 @@ func resolveSkillsDir(workDir, provider string) (string, error) {
 		skillsDir = filepath.Join(workDir, ".cursor", "skills")
 	case "kimi":
 		skillsDir = filepath.Join(workDir, ".kimi", "skills")
+	case "qoder":
+		skillsDir = filepath.Join(workDir, ".qoder", "skills")
 	default:
 		skillsDir = filepath.Join(workDir, ".agent_context", "skills")
 	}

@@ -31,6 +31,8 @@ var localProviderSpecs = []providerSpec{
 	{Provider: "opencode", PathEnv: "CREW44_OPENCODE_PATH", ModelEnv: "CREW44_OPENCODE_MODEL", DefaultBin: "opencode"},
 	{Provider: "openclaw", PathEnv: "CREW44_OPENCLAW_PATH", ModelEnv: "CREW44_OPENCLAW_MODEL", DefaultBin: "openclaw"},
 	{Provider: "pi", PathEnv: "CREW44_PI_PATH", ModelEnv: "CREW44_PI_MODEL", DefaultBin: "pi"},
+	{Provider: "qoder", PathEnv: "CREW44_QODER_PATH", ModelEnv: "CREW44_QODER_MODEL", DefaultBin: "qodercli"},
+	{Provider: "qwen", PathEnv: "CREW44_QWEN_PATH", ModelEnv: "CREW44_QWEN_MODEL", DefaultBin: "qwen"},
 }
 
 func (LocalScanner) Scan(ctx context.Context) ([]model.RuntimeRecord, error) {
@@ -130,6 +132,10 @@ func displayRuntimeName(provider string) string {
 		return "OpenClaw"
 	case "pi":
 		return "Pi"
+	case "qoder":
+		return "Qoder"
+	case "qwen":
+		return "Qwen Code"
 	default:
 		return strings.Title(provider)
 	}
