@@ -12,7 +12,8 @@ vi.mock('../api.js', () => ({
 
 const claudeRuntime = { id: 'rt-claude', name: 'Claude Code', provider: 'claude', version: '2.1.0', status: 'available' };
 const codexRuntime = { id: 'rt-codex', name: 'Codex', provider: 'codex', version: '0.125.0', status: 'available' };
-const offlineRuntime = { id: 'rt-cursor', name: 'Cursor', provider: 'cursor', version: '0.4.0', status: 'unavailable' };
+const offlineRuntime = { id: 'rt-cursor', name: 'Cursor Agent', provider: 'cursor', version: '—', status: 'not_installed' };
+const offlineQoder = { id: 'rt-qoder', name: 'Qoder', provider: 'qoder', version: '—', status: 'not_installed' };
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -101,6 +102,51 @@ describe('Onboarding — runtime scan step', () => {
       () => expect(screen.getByText(/No runtimes found on this machine/i)).toBeInTheDocument(),
       { timeout: 4000 },
     );
+  }, 6000);
+
+  it('pluralises the title at 2+ available runtimes', async () => {
+    render(<OnboardingRoute runtimes={[]} onComplete={() => {}} onSkip={() => {}} />);
+    fireEvent.click(screen.getByRole('button', { name: /start exploring/i }));
+
+    await waitFor(
+      () => expect(screen.getByText(/Your runtimes are ready/i)).toBeInTheDocument(),
+      { timeout: 4000 },
+    );
+  }, 6000);
+
+  it('singularises the title at exactly one available runtime', async () => {
+    api.listRuntimes.mockResolvedValueOnce([claudeRuntime]);
+    render(<OnboardingRoute runtimes={[]} onComplete={() => {}} onSkip={() => {}} />);
+    fireEvent.click(screen.getByRole('button', { name: /start exploring/i }));
+
+    await waitFor(
+      () => expect(screen.getByText(/Your runtime is ready/i)).toBeInTheDocument(),
+      { timeout: 4000 },
+    );
+  }, 6000);
+
+  it('hides not-installed runtimes by default and reveals them via the toggle', async () => {
+    api.listRuntimes.mockResolvedValueOnce([claudeRuntime, codexRuntime, offlineRuntime, offlineQoder]);
+    render(<OnboardingRoute runtimes={[]} onComplete={() => {}} onSkip={() => {}} />);
+    fireEvent.click(screen.getByRole('button', { name: /start exploring/i }));
+
+    await waitFor(
+      () => expect(screen.getByText(/Found 2 runtimes/i)).toBeInTheDocument(),
+      { timeout: 4000 },
+    );
+
+    // Available runtimes are visible; not-installed ones are hidden behind the toggle.
+    expect(screen.getByText('Claude Code')).toBeInTheDocument();
+    expect(screen.getByText('Codex')).toBeInTheDocument();
+    expect(screen.queryByText('Cursor Agent')).not.toBeInTheDocument();
+    expect(screen.queryByText('Qoder')).not.toBeInTheDocument();
+
+    const toggle = screen.getByRole('button', { name: /Show 2 more runtimes not installed/i });
+    fireEvent.click(toggle);
+
+    expect(screen.getByText('Cursor Agent')).toBeInTheDocument();
+    expect(screen.getByText('Qoder')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Hide runtimes not installed/i })).toBeInTheDocument();
   }, 6000);
 
   it('Back returns to the welcome step', async () => {

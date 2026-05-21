@@ -2,6 +2,7 @@ import React from 'react';
 import { Icon, primaryBtn, ghostBtn, card, MONO_FONT } from './components.jsx';
 import { CustomPicker } from './CustomPicker.jsx';
 import { agentColor, agentInitial } from './utils.js';
+import { runtimeIconUrl } from './runtime-icons/index.js';
 import * as api from './api.js';
 
 function RuntimeIcon({ size = 13 }) {
@@ -302,6 +303,7 @@ function WelcomeStep({ onNext }) {
 
 function RuntimeRow({ runtime, scanning }) {
   const available = runtime.status === 'available';
+  const iconUrl = runtimeIconUrl(runtime);
   return (
     <div style={{
       padding: '12px 16px', borderBottom: '1px solid #ECE6D5',
@@ -309,12 +311,30 @@ function RuntimeRow({ runtime, scanning }) {
     }}>
       <div style={{
         width: 28, height: 28, borderRadius: 7,
-        background: available ? '#F0EAD8' : '#F7F1DE',
+        // Letter fallback keeps the solid tile so it reads as an avatar.
+        // Real product icons get a transparent fill but a faint border so
+        // every brand mark sits inside the same visual frame — icons with
+        // thin glyphs (Cursor, Hermes) no longer look smaller than chunky
+        // ones (Qoder, Codex).
+        background: iconUrl ? 'transparent' : (available ? '#F0EAD8' : '#F7F1DE'),
         border: '1px solid #E6DFCC',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
         fontFamily: MONO_FONT, fontSize: 12, fontWeight: 600,
         color: available ? '#1C1A17' : '#A89F92',
-      }}>{(runtime.provider || runtime.name || '?')[0].toUpperCase()}</div>
+        overflow: 'hidden',
+      }}>
+        {iconUrl ? (
+          <img
+            src={iconUrl}
+            alt=""
+            width={18}
+            height={18}
+            style={{ display: 'block', opacity: available ? 1 : 0.45 }}
+          />
+        ) : (
+          (runtime.provider || runtime.name || '?')[0].toUpperCase()
+        )}
+      </div>
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ fontSize: 13.5, fontWeight: 500, color: '#1C1A17' }}>
           {runtime.name || runtime.id}
@@ -331,7 +351,7 @@ function RuntimeRow({ runtime, scanning }) {
           width: 7, height: 7, borderRadius: '50%',
           background: available ? '#5B9C5F' : '#C9BFA8',
         }} />
-        {scanning ? 'checking…' : available ? 'available' : 'not found'}
+        {scanning ? 'checking…' : available ? 'available' : 'not installed'}
       </span>
     </div>
   );
@@ -340,6 +360,7 @@ function RuntimeRow({ runtime, scanning }) {
 function ScanStep({ onNext, onBack, runtimes, setRuntimes }) {
   const [scanning, setScanning] = React.useState(true);
   const [error, setError] = React.useState(null);
+  const [showNotInstalled, setShowNotInstalled] = React.useState(false);
 
   const runScan = React.useCallback(async () => {
     setScanning(true);
@@ -360,6 +381,7 @@ function ScanStep({ onNext, onBack, runtimes, setRuntimes }) {
   React.useEffect(() => { runScan(); /* eslint-disable-next-line */ }, []);
 
   const available = runtimes.filter(r => r.status === 'available');
+  const notInstalled = runtimes.filter(r => r.status !== 'available');
 
   let title, body;
   if (scanning) {
@@ -371,8 +393,11 @@ function ScanStep({ onNext, onBack, runtimes, setRuntimes }) {
   } else if (available.length === 0) {
     title = 'No runtimes found on this machine.';
     body = 'You can install one (Claude Code, Codex, Cursor…) and rescan, or skip ahead and add a runtime later from the Crew tab.';
+  } else if (available.length === 1) {
+    title = 'Your runtime is ready.';
+    body = 'Your crew will run locally on your machine. You can swap or add more from the Crew tab anytime.';
   } else {
-    title = `Your runtime is ready.`;
+    title = 'Your runtimes are ready.';
     body = 'Your crew will run locally on your machine. You can swap or add more from the Crew tab anytime.';
   }
 
@@ -424,7 +449,58 @@ function ScanStep({ onNext, onBack, runtimes, setRuntimes }) {
           </div>
         )}
 
-        {runtimes.map(r => <RuntimeRow key={r.id} runtime={r} scanning={scanning} />)}
+        {scanning && runtimes.length === 0 ? null : (
+          <>
+            {/* Available always come first */}
+            {available.map(r => <RuntimeRow key={r.id} runtime={r} scanning={scanning} />)}
+
+            {/* Not-installed runtimes hidden behind a toggle so the common
+                1–2-installed case doesn't show a wall of greyed-out rows. */}
+            {!scanning && notInstalled.length > 0 && (
+              <>
+                {!showNotInstalled && (
+                  <button
+                    type="button"
+                    onClick={() => setShowNotInstalled(true)}
+                    style={{
+                      width: '100%', padding: '12px 16px', textAlign: 'left',
+                      background: 'transparent', border: 'none', borderBottom: '1px solid #ECE6D5',
+                      cursor: 'pointer', fontSize: 12.5, color: '#807972',
+                      display: 'flex', alignItems: 'center', gap: 8,
+                    }}
+                  >
+                    <span style={{ fontSize: 11 }}>▸</span>
+                    Show {notInstalled.length} more runtime{notInstalled.length === 1 ? '' : 's'} not installed
+                  </button>
+                )}
+                {showNotInstalled && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => setShowNotInstalled(false)}
+                      style={{
+                        width: '100%', padding: '12px 16px', textAlign: 'left',
+                        background: 'transparent', border: 'none', borderBottom: '1px solid #ECE6D5',
+                        cursor: 'pointer', fontSize: 12.5, color: '#807972',
+                        display: 'flex', alignItems: 'center', gap: 8,
+                      }}
+                    >
+                      <span style={{ fontSize: 11 }}>▾</span>
+                      Hide runtimes not installed
+                    </button>
+                    {notInstalled.map(r => <RuntimeRow key={r.id} runtime={r} scanning={scanning} />)}
+                  </>
+                )}
+              </>
+            )}
+
+            {/* During a rescan we still want to show every row so users can
+                see existing entries flip to 'checking…'. */}
+            {scanning && notInstalled.length > 0 && (
+              notInstalled.map(r => <RuntimeRow key={r.id} runtime={r} scanning={scanning} />)
+            )}
+          </>
+        )}
       </div>
 
       <Footer

@@ -72,6 +72,75 @@ describe('CrewRoute runtimes tab', () => {
     expect(onDataRefresh).toHaveBeenCalledOnce();
     expect(onToast).toHaveBeenCalledWith('Runtimes refreshed.');
   });
+
+  it('shows the supported runtime providers as a quiet indicator', () => {
+    render(<CrewRoute {...baseProps} runtimes={[]} />);
+
+    expect(screen.getByText('Supported runtimes')).toBeInTheDocument();
+    for (const name of [
+      'Claude Code',
+      'Codex',
+      'Cursor Agent',
+      'Gemini CLI',
+      'Hermes',
+      'Kimi',
+      'OpenCode',
+      'OpenClaw',
+      'Pi',
+      'Qoder',
+      'Qwen Code',
+    ]) {
+      expect(screen.getByText(name)).toBeInTheDocument();
+    }
+  });
+
+  it('collapses other supported runtimes once multiple runtimes are detected', () => {
+    render(<CrewRoute
+      {...baseProps}
+      runtimes={[
+        baseProps.runtimes[0],
+        {
+          id: 'claude',
+          name: 'Claude Code',
+          provider: 'claude',
+          status: 'available',
+          version: '2.1.0',
+        },
+      ]}
+    />);
+
+    expect(screen.getByText('Other supported runtimes')).toBeInTheDocument();
+    expect(screen.getByText('9')).toBeInTheDocument();
+    expect(screen.queryByText('Qwen Code')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /Other supported runtimes/i }));
+
+    expect(screen.getByText('Qwen Code')).toBeInTheDocument();
+    expect(screen.queryByText('Codex')).toBeInTheDocument();
+  });
+
+  it('shows a completion badge when every supported runtime is detected', () => {
+    render(<CrewRoute
+      {...baseProps}
+      runtimes={[
+        { id: 'claude', name: 'Claude Code', provider: 'claude', status: 'available', version: '2.1.0' },
+        { id: 'codex', name: 'Codex', provider: 'codex', status: 'available', version: '0.125.0' },
+        { id: 'cursor', name: 'Cursor Agent', provider: 'cursor', status: 'available', version: '1.4.2' },
+        { id: 'gemini', name: 'Gemini CLI', provider: 'gemini', status: 'available', version: '0.6.1' },
+        { id: 'hermes', name: 'Hermes', provider: 'hermes', status: 'available', version: '0.4.2' },
+        { id: 'kimi', name: 'Kimi', provider: 'kimi', status: 'available', version: '0.3.0' },
+        { id: 'opencode', name: 'OpenCode', provider: 'opencode', status: 'available', version: '0.21.4' },
+        { id: 'openclaw', name: 'OpenClaw', provider: 'openclaw', status: 'available', version: '2026.5.5' },
+        { id: 'pi', name: 'Pi', provider: 'pi', status: 'available', version: '0.5.0' },
+        { id: 'qoder', name: 'Qoder', provider: 'qoder', status: 'available', version: '0.9.0' },
+        { id: 'qwen', name: 'Qwen Code', provider: 'qwen', status: 'available', version: '0.2.8' },
+      ]}
+    />);
+
+    expect(screen.getByText('All 11 supported runtimes installed.')).toBeInTheDocument();
+    expect(screen.queryByText('Other supported runtimes')).not.toBeInTheDocument();
+    expect(screen.queryByText('not installed')).not.toBeInTheDocument();
+  });
 });
 
 describe('CrewRoute agents tab', () => {
