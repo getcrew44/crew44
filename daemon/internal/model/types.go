@@ -23,6 +23,7 @@ type RuntimeRecord struct {
 type AgentConfig struct {
 	ID          string    `json:"id"`
 	Name        string    `json:"name"`
+	Description string    `json:"description"`
 	Instruction string    `json:"instruction"`
 	RuntimeID   string    `json:"runtime_id"`
 	Model       string    `json:"model"`
