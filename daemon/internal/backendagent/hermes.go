@@ -186,7 +186,7 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		_, err := c.request(runCtx, "initialize", map[string]any{
 			"protocolVersion": 1,
 			"clientInfo": map[string]any{
-				"name":    "multica-agent-sdk",
+				"name":    "crew44-agent-sdk",
 				"version": "0.2.0",
 			},
 			"clientCapabilities": map[string]any{},
@@ -597,8 +597,9 @@ func (c *hermesClient) handleResponse(raw map[string]json.RawMessage) {
 			Data    json.RawMessage `json:"data"`
 		}
 		_ = json.Unmarshal(errData, &rpcErr)
-		// JSON-RPC `data` carries the provider-specific reason (e.g. Kiro
-		// returns "No session found with id" for code=-32603). Surface it
+		// JSON-RPC `data` carries the provider-specific reason (e.g. some
+		// ACP agents return "No session found with id" for code=-32603,
+		// others put the upstream HTTP body there). Surface it
 		// in the wrapped error so daemon logs / UI can show *why* the
 		// agent failed instead of a bare "Internal error". `data` may be
 		// any JSON value: render strings unquoted, everything else as raw
@@ -1113,8 +1114,8 @@ func (c *hermesClient) handleUsageUpdate(data json.RawMessage) {
 // ── Helpers ──
 
 // extractACPSessionID pulls `sessionId` out of a session/new or
-// session/resume response. Shared by all ACP backends (hermes, kimi, kiro,
-// and anything else that follows the standard ACP schema).
+// session/resume response. Shared by all ACP backends (hermes, kimi, and
+// anything else that follows the standard ACP schema).
 func extractACPSessionID(result json.RawMessage) string {
 	var r struct {
 		SessionID string `json:"sessionId"`
@@ -1394,11 +1395,10 @@ func (s *acpProviderErrorSniffer) messageLocked() string {
 // updated (status, error) pair; callers should overwrite their
 // locals with the result.
 //
-// This is the shared post-processing step for hermes/kimi/kiro.
+// This is the shared post-processing step for hermes/kimi.
 // Without it, runs that exhaust retries against the upstream LLM
 // (HTTP 429, expired token, …) silently report as "completed"
-// because session/prompt still ends with stopReason=end_turn — see
-// GitHub multica#1952.
+// because session/prompt still ends with stopReason=end_turn.
 func promoteACPResultOnProviderError(finalStatus, finalError, finalOutput string, sniffer *acpProviderErrorSniffer) (string, string) {
 	if finalStatus != "completed" {
 		return finalStatus, finalError

@@ -1,7 +1,7 @@
 {
   "name": "crew44",
   "productName": "Crew44",
-  "version": "0.5.4",
+  "version": "0.5.5",
   "description": "Crew44 — local-first AI crew runner",
   "author": "Crew44",
   "main": "electron/main.cjs",

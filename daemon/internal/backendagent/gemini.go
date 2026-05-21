@@ -13,17 +13,39 @@ import (
 
 // geminiBackend implements Backend by spawning the Google Gemini CLI
 // with `--output-format stream-json` and parsing its NDJSON event stream.
+//
+// label / defaultBin are normally empty (the Gemini defaults apply). The
+// fields exist so Qwen Code — which is a Gemini-CLI fork that ships the
+// identical -p / --yolo / -o stream-json / -m / -r argv and stream-json
+// event shape — can reuse this whole implementation by setting them to
+// "qwen". Other forks can plug in the same way.
 type geminiBackend struct {
-	cfg Config
+	cfg        Config
+	label      string // log/error label; defaults to "gemini" via b.name()
+	defaultBin string // PATH lookup name; defaults to "gemini" via b.bin()
+}
+
+func (b *geminiBackend) name() string {
+	if b.label != "" {
+		return b.label
+	}
+	return "gemini"
+}
+
+func (b *geminiBackend) bin() string {
+	if b.defaultBin != "" {
+		return b.defaultBin
+	}
+	return "gemini"
 }
 
 func (b *geminiBackend) Execute(ctx context.Context, prompt string, opts ExecOptions) (*Session, error) {
 	execPath := b.cfg.ExecutablePath
 	if execPath == "" {
-		execPath = "gemini"
+		execPath = b.bin()
 	}
 	if _, err := exec.LookPath(execPath); err != nil {
-		return nil, fmt.Errorf("gemini executable not found at %q: %w", execPath, err)
+		return nil, fmt.Errorf("%s executable not found at %q: %w", b.name(), execPath, err)
 	}
 
 	timeout := opts.Timeout
@@ -46,16 +68,16 @@ func (b *geminiBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		cancel()
-		return nil, fmt.Errorf("gemini stdout pipe: %w", err)
+		return nil, fmt.Errorf("%s stdout pipe: %w", b.name(), err)
 	}
-	cmd.Stderr = newLogWriter(b.cfg.Logger, "[gemini:stderr] ")
+	cmd.Stderr = newLogWriter(b.cfg.Logger, "["+b.name()+":stderr] ")
 
 	if err := cmd.Start(); err != nil {
 		cancel()
-		return nil, fmt.Errorf("start gemini: %w", err)
+		return nil, fmt.Errorf("start %s: %w", b.name(), err)
 	}
 
-	b.cfg.Logger.Info("gemini started", "pid", cmd.Process.Pid, "cwd", opts.Cwd, "model", opts.Model)
+	b.cfg.Logger.Info(b.name()+" started", "pid", cmd.Process.Pid, "cwd", opts.Cwd, "model", opts.Model)
 
 	msgCh := make(chan Message, 256)
 	resCh := make(chan Result, 1)
@@ -144,16 +166,16 @@ func (b *geminiBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 
 		if runCtx.Err() == context.DeadlineExceeded {
 			finalStatus = "timeout"
-			finalError = fmt.Sprintf("gemini timed out after %s", timeout)
+			finalError = fmt.Sprintf("%s timed out after %s", b.name(), timeout)
 		} else if runCtx.Err() == context.Canceled {
 			finalStatus = "aborted"
 			finalError = "execution cancelled"
 		} else if waitErr != nil && finalStatus == "completed" {
 			finalStatus = "failed"
-			finalError = fmt.Sprintf("gemini exited with error: %v", waitErr)
+			finalError = fmt.Sprintf("%s exited with error: %v", b.name(), waitErr)
 		}
 
-		b.cfg.Logger.Info("gemini finished", "pid", cmd.Process.Pid, "status", finalStatus, "duration", duration.Round(time.Millisecond).String())
+		b.cfg.Logger.Info(b.name()+" finished", "pid", cmd.Process.Pid, "status", finalStatus, "duration", duration.Round(time.Millisecond).String())
 
 		resCh <- Result{
 			Status:     finalStatus,
