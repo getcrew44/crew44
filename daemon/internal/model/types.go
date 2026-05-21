@@ -78,15 +78,6 @@ type ProjectRecord struct {
 	ArchivedAt   time.Time `json:"archived_at,omitempty"`
 }
 
-type ChatIndexEntry struct {
-	ChatID         string    `json:"chat_id"`
-	Title          string    `json:"title"`
-	Status         string    `json:"status"`
-	CurrentAgentID string    `json:"current_agent_id"`
-	UpdatedAt      time.Time `json:"updated_at"`
-	ArchivedAt     time.Time `json:"archived_at,omitempty"`
-}
-
 type LastRuntimeSession struct {
 	AgentID   string    `json:"agent_id"`
 	SessionID string    `json:"session_id"`
@@ -151,6 +142,7 @@ type Event struct {
 	TS             time.Time              `json:"ts"`
 	TurnID         string                 `json:"turn_id"`
 	ActorAgentID   string                 `json:"actor_agent_id"`
+	ActorAgentName string                 `json:"actor_agent_name,omitempty"`
 	Message        *MessagePayload        `json:"message,omitempty"`
 	Thinking       *ThinkingPayload       `json:"thinking,omitempty"`
 	ToolCall       *ToolCallPayload       `json:"tool_call,omitempty"`
@@ -182,13 +174,18 @@ type ThinkingPayload struct {
 }
 
 type ToolCallPayload struct {
-	Name  string         `json:"name"`
-	Input map[string]any `json:"input,omitempty"`
+	CallID  string         `json:"call_id,omitempty"`
+	Name    string         `json:"name"`
+	Input   map[string]any `json:"input,omitempty"`
+	Compact bool           `json:"compact,omitempty"`
 }
 
 type ToolCallResultPayload struct {
-	Name   string `json:"name"`
-	Output string `json:"output"`
+	CallID      string `json:"call_id,omitempty"`
+	ToolCallSeq int64  `json:"tool_call_seq,omitempty"`
+	Name        string `json:"name"`
+	Output      string `json:"output,omitempty"`
+	Compact     bool   `json:"compact,omitempty"`
 }
 
 type RuntimeSessionPayload struct {

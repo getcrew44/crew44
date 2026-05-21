@@ -4,7 +4,7 @@ import TaskView from './TaskView.jsx';
 import CrewRoute from './CrewRoute.jsx';
 import NewTaskRoute from './NewTaskRoute.jsx';
 import OnboardingRoute from './OnboardingRoute.jsx';
-import PairMobileDialog from './PairMobileDialog.jsx';
+import PairMobileDialog, { ManageMobileDialog } from './PairMobileDialog.jsx';
 import AutoRoute from './AutoRoute.jsx';
 import { Icon } from './components.jsx';
 import { displayAgent, relativeTime, rememberAgents, HUMAN_USER } from './utils.js';
@@ -211,6 +211,7 @@ export default function App() {
   const [agentsMap, setAgentsMap] = React.useState({ '__human__': HUMAN_USER });
   const [skills, setSkills] = React.useState([]);
   const [runtimes, setRuntimes] = React.useState([]);
+  const [mobileDevices, setMobileDevices] = React.useState([]);
   const [loading, setLoading] = React.useState(true);
   const [backendOnline, setBackendOnline] = React.useState(false);
   const [toast, setToast] = React.useState(null);
@@ -244,17 +245,19 @@ export default function App() {
 
   const loadData = React.useCallback(async () => {
     try {
-      const [projs, agts, sklls, rntms, onboarding] = await Promise.all([
+      const [projs, agts, sklls, rntms, onboarding, devices] = await Promise.all([
         api.listProjects(),
         api.listAgents(),
         api.listSkills(),
         api.listRuntimes(),
         api.getOnboardingStatus(),
+        api.listRemoteDevices(),
       ]);
 
       setProjects(projs);
       setSkills(sklls);
       setRuntimes(rntms);
+      setMobileDevices(devices);
       setOnboardingRequired(Boolean(onboarding.onboarding_required));
       setBackendOnline(true);
 
@@ -427,6 +430,29 @@ export default function App() {
 
     setFolderPathDialogOpen(true);
   }, [queueFolderForApproval]);
+
+  const refreshMobileDevices = React.useCallback(async () => {
+    const devices = await api.listRemoteDevices();
+    setMobileDevices(devices);
+    return devices;
+  }, []);
+
+  React.useEffect(() => {
+    if (!backendOnline) return undefined;
+    const timer = window.setInterval(() => {
+      refreshMobileDevices().catch(() => {});
+    }, 5000);
+    return () => window.clearInterval(timer);
+  }, [backendOnline, refreshMobileDevices]);
+
+  const openMobileDialog = React.useCallback(async () => {
+    try {
+      await refreshMobileDevices();
+      setPairMobileOpen(true);
+    } catch (err) {
+      showToast(`Failed to load mobile devices: ${err?.message || 'Unknown error'}`);
+    }
+  }, [refreshMobileDevices, showToast]);
 
   const pendingFolderPath = pendingFolderPaths[0] || null;
   const pendingFolderName = React.useMemo(() => {
@@ -688,7 +714,24 @@ export default function App() {
         onConfirm={confirmPendingFolder}
       />
     )}
-    {pairMobileOpen && <PairMobileDialog onClose={() => setPairMobileOpen(false)} />}
+    {pairMobileOpen && (mobileDevices.length > 0 ? (
+      <ManageMobileDialog
+        devices={mobileDevices}
+        onChanged={setMobileDevices}
+        onClose={() => {
+          setPairMobileOpen(false);
+          refreshMobileDevices().catch(() => {});
+        }}
+      />
+    ) : (
+      <PairMobileDialog
+        onChanged={() => refreshMobileDevices().catch(() => {})}
+        onClose={() => {
+          setPairMobileOpen(false);
+          refreshMobileDevices().catch(() => {});
+        }}
+      />
+    ))}
     <div style={{ width: '100%', height: '100%', display: 'flex', background: '#FAF5E8', overflow: 'hidden' }}>
       <Sidebar
         projects={sidebarProjects}
@@ -706,7 +749,8 @@ export default function App() {
         onRemoveProject={handleRemoveProject}
         onArchiveChat={handleArchiveChat}
         onResetOnboarding={resetOnboarding}
-        onPairMobile={() => setPairMobileOpen(true)}
+        onPairMobile={openMobileDialog}
+        hasMobileDevice={mobileDevices.length > 0}
         onDroppedProjectFolders={handleDroppedProjectFolders}
       />
       <div style={{ flex: 1, minWidth: 0, height: '100%', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>

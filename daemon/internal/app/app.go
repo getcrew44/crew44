@@ -898,7 +898,7 @@ func (a *App) CreateChat(projectID, title, mainAgentID string) (model.ChatRecord
 	record := model.ChatRecord{
 		ID:                  id.New(),
 		ProjectID:           project.ID,
-		Title:               title,
+		Title:               model.NormalizeChatTitle(title),
 		MainAgentID:         mainAgentID,
 		CurrentAgentID:      mainAgentID,
 		ParticipantAgentIDs: []string{mainAgentID},
@@ -953,7 +953,7 @@ func (a *App) UpdateChat(chat model.ChatRecord) (model.ChatRecord, error) {
 		return model.ChatRecord{}, a.mapError(err)
 	}
 	if chat.Title != "" {
-		current.Title = chat.Title
+		current.Title = model.NormalizeChatTitle(chat.Title)
 	}
 	if chat.Status != "" {
 		current.Status = chat.Status
@@ -972,7 +972,83 @@ func (a *App) DeleteChat(id string) error {
 
 func (a *App) ListEvents(chatID string, after int64) ([]model.Event, error) {
 	events, err := a.store.ListEvents(chatID, after)
-	return events, a.mapError(err)
+	if err != nil {
+		return nil, a.mapError(err)
+	}
+	return a.enrichEventAgentNames(events), nil
+}
+
+func (a *App) GetEvent(chatID string, seq int64) (model.Event, error) {
+	event, err := a.store.GetEvent(chatID, seq)
+	if err != nil {
+		return event, a.mapError(err)
+	}
+	return a.enrichEventAgentName(event), nil
+}
+
+func (a *App) GetToolCallDetails(chatID string, toolCallSeq int64) (model.Event, *model.Event, error) {
+	events, err := a.store.ListEvents(chatID, 0)
+	if err != nil {
+		return model.Event{}, nil, a.mapError(err)
+	}
+	var call model.Event
+	var result *model.Event
+	for _, event := range events {
+		if event.Seq == toolCallSeq {
+			if event.Type != model.EventTypeToolCall {
+				return model.Event{}, nil, a.mapError(store.ErrNotFound)
+			}
+			call = event
+			continue
+		}
+		if event.Type == model.EventTypeToolCallResult && event.ToolCallResult != nil && event.ToolCallResult.ToolCallSeq == toolCallSeq {
+			copy := event
+			result = &copy
+		}
+	}
+	if call.Seq == 0 {
+		return model.Event{}, nil, a.mapError(store.ErrNotFound)
+	}
+	call = a.enrichEventAgentName(call)
+	if result != nil {
+		enriched := a.enrichEventAgentName(*result)
+		result = &enriched
+	}
+	return call, result, nil
+}
+
+func (a *App) enrichEventAgentNames(events []model.Event) []model.Event {
+	out := make([]model.Event, len(events))
+	cache := map[string]string{}
+	for i, event := range events {
+		out[i] = a.enrichEventAgentNameWithCache(event, cache)
+	}
+	return out
+}
+
+func (a *App) enrichEventAgentName(event model.Event) model.Event {
+	return a.enrichEventAgentNameWithCache(event, nil)
+}
+
+func (a *App) enrichEventAgentNameWithCache(event model.Event, cache map[string]string) model.Event {
+	if event.ActorAgentName != "" || event.ActorAgentID == "" || event.ActorAgentID == "__human__" {
+		return event
+	}
+	if cache != nil {
+		if name, ok := cache[event.ActorAgentID]; ok {
+			event.ActorAgentName = name
+			return event
+		}
+	}
+	agent, err := a.store.GetAgent(event.ActorAgentID)
+	if err != nil || agent.Name == "" {
+		return event
+	}
+	if cache != nil {
+		cache[event.ActorAgentID] = agent.Name
+	}
+	event.ActorAgentName = agent.Name
+	return event
 }
 
 func (a *App) CancelChat(chatID string) error {

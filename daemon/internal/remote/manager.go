@@ -27,10 +27,15 @@ type Manager struct {
 
 	mu       sync.Mutex
 	pairings map[string]PairingSession
-	sessions map[string]context.CancelFunc
+	sessions map[string]deviceSession
 
 	rpcServer *rpc.Server
 	relay     *RelayClient
+}
+
+type deviceSession struct {
+	cancel context.CancelFunc
+	conn   *rpc.Conn
 }
 
 func NewManager(stateDir string) (*Manager, error) {
@@ -43,7 +48,7 @@ func NewManager(stateDir string) (*Manager, error) {
 		store:    store,
 		identity: identity,
 		pairings: make(map[string]PairingSession),
-		sessions: make(map[string]context.CancelFunc),
+		sessions: make(map[string]deviceSession),
 	}
 	manager.relay = NewRelayClient(manager)
 	return manager, nil
@@ -95,11 +100,13 @@ func (m *Manager) CreatePairing(_ context.Context, relayURL string) (any, error)
 	}
 
 	now := time.Now().UTC()
+	desktopName, _ := os.Hostname()
 	offer := PairingOffer{
 		Version:       1,
 		Type:          pairingType,
 		RelayURL:      relayURL,
 		ServerID:      m.identity.ServerID,
+		DesktopName:   desktopName,
 		DaemonPubKey:  m.identity.PublicKey,
 		PairingID:     newPairingID(),
 		PairingSecret: newSecret(),
@@ -201,10 +208,10 @@ func (m *Manager) server() *rpc.Server {
 	return m.rpcServer
 }
 
-func (m *Manager) trackDeviceSession(deviceID string, cancel context.CancelFunc) {
+func (m *Manager) trackDeviceSession(deviceID string, cancel context.CancelFunc, conn *rpc.Conn) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.sessions[deviceID] = cancel
+	m.sessions[deviceID] = deviceSession{cancel: cancel, conn: conn}
 }
 
 func (m *Manager) forgetDeviceSession(deviceID string) {
@@ -215,11 +222,14 @@ func (m *Manager) forgetDeviceSession(deviceID string) {
 
 func (m *Manager) closeDeviceSession(deviceID string) {
 	m.mu.Lock()
-	cancel := m.sessions[deviceID]
+	session := m.sessions[deviceID]
 	delete(m.sessions, deviceID)
 	m.mu.Unlock()
-	if cancel != nil {
-		cancel()
+	if session.conn != nil {
+		session.conn.NotifyAndClose("remote.device.revoked", map[string]any{"device_id": deviceID})
+	}
+	if session.cancel != nil {
+		session.cancel()
 	}
 }
 

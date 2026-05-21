@@ -3,6 +3,7 @@ package rpc
 import (
 	"context"
 	"encoding/json"
+	"sort"
 
 	"github.com/getcrew44/crew44/daemon/internal/app"
 	"github.com/getcrew44/crew44/daemon/internal/model"
@@ -64,6 +65,7 @@ func (s *Server) registerMethods() {
 		"chats.events.list":                s.chatsEventsList,
 		"chats.events.subscribe":           s.chatsEventsSubscribe,
 		"chats.events.unsubscribe":         s.chatsEventsUnsubscribe,
+		"chats.tool.get":                   s.chatsToolGet,
 		"chats.cancel":                     s.chatsCancel,
 
 		"optimizer.suggestions.list": s.optimizerSuggestionsList,
@@ -457,12 +459,34 @@ func (s *Server) projectsGitDiff(_ context.Context, _ Peer, params json.RawMessa
 
 func (s *Server) projectsChatsList(_ context.Context, _ Peer, params json.RawMessage) (any, error) {
 	var body struct {
-		ID string `json:"id"`
+		ID     string `json:"id"`
+		Limit  int    `json:"limit"`
+		Offset int    `json:"offset"`
 	}
 	if err := decodeParams(params, &body); err != nil {
 		return nil, err
 	}
 	items, err := s.app.ListProjectChats(body.ID)
+	if err != nil {
+		return nil, err
+	}
+	sort.SliceStable(items, func(i, j int) bool {
+		return items[i].UpdatedAt.After(items[j].UpdatedAt)
+	})
+	if body.Offset < 0 {
+		body.Offset = 0
+	}
+	if body.Limit > 0 {
+		if body.Offset >= len(items) {
+			items = nil
+		} else {
+			end := body.Offset + body.Limit
+			if end > len(items) {
+				end = len(items)
+			}
+			items = items[body.Offset:end]
+		}
+	}
 	return map[string]any{"items": items}, err
 }
 
@@ -569,14 +593,36 @@ func (s *Server) chatsMessagesInterruptDeliver(_ context.Context, _ Peer, params
 
 func (s *Server) chatsEventsList(_ context.Context, _ Peer, params json.RawMessage) (any, error) {
 	var body struct {
-		ChatID string `json:"chat_id"`
-		After  int64  `json:"after"`
+		ChatID       string `json:"chat_id"`
+		After        int64  `json:"after"`
+		CompactTools bool   `json:"compact_tools"`
 	}
 	if err := decodeParams(params, &body); err != nil {
 		return nil, err
 	}
 	events, err := s.app.ListEvents(body.ChatID, body.After)
+	if err != nil {
+		return nil, err
+	}
+	if body.CompactTools {
+		events = compactToolEvents(events)
+	}
 	return map[string]any{"events": events}, err
+}
+
+func (s *Server) chatsToolGet(_ context.Context, _ Peer, params json.RawMessage) (any, error) {
+	var body struct {
+		ChatID      string `json:"chat_id"`
+		ToolCallSeq int64  `json:"tool_call_seq"`
+	}
+	if err := decodeParams(params, &body); err != nil {
+		return nil, err
+	}
+	call, result, err := s.app.GetToolCallDetails(body.ChatID, body.ToolCallSeq)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{"tool_call": call, "tool_result": result}, nil
 }
 
 func (s *Server) chatsCancel(_ context.Context, _ Peer, params json.RawMessage) (any, error) {

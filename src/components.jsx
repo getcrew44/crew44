@@ -350,6 +350,8 @@ export function Icon({ name, size = 16 }) {
       return <svg {...s} viewBox="0 0 16 16"><path d="M3 8a5 5 0 1 0 1.6-3.7" {...p}/><path d="M3 2.5v3h3" {...p}/></svg>;
     case 'trash':
       return <svg {...s} viewBox="0 0 16 16"><path d="M5.5 5.5v7M8 5.5v7M10.5 5.5v7" {...p}/><path d="M3 4h10M6.2 4V2.8h3.6V4M4 4l.6 10h6.8L12 4" {...p}/></svg>;
+    case 'edit':
+      return <svg {...s} viewBox="0 0 16 16"><path d="M3 12.5l.8-3 6.8-6.8a1.3 1.3 0 0 1 1.8 1.8L5.6 11.3l-2.6 1.2z" {...p}/><path d="M9.6 3.7l2.7 2.7" {...p}/></svg>;
     case 'more':
       return <svg {...s} viewBox="0 0 16 16"><circle cx="3.5" cy="8" r="1.1" fill="currentColor" stroke="none"/><circle cx="8" cy="8" r="1.1" fill="currentColor" stroke="none"/><circle cx="12.5" cy="8" r="1.1" fill="currentColor" stroke="none"/></svg>;
     default: return null;

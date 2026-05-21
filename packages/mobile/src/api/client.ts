@@ -1,5 +1,5 @@
 import { JsonRpcPeer } from "@/remote/rpc";
-import { Agent, BackendEvent, Chat, ChatIndexEntry, MessageAttachment, Project } from "./types";
+import { Agent, BackendEvent, Chat, ChatIndexEntry, MessageAttachment, Project, ToolDetails } from "./types";
 
 export class CrewApi {
   constructor(private readonly rpc: JsonRpcPeer) {}
@@ -14,8 +14,12 @@ export class CrewApi {
     return data.items || [];
   }
 
-  async listProjectChats(projectId: string): Promise<ChatIndexEntry[]> {
-    const data = await this.rpc.call<{ items?: ChatIndexEntry[] }>("projects.chats.list", { id: projectId });
+  async listProjectChats(projectId: string, options: { limit?: number; offset?: number } = {}): Promise<ChatIndexEntry[]> {
+    const data = await this.rpc.call<{ items?: ChatIndexEntry[] }>("projects.chats.list", {
+      id: projectId,
+      limit: options.limit,
+      offset: options.offset
+    });
     return data.items || [];
   }
 
@@ -31,12 +35,20 @@ export class CrewApi {
     return this.rpc.call<Chat>("chats.get", { id });
   }
 
-  async listEvents(chatId: string, after = 0): Promise<BackendEvent[]> {
+  async listEvents(chatId: string, after = 0, options: { compactTools?: boolean } = {}): Promise<BackendEvent[]> {
     const data = await this.rpc.call<{ events?: BackendEvent[] }>("chats.events.list", {
       chat_id: chatId,
-      after
+      after,
+      compact_tools: Boolean(options.compactTools)
     });
     return data.events || [];
+  }
+
+  async getToolDetails(chatId: string, toolCallSeq: number): Promise<ToolDetails> {
+    return this.rpc.call<ToolDetails>("chats.tool.get", {
+      chat_id: chatId,
+      tool_call_seq: toolCallSeq
+    });
   }
 
   async postMessage(chatId: string, content: string, targetAgentId: string, attachments: MessageAttachment[] = []): Promise<unknown> {
@@ -68,9 +80,14 @@ export class CrewApi {
     return this.rpc.call("chats.cancel", { id: chatId });
   }
 
+  async deleteRemoteDevice(deviceId: string): Promise<unknown> {
+    return this.rpc.call("remote.devices.delete", { device_id: deviceId });
+  }
+
   subscribeChatEvents(
     chatId: string,
     after: number,
+    options: { compactTools?: boolean },
     onEvent: (event: BackendEvent) => void,
     onDone: () => void,
     onError: (err: Error) => void
@@ -95,7 +112,11 @@ export class CrewApi {
       })
     ];
 
-    this.rpc.call<{ subscription_id: string }>("chats.events.subscribe", { chat_id: chatId, after })
+    this.rpc.call<{ subscription_id: string }>("chats.events.subscribe", {
+      chat_id: chatId,
+      after,
+      compact_tools: Boolean(options.compactTools)
+    })
       .then(result => {
         subscriptionId = result.subscription_id;
         if (disposed && subscriptionId) {

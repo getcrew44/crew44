@@ -9,12 +9,12 @@ import (
 	"time"
 
 	"github.com/flynn/noise"
-	"github.com/gorilla/websocket"
 	"github.com/getcrew44/crew44/daemon/internal/httpapi"
 	"github.com/getcrew44/crew44/daemon/internal/relay"
 	"github.com/getcrew44/crew44/daemon/internal/remote"
 	"github.com/getcrew44/crew44/daemon/internal/rpc"
 	"github.com/getcrew44/crew44/daemon/internal/runtime"
+	"github.com/gorilla/websocket"
 )
 
 func TestRemotePairingAndDeviceRPCOverRelay(t *testing.T) {
@@ -86,20 +86,14 @@ func TestRemoteDeletedDeviceCannotReconnect(t *testing.T) {
 		t.Fatalf("generate device key: %v", err)
 	}
 	device := registerPairingOverRelay(t, relayURL, offer, deviceKey)
+
+	activeConn := dialDeviceOverRelay(t, relayURL, offer, deviceKey)
 	rpcCall(t, localRPC, "remote.devices.delete", map[string]any{"device_id": device.ID})
+	assertRevokedNotification(t, activeConn)
 
 	conn := dialDeviceOverRelay(t, relayURL, offer, deviceKey)
 	defer conn.Close()
-	if err := conn.WriteFrame(mustJSON(map[string]any{
-		"jsonrpc": "2.0",
-		"id":      "health_after_delete",
-		"method":  "system.health",
-	})); err != nil {
-		return
-	}
-	if _, err := conn.ReadFrame(); err == nil {
-		t.Fatal("expected deleted device connection to close")
-	}
+	assertRevokedNotification(t, conn)
 }
 
 func dialLocalRPC(t *testing.T, serverURL string) *websocket.Conn {
@@ -197,6 +191,7 @@ func eventuallyDialRelayClient(t *testing.T, relayURL, serverID string) *websock
 
 func handshakePairingClient(t *testing.T, conn *websocket.Conn, offer remote.PairingOffer) *remote.NoiseTransport {
 	t.Helper()
+	readRelayDesktopOnline(t, conn)
 	if err := conn.WriteJSON(map[string]string{"type": "noise_init", "mode": remote.PairingMode}); err != nil {
 		t.Fatalf("write pairing hello: %v", err)
 	}
@@ -230,6 +225,7 @@ func handshakePairingClient(t *testing.T, conn *websocket.Conn, offer remote.Pai
 
 func handshakeDeviceClient(t *testing.T, conn *websocket.Conn, offer remote.PairingOffer, deviceKey noise.DHKey) *remote.NoiseTransport {
 	t.Helper()
+	readRelayDesktopOnline(t, conn)
 	if err := conn.WriteJSON(map[string]string{"type": "noise_init", "mode": remote.DeviceMode}); err != nil {
 		t.Fatalf("write device hello: %v", err)
 	}
@@ -266,6 +262,19 @@ func handshakeDeviceClient(t *testing.T, conn *websocket.Conn, offer remote.Pair
 		t.Fatalf("send device handshake 3: %v", err)
 	}
 	return remote.NewNoiseTransport(conn, send, recv)
+}
+
+func readRelayDesktopOnline(t *testing.T, conn *websocket.Conn) {
+	t.Helper()
+	var status struct {
+		Type string `json:"type"`
+	}
+	if err := conn.ReadJSON(&status); err != nil {
+		t.Fatalf("read relay desktop status: %v", err)
+	}
+	if status.Type != "desktop_online" {
+		t.Fatalf("unexpected relay desktop status: %q", status.Type)
+	}
 }
 
 func rpcCall(t *testing.T, conn *websocket.Conn, method string, params any) json.RawMessage {
@@ -321,6 +330,21 @@ func encryptedRPCCall(t *testing.T, transport *remote.NoiseTransport, method str
 		t.Fatalf("encrypted rpc %s error: %#v", method, resp.Error)
 	}
 	return resp.Result
+}
+
+func assertRevokedNotification(t *testing.T, transport *remote.NoiseTransport) {
+	t.Helper()
+	var notification struct {
+		Method string `json:"method"`
+		Params struct {
+			DeviceID string `json:"device_id"`
+			Reason   string `json:"reason"`
+		} `json:"params"`
+	}
+	readEncryptedJSON(t, transport, &notification)
+	if notification.Method != "remote.device.revoked" {
+		t.Fatalf("expected remote.device.revoked notification, got %#v", notification)
+	}
 }
 
 func mustJSON(value any) []byte {

@@ -177,7 +177,6 @@ Assertions:
 - project-filtered chat list length is `1`
 - global chat list length is `1`
 - `state/chats/chat-{id}` contains exactly:
-  - `chat.json`
   - `events.jsonl`
   - `summary.md`
 - newly created chat starts with:

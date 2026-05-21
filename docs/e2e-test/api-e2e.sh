@@ -160,7 +160,7 @@ phase_chat_resources() {
 
   local chat_dir="${STATE_DIR}/chats/chat-${CHAT_RESUME_ID}"
   assert_dir_exists "${chat_dir}"
-  assert_dir_entries_exact "${chat_dir}" "chat.json" "events.jsonl" "summary.md"
+  assert_dir_entries_exact "${chat_dir}" "events.jsonl" "summary.md"
 
   api_get "/api/projects/${PROJECT_ID}/chats" "${STATE_ROOT}/project-chats-list-1.json"
   assert_eq "$(json_len "${STATE_ROOT}/project-chats-list-1.json" "items")" "1" "project chats count after first chat"
