@@ -718,6 +718,7 @@ export default function App() {
       <NewTaskRoute
         projects={projects}
         agents={agentsList}
+        skills={skills}
         onNewTask={handleNewTask}
         onExistingFolder={handleExistingFolder}
         initialProjectId={newTaskProjectId}
@@ -743,7 +744,7 @@ export default function App() {
   } else if (route === 'auto') {
     content = <AutoRoute onToast={showToast} onPickChat={handlePickChat} />;
   } else {
-    content = <NewTaskRoute projects={projects} agents={agentsList} onNewTask={handleNewTask} onExistingFolder={handleExistingFolder} initialProjectId={newTaskProjectId} />;
+    content = <NewTaskRoute projects={projects} agents={agentsList} skills={skills} onNewTask={handleNewTask} onExistingFolder={handleExistingFolder} initialProjectId={newTaskProjectId} />;
   }
 
   return (

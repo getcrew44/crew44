@@ -2,7 +2,7 @@ import React from 'react';
 import { UI_FONT } from './components.jsx';
 import { CustomPicker, PickerRow } from './CustomPicker.jsx';
 import * as api from './api.js';
-import { mentionBounds, MentionHighlightText } from './composerMentions.jsx';
+import { suggestionBounds, MentionHighlightText } from './composerMentions.jsx';
 import { AttachmentTray } from './AttachmentChips.jsx';
 import { attachmentsSupported, dedupeAttachments, droppedAttachments, pickAttachments } from './attachments.js';
 import { dataTransferHasFiles } from './dragDrop.js';
@@ -50,6 +50,100 @@ function AgentIcon({ size = 14 }) {
   );
 }
 
+function FileGlyph({ isDir }) {
+  return isDir ? (
+    <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
+      <path d="M2.5 5.5a1 1 0 0 1 1-1h3.2l1.4 1.5h6.4a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1H3.5a1 1 0 0 1-1-1v-7.5z"
+        stroke="#807972" strokeWidth="1.1" strokeLinejoin="round" fill="#F4F0E8"/>
+    </svg>
+  ) : (
+    <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
+      <path d="M5 2.5h5.2L13.5 6v9a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V3.5a1 1 0 0 1 1-1z"
+        stroke="#807972" strokeWidth="1.1" strokeLinejoin="round" fill="#FCFBF7"/>
+      <path d="M10.2 2.5V6h3.3" stroke="#807972" strokeWidth="1.1" strokeLinejoin="round" fill="none"/>
+    </svg>
+  );
+}
+
+function SkillGlyph() {
+  return (
+    <div aria-hidden="true" style={{
+      width: 22, height: 22, borderRadius: 5,
+      background: '#EEE6D2', color: '#5C544B',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: 13, fontWeight: 600,
+    }}>/</div>
+  );
+}
+
+function NewTaskSuggestionRow({ option, active, onSelect }) {
+  const rowStyle = {
+    display: 'flex', alignItems: 'center', gap: 8,
+    padding: '7px 9px', borderRadius: 7,
+    cursor: 'pointer',
+    background: active ? '#EFE9DB' : 'transparent',
+    color: '#1C1A17', fontSize: 13,
+  };
+  if (option.kind === 'agent') {
+    return (
+      <div
+        role="option"
+        aria-selected={active}
+        onMouseDown={(e) => e.preventDefault()}
+        onClick={onSelect}
+        style={rowStyle}
+      >
+        <AgentIcon size={14} />
+        <span style={{ fontWeight: 500 }}>{option.agent.name}</span>
+      </div>
+    );
+  }
+  if (option.kind === 'file') {
+    const segments = option.file.path.split('/');
+    const name = segments.pop();
+    const dir = segments.join('/');
+    return (
+      <div
+        role="option"
+        aria-selected={active}
+        onMouseDown={(e) => e.preventDefault()}
+        onClick={onSelect}
+        style={rowStyle}
+      >
+        <FileGlyph isDir={option.file.is_dir} />
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {name}{option.file.is_dir ? '/' : ''}
+          </div>
+          {dir && (
+            <div style={{ fontSize: 11.5, color: '#807972', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {dir}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+  if (option.kind === 'skill') {
+    return (
+      <div
+        role="option"
+        aria-selected={active}
+        onMouseDown={(e) => e.preventDefault()}
+        onClick={onSelect}
+        style={rowStyle}
+      >
+        <SkillGlyph />
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontWeight: 500 }}>{option.skill.name}</div>
+          <div style={{ fontSize: 11.5, color: '#807972' }}>Skill</div>
+        </div>
+      </div>
+    );
+  }
+  return null;
+}
+
 const SUGGESTIONS = [
   {
     t: 'Audit a flow',
@@ -75,7 +169,7 @@ const SUGGESTIONS = [
 
 const MENTION_MENU_WIDTH = 260;
 
-export default function NewTaskRoute({ projects, agents, onNewTask, onExistingFolder, initialProjectId }) {
+export default function NewTaskRoute({ projects, agents, skills = [], onNewTask, onExistingFolder, initialProjectId }) {
   const initialStoredProjectId = React.useMemo(() => initialProjectId || readLastNewChatProjectId(), [initialProjectId]);
   const initialDraft = React.useMemo(() => readComposerDraft(initialStoredProjectId, ''), [initialStoredProjectId]);
   const [val, setVal] = React.useState(initialDraft.text || '');
@@ -88,10 +182,19 @@ export default function NewTaskRoute({ projects, agents, onNewTask, onExistingFo
   const [submitting, setSubmitting] = React.useState(false);
   const [error, setError] = React.useState(null);
   const [scrollTop, setScrollTop] = React.useState(0);
+  const [fileMatches, setFileMatches] = React.useState([]);
   const inputRef = React.useRef(null);
   const listboxRef = React.useRef(null);
   const selectedProjectExists = projects.some(project => project.id === selectedProjectId);
   const canAttach = attachmentsSupported();
+  const selectedProject = projects.find(project => project.id === selectedProjectId);
+  const hasWorkdir = Boolean(selectedProject?.workdir);
+  const selectedAgent = agents.find(agent => agent.id === selectedAgentId);
+  const agentSkills = React.useMemo(() => {
+    if (!selectedAgent?.skill_ids?.length) return [];
+    const allowed = new Set(selectedAgent.skill_ids);
+    return (skills || []).filter(skill => allowed.has(skill.id));
+  }, [selectedAgent, skills]);
 
   // Apply initialProjectId when it changes (e.g. clicking new chat on a project)
   React.useEffect(() => {
@@ -127,16 +230,49 @@ export default function NewTaskRoute({ projects, agents, onNewTask, onExistingFo
 
   const projectItems = projects.map(p => ({ id: p.id, label: p.name }));
   const agentItems = agents.map(a => ({ id: a.id, label: a.name }));
-  const activeMention = React.useMemo(() => mentionBounds(val, cursor), [val, cursor]);
-  const mentionOptions = React.useMemo(() => {
-    if (!activeMention) return [];
-    const q = activeMention.query.toLowerCase();
-    return agents.filter(agent => agent.name.toLowerCase().includes(q)).slice(0, 6);
-  }, [activeMention, agents]);
+  const activeToken = React.useMemo(() => suggestionBounds(val, cursor), [val, cursor]);
+
+  React.useEffect(() => {
+    if (!activeToken || activeToken.kind !== 'mention' || !hasWorkdir || !selectedProjectId) {
+      setFileMatches([]);
+      return undefined;
+    }
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      api.listProjectFiles(selectedProjectId, activeToken.query, 12)
+        .then(items => { if (!cancelled) setFileMatches(items || []); })
+        .catch(() => { if (!cancelled) setFileMatches([]); });
+    }, 120);
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [activeToken?.kind, activeToken?.query, selectedProjectId, hasWorkdir]);
+
+  const suggestionOptions = React.useMemo(() => {
+    if (!activeToken) return [];
+    const q = activeToken.query.toLowerCase();
+    if (activeToken.kind === 'mention') {
+      const agentItems = agents
+        .filter(agent => agent.name.toLowerCase().includes(q))
+        .slice(0, 6)
+        .map(agent => ({ kind: 'agent', key: `agent:${agent.id}`, agent }));
+      const fileItems = (fileMatches || []).map(file => ({
+        kind: 'file',
+        key: `file:${file.path}`,
+        file,
+      }));
+      return [...agentItems, ...fileItems].slice(0, 12);
+    }
+    if (activeToken.kind === 'slash') {
+      return agentSkills
+        .filter(skill => skill.name.toLowerCase().includes(q))
+        .slice(0, 8)
+        .map(skill => ({ kind: 'skill', key: `skill:${skill.id}`, skill }));
+    }
+    return [];
+  }, [activeToken, agents, fileMatches, agentSkills]);
 
   React.useEffect(() => {
     setActiveSuggestion(0);
-  }, [activeMention?.query]);
+  }, [activeToken?.kind, activeToken?.query, suggestionOptions.length]);
 
   React.useEffect(() => {
     const el = listboxRef.current?.children[activeSuggestion];
@@ -153,21 +289,26 @@ export default function NewTaskRoute({ projects, agents, onNewTask, onExistingFo
   }, [val]);
 
   React.useLayoutEffect(() => {
-    if (!activeMention || !inputRef.current) {
+    if (!activeToken || !inputRef.current) {
       setMentionPoint(null);
       return;
     }
-    setMentionPoint(textareaCaretPoint(inputRef.current, activeMention.start));
-  }, [activeMention, val]);
+    setMentionPoint(textareaCaretPoint(inputRef.current, activeToken.start));
+  }, [activeToken, val]);
 
   const updateCursor = (node) => {
     setCursor(node?.selectionStart ?? val.length);
   };
 
-  const selectMention = (agent) => {
-    if (!activeMention) return;
-    const next = `${val.slice(0, activeMention.start)}@${agent.name} ${val.slice(activeMention.end)}`;
-    const nextCursor = activeMention.start + agent.name.length + 2;
+  const applySuggestion = (option) => {
+    if (!activeToken || !option) return;
+    let inserted;
+    if (option.kind === 'agent') inserted = `@${option.agent.name}`;
+    else if (option.kind === 'file') inserted = `@${option.file.path}`;
+    else if (option.kind === 'skill') inserted = `/${option.skill.name}`;
+    else return;
+    const next = `${val.slice(0, activeToken.start)}${inserted} ${val.slice(activeToken.end)}`;
+    const nextCursor = activeToken.start + inserted.length + 1;
     setVal(next);
     setCursor(nextCursor);
     window.requestAnimationFrame?.(() => {
@@ -226,10 +367,10 @@ export default function NewTaskRoute({ projects, agents, onNewTask, onExistingFo
   };
 
   const onKeyDown = (e) => {
-    if (mentionOptions.length > 0) {
+    if (suggestionOptions.length > 0) {
       if (e.key === 'ArrowDown') {
         e.preventDefault();
-        setActiveSuggestion(i => Math.min(i + 1, mentionOptions.length - 1));
+        setActiveSuggestion(i => Math.min(i + 1, suggestionOptions.length - 1));
         return;
       }
       if (e.key === 'ArrowUp') {
@@ -239,7 +380,7 @@ export default function NewTaskRoute({ projects, agents, onNewTask, onExistingFo
       }
       if (e.key === 'Enter' || e.key === 'Tab') {
         e.preventDefault();
-        selectMention(mentionOptions[activeSuggestion] || mentionOptions[0]);
+        applySuggestion(suggestionOptions[activeSuggestion] || suggestionOptions[0]);
         return;
       }
       if (e.key === 'Escape') {
@@ -291,12 +432,12 @@ export default function NewTaskRoute({ projects, agents, onNewTask, onExistingFo
         >
           <AttachmentTray attachments={attachments} onRemove={removeAttachment} />
           <div style={{ position: 'relative' }}>
-            {mentionOptions.length > 0 && (
+            {suggestionOptions.length > 0 && (
               <div
                 ref={listboxRef}
                 data-testid="new-task-mention-list"
                 role="listbox"
-                aria-label="Agent suggestions"
+                aria-label={activeToken?.kind === 'slash' ? 'Skill suggestions' : 'Mention suggestions'}
                 style={{
                   position: 'absolute',
                   left: mentionMenuLeft,
@@ -308,26 +449,17 @@ export default function NewTaskRoute({ projects, agents, onNewTask, onExistingFo
                   borderRadius: 10,
                   boxShadow: '0 8px 24px rgba(28,26,23,0.14)',
                   padding: 4,
+                  maxHeight: 280,
+                  overflowY: 'auto',
                 }}
               >
-                {mentionOptions.map((agent, index) => (
-                  <div
-                    key={agent.id}
-                    role="option"
-                    aria-selected={index === activeSuggestion}
-                    onMouseDown={(e) => e.preventDefault()}
-                    onClick={() => selectMention(agent)}
-                    style={{
-                      display: 'flex', alignItems: 'center', gap: 8,
-                      padding: '7px 9px', borderRadius: 7,
-                      cursor: 'pointer',
-                      background: index === activeSuggestion ? '#EFE9DB' : 'transparent',
-                      color: '#1C1A17', fontSize: 13,
-                    }}
-                  >
-                    <AgentIcon size={14} />
-                    <span style={{ fontWeight: 500 }}>{agent.name}</span>
-                  </div>
+                {suggestionOptions.map((option, index) => (
+                  <NewTaskSuggestionRow
+                    key={option.key}
+                    option={option}
+                    active={index === activeSuggestion}
+                    onSelect={() => applySuggestion(option)}
+                  />
                 ))}
               </div>
             )}

@@ -4,12 +4,24 @@ function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-export function mentionBounds(value, cursor) {
+// suggestionBounds detects either an @-mention (agents / files) or a
+// /-slash (skills) token immediately before the cursor. Returns the
+// kind, token bounds, and query so callers can route to the right
+// suggestion source. Returns null when the cursor isn't inside such
+// a token.
+export function suggestionBounds(value, cursor) {
   const before = value.slice(0, cursor);
-  const match = before.match(/(^|\s)@([^\s@]*)$/);
-  if (!match) return null;
-  const start = before.length - match[0].length + match[1].length;
-  return { start, end: cursor, query: match[2] || '' };
+  let match = before.match(/(^|\s)@(\S*)$/);
+  if (match) {
+    const start = before.length - match[0].length + match[1].length;
+    return { kind: 'mention', start, end: cursor, query: match[2] || '' };
+  }
+  match = before.match(/(^|\s)\/([^\s/]*)$/);
+  if (match) {
+    const start = before.length - match[0].length + match[1].length;
+    return { kind: 'slash', start, end: cursor, query: match[2] || '' };
+  }
+  return null;
 }
 
 export function mentionDeleteBounds(value, cursor, agents) {

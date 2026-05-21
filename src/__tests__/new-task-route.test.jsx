@@ -7,11 +7,12 @@ import { writeLastNewChatProjectId } from '../draftStore.js';
 vi.mock('../api.js', () => ({
   createChat: vi.fn(),
   postMessage: vi.fn(),
+  listProjectFiles: vi.fn(),
 }));
 
 const projects = [
-  { id: 'p1', name: 'First Project' },
-  { id: 'p2', name: 'Second Project' },
+  { id: 'p1', name: 'First Project', workdir: '/tmp/p1' },
+  { id: 'p2', name: 'Second Project', workdir: '/tmp/p2' },
 ];
 
 const agents = [
@@ -34,6 +35,7 @@ beforeEach(() => {
   };
   api.createChat.mockResolvedValue({ id: 'chat-1', main_agent_id: 'a1' });
   api.postMessage.mockResolvedValue({});
+  api.listProjectFiles.mockResolvedValue([]);
 });
 
 describe('NewTaskRoute', () => {
@@ -108,6 +110,64 @@ describe('NewTaskRoute', () => {
     expect(screen.getByTestId('composer-mention-highlight')).toHaveTextContent('@Bryn');
   });
 
+  it('suggests files after @path when the selected project has a workdir', async () => {
+    api.listProjectFiles.mockResolvedValue([
+      { path: 'src/main.go', is_dir: false },
+      { path: 'src/helpers', is_dir: true },
+    ]);
+
+    render(
+      <NewTaskRoute
+        projects={projects}
+        agents={agents}
+        skills={[]}
+        onNewTask={() => {}}
+        initialProjectId="p1"
+      />
+    );
+
+    const input = screen.getByTestId('new-task-input');
+    fireEvent.change(input, { target: { value: '@src', selectionStart: 4, selectionEnd: 4 } });
+
+    const fileOption = await screen.findByRole('option', { name: /main\.go/i }, { timeout: 2000 });
+    fireEvent.click(fileOption);
+
+    expect(input).toHaveValue('@src/main.go ');
+    expect(api.listProjectFiles).toHaveBeenCalledWith('p1', 'src', expect.any(Number));
+  });
+
+  it('suggests skills for the selected lead agent after / and inserts the chosen one', async () => {
+    const skills = [
+      { id: 'skill-1', name: 'review' },
+      { id: 'skill-2', name: 'plan' },
+      { id: 'skill-3', name: 'qa' },
+    ];
+    const agentsWithSkills = [
+      { ...agents[0], skill_ids: ['skill-1', 'skill-2'] },
+      agents[1],
+    ];
+
+    render(
+      <NewTaskRoute
+        projects={projects}
+        agents={agentsWithSkills}
+        skills={skills}
+        onNewTask={() => {}}
+        initialProjectId="p1"
+      />
+    );
+
+    const input = screen.getByTestId('new-task-input');
+    fireEvent.change(input, { target: { value: '/', selectionStart: 1, selectionEnd: 1 } });
+
+    const reviewOption = await screen.findByRole('option', { name: /review/i });
+    expect(reviewOption).toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: /^qa$/i })).not.toBeInTheDocument();
+
+    fireEvent.click(reviewOption);
+    expect(input).toHaveValue('/review ');
+  });
+
   it('anchors new task mention suggestions to the @ caret line', async () => {
     render(
       <NewTaskRoute
@@ -121,7 +181,7 @@ describe('NewTaskRoute', () => {
     const input = screen.getByTestId('new-task-input');
     fireEvent.change(input, { target: { value: '@a', selectionStart: 2, selectionEnd: 2 } });
 
-    const listbox = await screen.findByRole('listbox', { name: /agent suggestions/i });
+    const listbox = await screen.findByRole('listbox', { name: /mention suggestions/i });
     expect(listbox.style.top).not.toBe('');
     expect(listbox.style.top).not.toBe('calc(100% + 8px)');
     expect(listbox.style.bottom).toBe('');
