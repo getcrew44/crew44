@@ -43,6 +43,7 @@ var localProviderSpecs = []providerSpec{
 }
 
 func (LocalScanner) Scan(ctx context.Context) ([]model.RuntimeRecord, error) {
+	refreshSystemPath()
 	now := time.Now().UTC()
 	records := make([]model.RuntimeRecord, 0, len(localProviderSpecs))
 	debug := daemonDebugEnabled()
