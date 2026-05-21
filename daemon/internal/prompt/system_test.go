@@ -146,6 +146,7 @@ func TestBuildSystemPromptStructuresRuntimeContext(t *testing.T) {
 		AvailableAgents: []model.AgentConfig{current, other},
 		Skills:          []Skill{{Name: "problem-framing"}},
 		SummaryPath:     "/tmp/chat-summary.md",
+		ChatSessionDir:  "/home/user/.crew44/chats/chat-abc",
 		HandoverNote:    "Tell the user an English story.",
 	})
 
@@ -184,7 +185,8 @@ func TestBuildSystemPromptStructuresRuntimeContext(t *testing.T) {
 		"Routing:",
 		"hand off rather than attempting the work yourself",
 		"Route the moment you recognize the scope match",
-		"tmp/handover/<short-slug>.md",
+		"/home/user/.crew44/chats/chat-abc/handover/<short-slug>.md",
+		"do not create files under `/tmp` or the project workdir",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("system prompt missing shared routing guidance %q:\n%s", want, got)

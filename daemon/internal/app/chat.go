@@ -296,6 +296,7 @@ func (a *App) runChat(ctx context.Context, controller *chatRunController, chatID
 			AvailableAgents:         availableAgents,
 			Skills:                  promptSkills(agentSkills),
 			SummaryPath:             a.store.SummaryPath(chatID),
+			ChatSessionDir:          a.store.ChatSessionDir(chatID),
 			HandoverNote:            currentHandoverNote,
 			UserMemoryDir:           a.store.UserMemoryDir(),
 			ProjectMemoryDir:        a.store.ProjectMemoryDir(project.ID),

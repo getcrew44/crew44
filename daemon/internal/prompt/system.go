@@ -29,6 +29,7 @@ type SystemPromptInput struct {
 	AvailableAgents         []model.AgentConfig
 	Skills                  []Skill
 	SummaryPath             string
+	ChatSessionDir          string // ~/.crew44/chats/chat-<id>; agents write handover scratch files here so they are scoped to this chat
 	HandoverNote            string
 	UserMemoryDir           string // ~/.crew44/memory; reader expands MEMORY.md + per-entry files
 	ProjectMemoryDir        string // ~/.crew44/projects/<id>/memory
@@ -52,7 +53,7 @@ func BuildSystemPrompt(input SystemPromptInput) string {
 	if skills := skillSummary(input.Runtime.Provider, input.Skills); skills != "" {
 		writeSection(&b, "Available Skills", skills)
 	}
-	writeSection(&b, "Available Agents For Handover", availableAgents(input.Agent.ID, input.AvailableAgents))
+	writeSection(&b, "Available Agents For Handover", availableAgents(input.Agent.ID, input.AvailableAgents, input.ChatSessionDir))
 	writeSection(&b, "Handover Output Protocol", handoverProtocol())
 	return strings.TrimSpace(b.String())
 }
@@ -241,7 +242,7 @@ func skillSummary(provider string, skills []Skill) string {
 	return strings.TrimSpace(b.String())
 }
 
-func availableAgents(currentAgentID string, agents []model.AgentConfig) string {
+func availableAgents(currentAgentID string, agents []model.AgentConfig, chatSessionDir string) string {
 	var b strings.Builder
 	count := 0
 	for _, agent := range agents {
@@ -263,9 +264,22 @@ func availableAgents(currentAgentID string, agents []model.AgentConfig) string {
 	b.WriteString("- Compare every request against the listed agents' descriptions. If another listed agent's scope clearly fits the request better than yours, hand off rather than attempting the work yourself.\n")
 	b.WriteString("- Route the moment you recognize the scope match. Do not partial-answer first and then hand over — the partial answer competes with the specialist's framing and wastes the user's turn.\n")
 	b.WriteString("- When handing over, include the user's goal, the relevant context, and the specific deliverable expected of the next agent.\n")
-	b.WriteString("- Before handing over, save any meaningful intermediate work (plans, drafts, partial diffs, notes, scope statements, design sketches) to a local file under the project workdir at `tmp/handover/<short-slug>.md` and reference that path in the handover note. Other agents read files; they cannot see your scrollback.\n")
+	b.WriteString(handoverScratchInstruction(chatSessionDir))
 	b.WriteString("- Handle directly only when the request fits your scope or when no listed agent clearly fits better.")
 	return strings.TrimSpace(b.String())
+}
+
+// handoverScratchInstruction tells the agent where to persist intermediate
+// work before a handover. Files belong with the chat session, not under
+// /tmp or the project workdir — that way the next agent in this chat can
+// find them and they get cleaned up with the chat. Falls back to a chat-
+// scoped relative path when no session dir is available (tests, edge cases).
+func handoverScratchInstruction(chatSessionDir string) string {
+	chatSessionDir = strings.TrimSpace(chatSessionDir)
+	if chatSessionDir == "" {
+		return "- Before handing over, save any meaningful intermediate work (plans, drafts, partial diffs, notes, scope statements, design sketches) to a file under this chat's session directory (alongside `summary.md`) at `handover/<short-slug>.md`, and reference that absolute path in the handover note. Other agents read files; they cannot see your scrollback.\n"
+	}
+	return fmt.Sprintf("- Before handing over, save any meaningful intermediate work (plans, drafts, partial diffs, notes, scope statements, design sketches) to a file under this chat's session directory at `%s/handover/<short-slug>.md`, and reference that absolute path in the handover note. The chat session directory already exists; do not create files under `/tmp` or the project workdir. Other agents read files; they cannot see your scrollback.\n", chatSessionDir)
 }
 
 func handoverProtocol() string {
