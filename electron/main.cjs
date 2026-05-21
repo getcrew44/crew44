@@ -9,8 +9,15 @@ const path = require('path');
 
 const isDev = Boolean(process.env.CREW44_RENDERER_URL);
 const appName = 'Crew44';
-const appIcon = path.join(__dirname, 'assets', 'crew44.icns');
-const bundledDaemon = path.join(__dirname, '..', 'bin', process.platform === 'win32' ? 'crew44-daemon.exe' : 'crew44-daemon');
+const daemonBin = process.platform === 'win32' ? 'crew44-daemon.exe' : 'crew44-daemon';
+// Packaged builds (electron-builder) ship the daemon as an extraResource at
+// `Resources/bin/`. Dev/source runs find it at the repo's `bin/` next to the
+// app source.
+const bundledDaemon = app.isPackaged
+  ? path.join(process.resourcesPath, 'bin', daemonBin)
+  : path.join(__dirname, '..', 'bin', daemonBin);
+const iconCandidate = path.join(__dirname, 'assets', process.platform === 'win32' ? 'crew44.ico' : 'crew44.icns');
+const appIcon = fs.existsSync(iconCandidate) ? iconCandidate : undefined;
 const configuredBackendUrl = (process.env.CREW44_BACKEND_URL || process.env.CREW44_BASE_URL || '').replace(/\/$/, '');
 const configuredRpcUrl = process.env.CREW44_RPC_URL || '';
 const configuredAuthToken = process.env.AUTH_TOKEN || process.env.CREW44_AUTH_TOKEN || process.env.CREW44_API_TOKEN || '';

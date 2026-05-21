@@ -2,28 +2,92 @@
   "name": "crew44",
   "productName": "Crew44",
   "version": "0.5.4",
+  "description": "Crew44 — local-first AI crew runner",
+  "author": "Crew44",
   "main": "electron/main.cjs",
   "type": "module",
   "workspaces": [
     "packages/*"
   ],
   "scripts": {
-    "dev": "mkdir -p bin && cd daemon && go build -o ../bin/crew44-daemon ./cmd/crew44-daemon && cd .. && node electron/scripts/dev.cjs",
-    "build": "mkdir -p bin && cd daemon && go build -o ../bin/crew44-daemon ./cmd/crew44-daemon && cd .. && vite build && node electron/scripts/build.cjs",
-    "dist": "npm run build && node electron/scripts/dist.cjs",
-    "dist:unsigned": "npm run build && node electron/scripts/dist.cjs --skip-sign --skip-notarize",
+    "dev": "node electron/scripts/build-daemon.cjs && node electron/scripts/dev.cjs",
+    "build:daemon": "node electron/scripts/build-daemon.cjs",
+    "build:daemon:mac": "node electron/scripts/build-daemon.cjs mac",
+    "build:daemon:win": "node electron/scripts/build-daemon.cjs win",
+    "build:daemon:linux": "node electron/scripts/build-daemon.cjs linux",
+    "dist:mac": "npm run build:daemon:mac && vite build && electron-builder --dir --mac -c.mac.identity=null && node electron/scripts/dist-mac.cjs",
+    "dist:mac:unsigned": "npm run build:daemon:mac && vite build && electron-builder --dir --mac -c.mac.identity=null && node electron/scripts/dist-mac.cjs --skip-sign",
+    "dist:win": "npm run build:daemon:win && vite build && electron-builder --win",
+    "dist:linux": "npm run build:daemon:linux && vite build && electron-builder --linux",
     "web:dev": "node daemon/scripts/web-dev.cjs",
     "mobile:start": "npm --workspace=@crew44/mobile run start --",
     "mobile:android": "npm --workspace=@crew44/mobile run android --",
     "mobile:ios": "npm --workspace=@crew44/mobile run ios --",
     "test:mobile": "npm --workspace=@crew44/mobile run test",
     "test": "cd daemon && go test ./... && cd .. && vitest run && npm run test:mobile",
-    "clean": "rm -rf bin dist .electron-app crew44-server crew44-daemon"
+    "clean": "rm -rf bin dist release .electron-app crew44-server crew44-daemon"
+  },
+  "build": {
+    "appId": "com.crew44.desktop",
+    "productName": "Crew44",
+    "copyright": "Copyright © 2026 Crew44",
+    "asar": true,
+    "directories": {
+      "output": "release",
+      "buildResources": "electron/build"
+    },
+    "files": [
+      "package.json",
+      "electron/**/*",
+      "dist/**/*",
+      "!**/.DS_Store",
+      "!**/*.map"
+    ],
+    "extraResources": [
+      {
+        "from": "bin/",
+        "to": "bin/",
+        "filter": [
+          "crew44-daemon*"
+        ]
+      }
+    ],
+    "mac": {
+      "category": "public.app-category.developer-tools",
+      "icon": "electron/assets/crew44.icns"
+    },
+    "win": {
+      "icon": "electron/assets/crew44.ico",
+      "target": [
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "portable": {
+      "artifactName": "${productName}-${version}-${arch}.${ext}"
+    },
+    "linux": {
+      "category": "Development",
+      "target": [
+        "AppImage",
+        "deb"
+      ]
+    }
   },
   "dependencies": {
     "qrcode.react": "^4.2.0",
     "react": "19.1.0",
     "react-dom": "19.1.0"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "electron",
+      "electron-winstaller"
+    ]
   },
   "devDependencies": {
     "@testing-library/jest-dom": "^6.9.1",
@@ -31,6 +95,7 @@
     "@testing-library/user-event": "^14.6.1",
     "@vitejs/plugin-react": "^4.3.4",
     "electron": "^42.0.1",
+    "electron-builder": "^26.8.1",
     "jsdom": "^29.1.1",
     "vite": "^6.3.2",
     "vitest": "^4.1.6"

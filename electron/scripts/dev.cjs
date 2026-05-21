@@ -7,6 +7,22 @@ const rendererUrl = process.env.CREW44_RENDERER_URL || `http://127.0.0.1:${front
 const cwd = path.resolve(__dirname, '..', '..');
 const viteBin = path.join(cwd, 'node_modules', '.bin', process.platform === 'win32' ? 'vite.cmd' : 'vite');
 
+function resolveElectronBin() {
+  const fs = require('fs');
+  const distDir = path.join(cwd, 'node_modules', 'electron', 'dist');
+  if (!fs.existsSync(distDir)) {
+    console.error(
+      'Electron binary not found at node_modules/electron/dist/.\n' +
+        'pnpm 10 blocks postinstall scripts by default. Fix with one of:\n' +
+        '  pnpm exec install-electron --no\n' +
+        '  pnpm rebuild electron'
+    );
+    process.exit(1);
+  }
+  return require('electron');
+}
+const electronBin = resolveElectronBin();
+
 function waitFor(url, retries = 80) {
   return new Promise((resolve, reject) => {
     const attempt = () => {
@@ -54,7 +70,7 @@ async function main() {
 
   try {
     await waitFor(rendererUrl);
-    const electron = spawnLogged(process.execPath, [path.join(cwd, 'electron', 'scripts', 'run.cjs')], {
+    const electron = spawnLogged(electronBin, [path.join(cwd, 'electron', 'main.cjs')], {
       CREW44_RENDERER_URL: rendererUrl,
     });
     electron.on('exit', code => {
