@@ -39,7 +39,7 @@ export default function ProjectsScreen() {
           left={<BackButton onPress={goBackOrHome} />}
         />
         <DesktopOfflineState
-          title={connectionIssue === "relay" ? "Relay connection issue" : "Desktop offline"}
+          title={connectionIssue === "relay" ? "Relay connection issue" : "Can't connect to the Crew44 desktop"}
           message={connectionError}
           onRetry={reconnect}
           onUnpair={disconnect}

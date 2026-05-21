@@ -111,6 +111,19 @@ func TestChatMessageReplayAndEventList(t *testing.T) {
 	if len(items) < 4 {
 		t.Fatalf("expected replay events, got %#v", replay)
 	}
+	foundNamedAgentEvent := false
+	for _, raw := range items {
+		event, _ := raw.(map[string]any)
+		if event["actor_agent_id"] == agentID {
+			foundNamedAgentEvent = true
+			if event["actor_agent_name"] != "Aria" {
+				t.Fatalf("expected actor_agent_name=Aria on agent event, got %#v", event)
+			}
+		}
+	}
+	if !foundNamedAgentEvent {
+		t.Fatalf("expected replay to include an event from agent %s, got %#v", agentID, replay)
+	}
 }
 
 func TestChatMessageInterruptRestartsRunWithSteerFlags(t *testing.T) {

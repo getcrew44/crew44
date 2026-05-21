@@ -8,9 +8,9 @@ import (
 	"sync"
 
 	"github.com/flynn/noise"
-	"github.com/gorilla/websocket"
 	"github.com/getcrew44/crew44/daemon/internal/app"
 	"github.com/getcrew44/crew44/daemon/internal/rpc"
+	"github.com/gorilla/websocket"
 )
 
 type sessionHello struct {
@@ -88,6 +88,9 @@ func (m *Manager) serveDeviceSession(ctx context.Context, ws *websocket.Conn) {
 	}
 	device, err := m.AuthorizeDevice(encodeKey(peerStatic))
 	if err != nil {
+		if errors.Is(err, app.ErrUnauthorized) {
+			_ = writeRPCNotification(transport, "remote.device.revoked", map[string]any{"reason": "device_revoked"})
+		}
 		return
 	}
 	server := m.server()
@@ -95,12 +98,13 @@ func (m *Manager) serveDeviceSession(ctx context.Context, ws *websocket.Conn) {
 		return
 	}
 	sessionCtx, cancel := context.WithCancel(ctx)
-	m.trackDeviceSession(device.ID, cancel)
+	conn := rpc.NewConn(transport)
+	m.trackDeviceSession(device.ID, cancel, conn)
 	defer func() {
 		cancel()
 		m.forgetDeviceSession(device.ID)
 	}()
-	rpc.NewConn(transport).Run(sessionCtx, server)
+	conn.Run(sessionCtx, server)
 }
 
 func (m *Manager) handshakePairing(ws *websocket.Conn) (*NoiseTransport, error) {
@@ -220,6 +224,14 @@ func writeRPCError(transport rpc.FrameTransport, id json.RawMessage, code int, m
 		JSONRPC: rpc.Version,
 		ID:      normalizeRPCID(id),
 		Error:   &rpc.Error{Code: code, Message: message},
+	})
+}
+
+func writeRPCNotification(transport rpc.FrameTransport, method string, params any) error {
+	return writeRPCMessage(transport, map[string]any{
+		"jsonrpc": rpc.Version,
+		"method":  method,
+		"params":  params,
 	})
 }
 

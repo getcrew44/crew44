@@ -14,6 +14,7 @@ export interface BaseTimelineItem {
   seq: number;
   _seq: number;
   author: string;
+  authorName?: string;
   time: string;
   tsISO: string;
   showHeader?: boolean;
@@ -93,6 +94,8 @@ export interface HandoverDividerItem {
   _seq: number;
   from: string;
   to: string;
+  fromName?: string;
+  toName?: string;
   subtype?: string;
   note?: string;
   synthetic?: boolean;
@@ -130,6 +133,7 @@ export function mapBackendEvent(event: BackendEvent): TimelineItem | null {
       seq,
       _seq: seq,
       author: role === "user" ? "__human__" : event.actor_agent_id,
+      authorName: role === "user" ? "You" : event.actor_agent_name,
       role,
       body: event.message?.content || "",
       attachments: attachments.length ? attachments : undefined,
@@ -146,6 +150,7 @@ export function mapBackendEvent(event: BackendEvent): TimelineItem | null {
       seq,
       _seq: seq,
       author: event.actor_agent_id,
+      authorName: event.actor_agent_name,
       reasoning: event.thinking?.content || "",
       seconds: 0,
       time,
@@ -159,6 +164,7 @@ export function mapBackendEvent(event: BackendEvent): TimelineItem | null {
       seq,
       _seq: seq,
       author: event.actor_agent_id,
+      authorName: event.actor_agent_name,
       callId: event.tool_call?.call_id || "",
       tool: event.tool_call?.name || "tool",
       path: summarizeToolInput(input),
@@ -175,6 +181,7 @@ export function mapBackendEvent(event: BackendEvent): TimelineItem | null {
       seq,
       _seq: seq,
       author: event.actor_agent_id,
+      authorName: event.actor_agent_name,
       callId: event.tool_call_result?.call_id || "",
       toolCallSeq: event.tool_call_result?.tool_call_seq || 0,
       name: event.tool_call_result?.name || "",
@@ -190,6 +197,7 @@ export function mapBackendEvent(event: BackendEvent): TimelineItem | null {
       seq,
       _seq: seq,
       author: event.actor_agent_id,
+      authorName: event.actor_agent_name,
       time,
       tsISO
     };
@@ -200,6 +208,7 @@ export function mapBackendEvent(event: BackendEvent): TimelineItem | null {
       seq,
       _seq: seq,
       author: event.actor_agent_id,
+      authorName: event.actor_agent_name,
       subtype: event.handover?.subtype || "delegate",
       agent_id: event.actor_agent_id,
       target_agent_id: event.handover?.agent_id || "",
@@ -215,6 +224,7 @@ export function mapBackendEvent(event: BackendEvent): TimelineItem | null {
       seq,
       _seq: seq,
       author: event.actor_agent_id,
+      authorName: event.actor_agent_name,
       subtype: event.error?.subtype || "error",
       code: event.error?.code || "",
       message: event.error?.message || "",
@@ -288,6 +298,7 @@ function groupConsecutiveTools(events: TimelineItem[]): TimelineItem[] {
         seq: event.seq,
         _seq: event._seq,
         author: event.author,
+        authorName: event.authorName,
         time: event.time,
         tsISO: event.tsISO,
         events: [event]
@@ -308,6 +319,7 @@ export function buildRenderableTimeline(events: TimelineItem[]): RenderableTimel
   const prepared = groupConsecutiveTools(prepareEvents(events));
   const out: RenderableTimelineItem[] = [];
   let prevAgentActor = "";
+  let prevAgentName = "";
   let prevDisplayedActor = "";
   const isAgentActor = (id: string) => id && id !== "__human__";
 
@@ -322,13 +334,17 @@ export function buildRenderableTimeline(events: TimelineItem[]): RenderableTimel
           _seq: event._seq,
           from,
           to,
+          fromName: event.authorName,
+          toName: event.target_agent_name,
           subtype: event.subtype,
           note: event.note
         });
         prevAgentActor = to;
+        prevAgentName = event.target_agent_name;
         prevDisplayedActor = "";
       } else if (from && to && from === to) {
         prevAgentActor = to;
+        prevAgentName = event.target_agent_name;
       }
       return;
     }
@@ -340,6 +356,8 @@ export function buildRenderableTimeline(events: TimelineItem[]): RenderableTimel
         _seq: event._seq - 0.1,
         from: prevAgentActor,
         to: event.author,
+        fromName: prevAgentName,
+        toName: event.authorName,
         synthetic: true
       });
       prevDisplayedActor = "";
@@ -349,7 +367,10 @@ export function buildRenderableTimeline(events: TimelineItem[]): RenderableTimel
     const isHeaderless = !isAgentActor(actor) || event.kind === "tool_result";
     const showHeader = isHeaderless ? true : prevDisplayedActor !== actor;
     out.push(withHeaderState(event, showHeader));
-    if (isAgentActor(event.author)) prevAgentActor = event.author;
+    if (isAgentActor(event.author)) {
+      prevAgentActor = event.author;
+      prevAgentName = event.authorName || prevAgentName;
+    }
     if (!isAgentActor(event.author)) {
       prevAgentActor = prevAgentActor || "";
       prevDisplayedActor = "";

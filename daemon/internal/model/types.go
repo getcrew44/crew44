@@ -142,6 +142,7 @@ type Event struct {
 	TS             time.Time              `json:"ts"`
 	TurnID         string                 `json:"turn_id"`
 	ActorAgentID   string                 `json:"actor_agent_id"`
+	ActorAgentName string                 `json:"actor_agent_name,omitempty"`
 	Message        *MessagePayload        `json:"message,omitempty"`
 	Thinking       *ThinkingPayload       `json:"thinking,omitempty"`
 	ToolCall       *ToolCallPayload       `json:"tool_call,omitempty"`

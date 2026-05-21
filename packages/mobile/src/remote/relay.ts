@@ -8,7 +8,7 @@ export class RelayConnectionError extends Error {
 }
 
 export class DesktopOfflineError extends Error {
-  constructor(message = "Desktop is offline") {
+  constructor(message = "Can't connect to the Crew44 desktop") {
     super(message);
     this.name = "DesktopOfflineError";
   }
@@ -91,7 +91,7 @@ export async function checkRelayDesktopStatus(relayUrl: string, serverId: string
 
 export function waitForRelayReady(socket: WebSocket): Promise<void> {
   return waitForRelayStatus(socket).then(status => {
-    if (status === "desktop_offline") throw new DesktopOfflineError("Desktop is offline");
+    if (status === "desktop_offline") throw new DesktopOfflineError();
   });
 }
 

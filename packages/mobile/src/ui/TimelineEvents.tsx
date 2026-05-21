@@ -16,10 +16,13 @@ type AgentDisplay = {
 
 export type LoadedToolDetails = Pick<ToolItem, "path" | "input" | "output" | "detail" | "result">;
 
-function resolveAuthor(id: string, agents: Agent[]): AgentDisplay {
+function resolveAuthor(id: string, agents: Agent[], name?: string): AgentDisplay {
   if (id === "__human__") return { id, name: "You", initial: "Y", kind: "human" };
   const agent = agents.find(item => item.id === id);
-  if (!agent) return { id, name: id || "Agent", initial: (id || "?")[0].toUpperCase(), kind: "agent" };
+  if (!agent) {
+    const displayName = name || "Deleted agent";
+    return { id, name: displayName, initial: (displayName || "?")[0].toUpperCase(), kind: "agent" };
+  }
   return { id: agent.id, name: agent.name, initial: (agent.name || "?")[0].toUpperCase(), kind: "agent" };
 }
 
@@ -86,8 +89,8 @@ function HandoverVerb({ subtype }: { subtype?: string }) {
 }
 
 function HandoverDivider({ item, agents }: { item: HandoverDividerItem; agents: Agent[] }) {
-  const from = resolveAuthor(item.from, agents);
-  const to = resolveAuthor(item.to, agents);
+  const from = resolveAuthor(item.from, agents, item.fromName);
+  const to = resolveAuthor(item.to, agents, item.toName);
   return (
     <View style={styles.handoverRow}>
       <View style={styles.handoverLine} />
@@ -188,18 +191,20 @@ function toolGroupSummary(events: ToolItem[]): string {
 
 function ToolGutter({
   author,
+  authorName,
   time,
   agents,
   showHeader,
   children
 }: {
   author: string;
+  authorName?: string;
   time: string;
   agents: Agent[];
   showHeader?: boolean;
   children: React.ReactNode;
 }) {
-  const agent = resolveAuthor(author, agents);
+  const agent = resolveAuthor(author, agents, authorName);
   return (
     <View style={styles.agentMessageWrap}>
       {showHeader === false ? <View style={styles.avatarSpacer} /> : <Avatar agent={agent} />}
@@ -281,7 +286,7 @@ export function TimelineRow({
 }) {
   if (item.kind === "handover_divider") return <HandoverDivider item={item} agents={agents} />;
   if (item.kind === "message") {
-    const agent = resolveAuthor(item.author, agents);
+    const agent = resolveAuthor(item.author, agents, item.authorName);
     const mine = agent.kind === "human";
     return (
       <View style={mine ? styles.userMessageWrap : styles.agentMessageWrap}>
@@ -304,7 +309,7 @@ export function TimelineRow({
     );
   }
   if (item.kind === "thinking") {
-    const agent = resolveAuthor(item.author, agents);
+    const agent = resolveAuthor(item.author, agents, item.authorName);
     return (
       <View style={styles.agentMessageWrap}>
         {item.showHeader === false ? <View style={styles.avatarSpacer} /> : <Avatar agent={agent} />}
@@ -317,14 +322,14 @@ export function TimelineRow({
   }
   if (item.kind === "tool") {
     return (
-      <ToolGutter author={item.author} time={item.time} agents={agents} showHeader={item.showHeader}>
+      <ToolGutter author={item.author} authorName={item.authorName} time={item.time} agents={agents} showHeader={item.showHeader}>
         <ToolLine tool={item} onLoadToolDetails={onLoadToolDetails} />
       </ToolGutter>
     );
   }
   if (item.kind === "tool_group") {
     return (
-      <ToolGutter author={item.author} time={item.time} agents={agents} showHeader={item.showHeader}>
+      <ToolGutter author={item.author} authorName={item.authorName} time={item.time} agents={agents} showHeader={item.showHeader}>
         <ToolGroupLine item={item} onLoadToolDetails={onLoadToolDetails} />
       </ToolGutter>
     );

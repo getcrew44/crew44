@@ -86,20 +86,14 @@ func TestRemoteDeletedDeviceCannotReconnect(t *testing.T) {
 		t.Fatalf("generate device key: %v", err)
 	}
 	device := registerPairingOverRelay(t, relayURL, offer, deviceKey)
+
+	activeConn := dialDeviceOverRelay(t, relayURL, offer, deviceKey)
 	rpcCall(t, localRPC, "remote.devices.delete", map[string]any{"device_id": device.ID})
+	assertRevokedNotification(t, activeConn)
 
 	conn := dialDeviceOverRelay(t, relayURL, offer, deviceKey)
 	defer conn.Close()
-	if err := conn.WriteFrame(mustJSON(map[string]any{
-		"jsonrpc": "2.0",
-		"id":      "health_after_delete",
-		"method":  "system.health",
-	})); err != nil {
-		return
-	}
-	if _, err := conn.ReadFrame(); err == nil {
-		t.Fatal("expected deleted device connection to close")
-	}
+	assertRevokedNotification(t, conn)
 }
 
 func dialLocalRPC(t *testing.T, serverURL string) *websocket.Conn {
@@ -336,6 +330,21 @@ func encryptedRPCCall(t *testing.T, transport *remote.NoiseTransport, method str
 		t.Fatalf("encrypted rpc %s error: %#v", method, resp.Error)
 	}
 	return resp.Result
+}
+
+func assertRevokedNotification(t *testing.T, transport *remote.NoiseTransport) {
+	t.Helper()
+	var notification struct {
+		Method string `json:"method"`
+		Params struct {
+			DeviceID string `json:"device_id"`
+			Reason   string `json:"reason"`
+		} `json:"params"`
+	}
+	readEncryptedJSON(t, transport, &notification)
+	if notification.Method != "remote.device.revoked" {
+		t.Fatalf("expected remote.device.revoked notification, got %#v", notification)
+	}
 }
 
 func mustJSON(value any) []byte {

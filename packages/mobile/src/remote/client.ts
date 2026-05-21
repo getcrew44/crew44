@@ -119,7 +119,8 @@ export async function registerPairing(offer: PairingOffer, deviceName: string): 
 export async function connectPairedDevice(
   profile: PairedProfile,
   privateKey: string,
-  onClose: (err: Error) => void
+  onClose: (err: Error) => void,
+  onRevoked: () => void
 ): Promise<JsonRpcPeer> {
   const socket = await openRelaySocket(profile.relayUrl, profile.serverId);
   await waitForRelayReady(socket);
@@ -138,6 +139,7 @@ export async function connectPairedDevice(
 
   const transport = new EncryptedFrameTransport(socket, noise.split());
   const peer = new JsonRpcPeer(transport);
+  peer.on("remote.device.revoked", onRevoked);
   attachRpcSocket(peer, socket, onClose);
   return peer;
 }

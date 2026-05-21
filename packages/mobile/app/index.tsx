@@ -47,12 +47,18 @@ export default function Index() {
     );
   }, [client.disconnect]);
 
+  const connectingLabel = client.status === "reconnecting"
+    ? "Reconnecting to relay..."
+    : client.status === "connecting"
+      ? "Connecting to the Crew44 desktop..."
+      : "Loading pairing...";
+
   if (client.status === "error") {
     return (
       <Screen>
         <Header title="Crew44 Mobile" />
         <DesktopOfflineState
-          title={client.connectionIssue === "relay" ? "Relay connection issue" : "Desktop offline"}
+          title={client.connectionIssue === "relay" ? "Relay connection issue" : "Can't connect to the Crew44 desktop"}
           message={client.error}
           onRetry={client.reconnect}
           onUnpair={client.disconnect}
@@ -128,7 +134,7 @@ export default function Index() {
     <Screen>
       <Header title="Crew44 Mobile" />
       <ConnectingDesktopState
-        label={client.status === "connecting" ? "Connecting to desktop..." : "Loading pairing..."}
+        label={connectingLabel}
         showOtherOptions={Boolean(client.profile)}
         onUnpair={client.disconnect}
       />

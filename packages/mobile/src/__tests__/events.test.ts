@@ -18,9 +18,11 @@ describe("mapBackendEvent", () => {
       type: "handover",
       ts: "2026-05-13T11:00:00.000Z",
       actor_agent_id: "agent_1",
+      actor_agent_name: "Aria",
       handover: { subtype: "occurred", agent_id: "agent_2", agent_name: "Bex", note: "continue" }
     })).toMatchObject({
       kind: "handover",
+      authorName: "Aria",
       subtype: "occurred",
       agent_id: "agent_1",
       target_agent_id: "agent_2",
@@ -66,6 +68,7 @@ describe("mapBackendEvent", () => {
         seq: 3,
         _seq: 3,
         author: "agent_1",
+        authorName: "Aria",
         time: "11:02",
         tsISO: "",
         subtype: "delegate",
@@ -78,7 +81,7 @@ describe("mapBackendEvent", () => {
 
     const rendered = buildRenderableTimeline(events);
     expect(rendered[0]).toMatchObject({ kind: "message", _thought: { reasoning: "checking" } });
-    expect(rendered[1]).toMatchObject({ kind: "handover_divider", from: "agent_1", to: "agent_2" });
+    expect(rendered[1]).toMatchObject({ kind: "handover_divider", from: "agent_1", fromName: "Aria", to: "agent_2", toName: "Bex" });
   });
 
   it("marks consecutive agent tool calls as header continuations", () => {

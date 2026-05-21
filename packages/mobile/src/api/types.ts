@@ -48,6 +48,7 @@ export interface BackendEvent {
   type: "message" | "thinking" | "tool_call" | "tool_call_result" | "runtime_session" | "handover" | "error";
   ts: string;
   actor_agent_id: string;
+  actor_agent_name?: string;
   message?: {
     role: "user" | "assistant";
     content: string;

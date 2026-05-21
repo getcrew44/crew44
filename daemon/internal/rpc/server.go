@@ -8,8 +8,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/gorilla/websocket"
 	"github.com/getcrew44/crew44/daemon/internal/app"
+	"github.com/gorilla/websocket"
 )
 
 const (
@@ -176,6 +176,18 @@ func (c *Conn) Run(ctx context.Context, server *Server) {
 
 func (c *Conn) Notify(method string, params any) bool {
 	return c.send(notification(method, params))
+}
+
+func (c *Conn) Close() {
+	c.close()
+}
+
+func (c *Conn) NotifyAndClose(method string, params any) {
+	data, err := json.Marshal(notification(method, params))
+	if err == nil {
+		_ = c.transport.WriteFrame(data)
+	}
+	c.close()
 }
 
 func (c *Conn) send(value any) bool {

@@ -103,11 +103,18 @@ func buildHandoverPrompt(currentPrompt, sourceMessage string) string {
 }
 
 func (a *App) appendHandoverEvent(chatID, turnID, actorAgentID, subtype string, agent model.AgentConfig, note string) error {
+	actorAgentName := ""
+	if actorAgentID != "" {
+		if actor, err := a.store.GetAgent(actorAgentID); err == nil {
+			actorAgentName = actor.Name
+		}
+	}
 	event, err := a.store.AppendEvent(chatID, model.Event{
-		Type:         model.EventTypeHandover,
-		TS:           time.Now().UTC(),
-		TurnID:       turnID,
-		ActorAgentID: actorAgentID,
+		Type:           model.EventTypeHandover,
+		TS:             time.Now().UTC(),
+		TurnID:         turnID,
+		ActorAgentID:   actorAgentID,
+		ActorAgentName: actorAgentName,
 		Handover: &model.HandoverPayload{
 			Subtype:   subtype,
 			AgentID:   agent.ID,

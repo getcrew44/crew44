@@ -296,6 +296,7 @@ func (a *App) runChat(ctx context.Context, controller *chatRunController, chatID
 				TS:             time.Now().UTC(),
 				TurnID:         currentTurnID,
 				ActorAgentID:   currentAgentID,
+				ActorAgentName: agent.Name,
 				Message:        streamEvent.Message,
 				Thinking:       streamEvent.Thinking,
 				ToolCall:       streamEvent.ToolCall,

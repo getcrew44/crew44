@@ -43,7 +43,7 @@ export function OtherOptions({ onUnpair }: { onUnpair: () => void }) {
 }
 
 export function DesktopOfflineState({
-  title = "Desktop offline",
+  title = "Can't connect to the Crew44 desktop",
   message,
   onRetry,
   onUnpair
@@ -58,7 +58,7 @@ export function DesktopOfflineState({
       <OfflineComputer />
       <Text style={styles.title}>{title}</Text>
       <Text style={styles.body}>
-        {message || "The relay cannot reach your paired desktop right now."}
+        {message || "The mobile app cannot reach your paired desktop right now."}
       </Text>
       <View style={styles.actions}>
         <Button label="Retry" onPress={onRetry} />
@@ -69,7 +69,7 @@ export function DesktopOfflineState({
 }
 
 export function ConnectingDesktopState({
-  label = "Connecting to desktop...",
+  label = "Connecting to the Crew44 desktop...",
   onUnpair,
   showOtherOptions = false
 }: {
