@@ -66,8 +66,8 @@ export async function listAgents() {
   return data.items || [];
 }
 
-export async function createAgent(name, instruction, runtimeId, model) {
-  return rpc.call('agents.create', { name, instruction, runtime_id: runtimeId, model });
+export async function createAgent(name, description, instruction, runtimeId, model) {
+  return rpc.call('agents.create', { name, description, instruction, runtime_id: runtimeId, model });
 }
 
 export async function updateAgent(id, data) {

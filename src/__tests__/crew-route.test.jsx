@@ -217,7 +217,7 @@ describe('CrewRoute agents tab', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Create agent' }));
 
     await waitFor(() => {
-      expect(api.createAgent).toHaveBeenCalledWith('Coding Agent', '', 'codex', 'gpt-5.5');
+      expect(api.createAgent).toHaveBeenCalledWith('Coding Agent', '', '', 'codex', 'gpt-5.5');
     });
     expect(onDataRefresh).toHaveBeenCalledOnce();
   });
