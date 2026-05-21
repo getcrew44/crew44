@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import Sidebar from '../Sidebar.jsx';
 
 const noop = () => {};
@@ -327,5 +327,119 @@ describe('Sidebar archive chat flow', () => {
     // appear even on hover.
     expect(screen.getByRole('progressbar', { name: /streaming is waiting/i })).toBeInTheDocument();
     expect(screen.queryByTitle('Archive chat')).not.toBeInTheDocument();
+  });
+});
+
+// ─── Right-click context menu ─────────────────────────────────────────────────
+describe('Sidebar session context menu', () => {
+  it('right-clicking a chat opens the context menu with Rename and Archive', () => {
+    render(<Sidebar {...baseProps} projects={sampleProjects} onRenameChat={vi.fn()} onArchiveChat={vi.fn()} />);
+    const session = screen.getByTestId('chat-c1');
+
+    fireEvent.contextMenu(session);
+
+    const menu = screen.getByTestId('session-menu');
+    expect(menu).toBeInTheDocument();
+    expect(within(menu).getByText('Rename')).toBeInTheDocument();
+    expect(within(menu).getByText('Archive')).toBeInTheDocument();
+  });
+
+  it('positions the menu at the cursor', () => {
+    render(<Sidebar {...baseProps} projects={sampleProjects} onRenameChat={vi.fn()} />);
+    const session = screen.getByTestId('chat-c1');
+
+    fireEvent.contextMenu(session, { clientX: 250, clientY: 180 });
+
+    const menu = screen.getByTestId('session-menu');
+    expect(menu).toHaveStyle({ left: '250px', top: '180px' });
+  });
+
+  it('clicking Rename swaps the row to an input that calls onRenameChat on Enter', async () => {
+    const onRenameChat = vi.fn();
+    render(<Sidebar {...baseProps} projects={sampleProjects} onRenameChat={onRenameChat} />);
+
+    fireEvent.contextMenu(screen.getByTestId('chat-c1'));
+    fireEvent.click(screen.getByText('Rename'));
+
+    const input = await screen.findByTestId('chat-c1-rename-input');
+    expect(input).toHaveValue('chat one');
+    fireEvent.change(input, { target: { value: 'renamed conversation' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+
+    expect(onRenameChat).toHaveBeenCalledWith('c1', 'renamed conversation');
+  });
+
+  it('Escape inside the rename input cancels without calling onRenameChat', async () => {
+    const onRenameChat = vi.fn();
+    render(<Sidebar {...baseProps} projects={sampleProjects} onRenameChat={onRenameChat} />);
+
+    fireEvent.contextMenu(screen.getByTestId('chat-c1'));
+    fireEvent.click(screen.getByText('Rename'));
+
+    const input = await screen.findByTestId('chat-c1-rename-input');
+    fireEvent.change(input, { target: { value: 'discarded' } });
+    fireEvent.keyDown(input, { key: 'Escape' });
+
+    await waitFor(() => expect(screen.queryByTestId('chat-c1-rename-input')).not.toBeInTheDocument());
+    expect(onRenameChat).not.toHaveBeenCalled();
+    expect(screen.getByText('chat one')).toBeInTheDocument();
+  });
+
+  it('does not call onRenameChat when the trimmed input matches the current title', async () => {
+    const onRenameChat = vi.fn();
+    render(<Sidebar {...baseProps} projects={sampleProjects} onRenameChat={onRenameChat} />);
+
+    fireEvent.contextMenu(screen.getByTestId('chat-c1'));
+    fireEvent.click(screen.getByText('Rename'));
+
+    const input = await screen.findByTestId('chat-c1-rename-input');
+    fireEvent.keyDown(input, { key: 'Enter' });
+
+    expect(onRenameChat).not.toHaveBeenCalled();
+  });
+
+  it('does not call onRenameChat when the trimmed input is empty', async () => {
+    const onRenameChat = vi.fn();
+    render(<Sidebar {...baseProps} projects={sampleProjects} onRenameChat={onRenameChat} />);
+
+    fireEvent.contextMenu(screen.getByTestId('chat-c1'));
+    fireEvent.click(screen.getByText('Rename'));
+
+    const input = await screen.findByTestId('chat-c1-rename-input');
+    fireEvent.change(input, { target: { value: '   ' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+
+    expect(onRenameChat).not.toHaveBeenCalled();
+  });
+
+  it('clicking Archive in the menu fires onArchiveChat without a confirm step', () => {
+    const onArchive = vi.fn();
+    render(<Sidebar {...baseProps} projects={sampleProjects} onArchiveChat={onArchive} />);
+
+    fireEvent.contextMenu(screen.getByTestId('chat-c1'));
+    fireEvent.click(screen.getByText('Archive'));
+
+    expect(onArchive).toHaveBeenCalledWith('c1');
+    expect(screen.queryByTestId('session-menu')).not.toBeInTheDocument();
+  });
+
+  it('clicking outside the menu closes it', () => {
+    render(<Sidebar {...baseProps} projects={sampleProjects} onRenameChat={vi.fn()} />);
+
+    fireEvent.contextMenu(screen.getByTestId('chat-c1'));
+    expect(screen.getByTestId('session-menu')).toBeInTheDocument();
+
+    fireEvent.mouseDown(document.body);
+    expect(screen.queryByTestId('session-menu')).not.toBeInTheDocument();
+  });
+
+  it('Escape closes the menu when no input is open', () => {
+    render(<Sidebar {...baseProps} projects={sampleProjects} onRenameChat={vi.fn()} />);
+
+    fireEvent.contextMenu(screen.getByTestId('chat-c1'));
+    expect(screen.getByTestId('session-menu')).toBeInTheDocument();
+
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(screen.queryByTestId('session-menu')).not.toBeInTheDocument();
   });
 });
