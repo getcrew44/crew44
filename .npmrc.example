@@ -1,0 +1,8 @@
+# Copy to .npmrc (gitignored) if Electron or electron-builder downloads
+# are slow or failing on your network — typically a symptom of GitHub
+# release CDN flakiness, common from China.
+#
+# npmmirror.com is Alibaba's open-source mirror service. Fast from China,
+# reachable from anywhere — safe to use globally.
+electron_mirror=https://npmmirror.com/mirrors/electron/
+electron_builder_binaries_mirror=https://npmmirror.com/mirrors/electron-builder-binaries/
