@@ -41,9 +41,9 @@ describe('Sidebar empty states', () => {
     expect(screen.getByText("Jordan's Mac")).toBeInTheDocument();
   });
 
-  it('renames the mobile entry when a device is paired', () => {
+  it('keeps the mobile entry hidden while the feature is incomplete', () => {
     render(<Sidebar {...baseProps} hasMobileDevice />);
-    expect(screen.getByTestId('nav-pair-mobile')).toHaveTextContent('Manage Mobile');
+    expect(screen.queryByTestId('nav-pair-mobile')).not.toBeInTheDocument();
   });
 });
 
