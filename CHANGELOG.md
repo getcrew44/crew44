@@ -14,6 +14,7 @@ All notable changes to this project are documented here. The format is based on 
 
 ### Changed
 - **Handover scratch files moved to chat session storage.** Agents handing off now write intermediate work (plans, drafts, partial diffs, notes) to `~/.crew44/chats/chat-<id>/handover/<short-slug>.md` instead of `tmp/handover/` under the project workdir. Files now sit next to `events.jsonl` and `summary.md`, are reachable by the receiving agent via an absolute path in the handover note, and get cleaned up when the chat is deleted.
+- **Handover note format is now required.** The system prompt spells out the four sections every handover file must contain — `User report`, `Context`, `Goal`, `Suggested approach` — plus a `Handover at:` RFC3339 timestamp. A bare pointer at a file with no sections is no longer treated as a real handover, so the receiving agent can always pick up cold.
 
 ## [0.5.5] - 2026-05-21
 

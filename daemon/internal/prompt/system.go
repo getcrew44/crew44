@@ -270,16 +270,38 @@ func availableAgents(currentAgentID string, agents []model.AgentConfig, chatSess
 }
 
 // handoverScratchInstruction tells the agent where to persist intermediate
-// work before a handover. Files belong with the chat session, not under
-// /tmp or the project workdir — that way the next agent in this chat can
-// find them and they get cleaned up with the chat. Falls back to a chat-
-// scoped relative path when no session dir is available (tests, edge cases).
+// work before a handover and what shape that handover document should take.
+// Files belong with the chat session, not under /tmp or the project workdir
+// — that way the next agent in this chat can find them and they get cleaned
+// up with the chat. Falls back to a chat-scoped relative path when no
+// session dir is available (tests, edge cases).
 func handoverScratchInstruction(chatSessionDir string) string {
 	chatSessionDir = strings.TrimSpace(chatSessionDir)
-	if chatSessionDir == "" {
-		return "- Before handing over, save any meaningful intermediate work (plans, drafts, partial diffs, notes, scope statements, design sketches) to a file under this chat's session directory (alongside `summary.md`) at `handover/<short-slug>.md`, and reference that absolute path in the handover note. Other agents read files; they cannot see your scrollback.\n"
+	location := "this chat's session directory (alongside `summary.md`) at `handover/<short-slug>.md`"
+	pathConstraint := ""
+	if chatSessionDir != "" {
+		location = fmt.Sprintf("this chat's session directory at `%s/handover/<short-slug>.md`", chatSessionDir)
+		pathConstraint = " The chat session directory already exists; do not create files under `/tmp` or the project workdir."
 	}
-	return fmt.Sprintf("- Before handing over, save any meaningful intermediate work (plans, drafts, partial diffs, notes, scope statements, design sketches) to a file under this chat's session directory at `%s/handover/<short-slug>.md`, and reference that absolute path in the handover note. The chat session directory already exists; do not create files under `/tmp` or the project workdir. Other agents read files; they cannot see your scrollback.\n", chatSessionDir)
+	return "- Before handing over, save any meaningful intermediate work to a file under " + location + ", and reference that absolute path in the handover note." + pathConstraint + " The file MUST follow this structure so the receiving agent can pick up cold:\n" +
+		"  ```markdown\n" +
+		"  # <one-line title of the task>\n" +
+		"\n" +
+		"  **Handover at:** <RFC3339 timestamp, e.g. 2026-05-21T19:42:00Z>\n" +
+		"\n" +
+		"  ## User report\n" +
+		"  <Quote or tightly paraphrase what the user asked, including the exact phrasing of any reproduction steps or symptoms. Preserve their words for ambiguous requests.>\n" +
+		"\n" +
+		"  ## Context\n" +
+		"  <Current branch, files already modified, related code paths, prior attempts, and anything you learned that isn't obvious from the diff. Cite paths and line numbers.>\n" +
+		"\n" +
+		"  ## Goal\n" +
+		"  <One or two sentences naming the concrete deliverable the next agent must produce. What does \"done\" look like?>\n" +
+		"\n" +
+		"  ## Suggested approach\n" +
+		"  <Numbered steps you would take next. Specific commands, files to read, comparisons to make. Mark anything you tried that didn't work so the next agent doesn't repeat it.>\n" +
+		"  ```\n" +
+		"  Other agents read files; they cannot see your scrollback. A handover note that just points at the file without these sections is not a handover — fill all four sections.\n"
 }
 
 func handoverProtocol() string {

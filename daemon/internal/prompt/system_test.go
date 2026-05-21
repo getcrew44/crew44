@@ -187,6 +187,11 @@ func TestBuildSystemPromptStructuresRuntimeContext(t *testing.T) {
 		"Route the moment you recognize the scope match",
 		"/home/user/.crew44/chats/chat-abc/handover/<short-slug>.md",
 		"do not create files under `/tmp` or the project workdir",
+		"**Handover at:**",
+		"## User report",
+		"## Context",
+		"## Goal",
+		"## Suggested approach",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("system prompt missing shared routing guidance %q:\n%s", want, got)
