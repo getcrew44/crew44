@@ -3,6 +3,7 @@ import { ActivityIndicator, Platform, Pressable, ScrollView, StyleSheet, Text, V
 import { Agent } from "@/api/types";
 import { ErrorItem, HandoverDividerItem, RenderableTimelineItem, ThinkingItem, ToolItem } from "@/api/events";
 import { AttachmentTray } from "./AttachmentTray";
+import { DisclosureChevron } from "./DisclosureChevron";
 import { RichText } from "./RichText";
 import { colors } from "./theme";
 
@@ -12,9 +13,6 @@ type AgentDisplay = {
   initial: string;
   kind: "agent" | "human";
 };
-
-const CHEVRON_CLOSED = "›";
-const CHEVRON_OPEN = "⌄";
 
 export type LoadedToolDetails = Pick<ToolItem, "path" | "input" | "output" | "detail" | "result">;
 
@@ -39,7 +37,7 @@ function ThoughtChip({ thought }: { thought: ThinkingItem }) {
     <View style={styles.thoughtWrap}>
       <Pressable style={styles.thoughtChip} onPress={() => setOpen(value => !value)}>
         <Text style={styles.thoughtLabel}>{open ? "Thinking" : "Thought"}</Text>
-        <Text style={styles.thoughtCaret}>{open ? CHEVRON_OPEN : CHEVRON_CLOSED}</Text>
+        <DisclosureChevron open={open} />
       </Pressable>
       {open ? <Text style={styles.eventText}>{thought.reasoning}</Text> : null}
     </View>
@@ -143,7 +141,7 @@ function ToolLine({
         style={styles.toolSummary}
         onPress={openTool}
       >
-        <Text style={[styles.toolCaret, !canOpen && styles.toolCaretMuted]}>{open ? CHEVRON_OPEN : CHEVRON_CLOSED}</Text>
+        <DisclosureChevron open={open} muted={!canOpen} style={styles.toolCaret} />
         <Text style={styles.toolName} numberOfLines={1}>{effectiveTool.tool}</Text>
         {effectiveTool.path ? <Text style={styles.toolDetail} numberOfLines={1}>{effectiveTool.path}</Text> : <View style={styles.flex} />}
         <ToolStatus result={effectiveTool.result} />
@@ -234,7 +232,7 @@ function ToolGroupLine({
   return (
     <View style={[styles.toolGroup, open && styles.toolLineOpen]}>
       <Pressable style={styles.toolSummary} onPress={() => setOpen(value => !value)}>
-        <Text style={styles.toolCaret}>{open ? CHEVRON_OPEN : CHEVRON_CLOSED}</Text>
+        <DisclosureChevron open={open} style={styles.toolCaret} />
         <Text style={styles.toolGroupTitle}>Used {item.events.length} tools</Text>
         {open ? <View style={styles.flex} /> : <Text style={styles.toolDetail} numberOfLines={1}>{toolGroupSummary(item.events)}</Text>}
         <ToolStatus result={status} />
@@ -445,11 +443,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: "600"
   },
-  thoughtCaret: {
-    color: colors.muted,
-    fontSize: 12,
-    fontWeight: "700"
-  },
   handoverRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -513,13 +506,7 @@ const styles = StyleSheet.create({
     gap: 8
   },
   toolCaret: {
-    color: colors.muted,
-    fontSize: 12,
-    fontWeight: "700",
     width: 12
-  },
-  toolCaretMuted: {
-    opacity: 0.35
   },
   toolGroupDetails: {
     borderTopWidth: StyleSheet.hairlineWidth,

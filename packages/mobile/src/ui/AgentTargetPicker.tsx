@@ -1,6 +1,7 @@
 import React from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { Agent } from "@/api/types";
+import { DisclosureChevron } from "./DisclosureChevron";
 import { colors } from "./theme";
 
 function initialFor(agent?: Agent): string {
@@ -15,7 +16,6 @@ function AgentAvatar({ agent, size = 20 }: { agent?: Agent; size?: number }) {
   );
 }
 
-const CHEVRON_DOWN = "⌄";
 const CHECK = "✓";
 
 export function AgentTargetPicker({
@@ -64,7 +64,7 @@ export function AgentTargetPicker({
       >
         <AgentAvatar agent={selected} size={20} />
         <Text style={styles.name} numberOfLines={1}>{selected.name}</Text>
-        <Text style={styles.caret}>{CHEVRON_DOWN}</Text>
+        <DisclosureChevron open style={styles.caret} />
       </Pressable>
     </View>
   );
@@ -110,9 +110,7 @@ const styles = StyleSheet.create({
     flexShrink: 1
   },
   caret: {
-    color: colors.muted,
-    fontSize: 12,
-    fontWeight: "800"
+    marginLeft: 1
   },
   menu: {
     position: "absolute",
