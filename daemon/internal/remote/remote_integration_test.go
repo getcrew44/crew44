@@ -3,6 +3,7 @@ package remote_test
 import (
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -173,16 +174,46 @@ func dialDeviceOverRelay(t *testing.T, relayURL string, offer remote.PairingOffe
 	return transport
 }
 
+// eventuallyDialRelayClient dials the relay's client role and waits until
+// the daemon's control connection has registered so the server greets us
+// with "desktop_online" instead of "desktop_offline". The relay accepts
+// the client websocket even before control is in place — it just immediately
+// sends desktop_offline and closes — so polling on dial success alone races
+// with the daemon's relay-client goroutine in CI. We poll the first frame
+// and retry until we either see desktop_online or hit the deadline.
+//
+// On success the desktop_online greeting has been consumed, so callers
+// proceed directly to the noise handshake. The deadline is generous
+// (5s) so a slow CI machine doesn't flake on startup contention.
 func eventuallyDialRelayClient(t *testing.T, relayURL, serverID string) *websocket.Conn {
 	t.Helper()
 	wsURL := relayURL + "?role=client&server_id=" + serverID
 	var lastErr error
-	for deadline := time.Now().Add(2 * time.Second); time.Now().Before(deadline); {
+	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); {
 		conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
-		if err == nil {
+		if err != nil {
+			lastErr = err
+			time.Sleep(25 * time.Millisecond)
+			continue
+		}
+		_ = conn.SetReadDeadline(time.Now().Add(500 * time.Millisecond))
+		var greeting struct {
+			Type string `json:"type"`
+		}
+		if err := conn.ReadJSON(&greeting); err != nil {
+			lastErr = err
+			conn.Close()
+			time.Sleep(25 * time.Millisecond)
+			continue
+		}
+		_ = conn.SetReadDeadline(time.Time{})
+		if greeting.Type == "desktop_online" {
 			return conn
 		}
-		lastErr = err
+		// desktop_offline (or anything else) — relay has already closed
+		// the connection, so retry the dial after a small backoff.
+		conn.Close()
+		lastErr = fmt.Errorf("relay greeted with %q", greeting.Type)
 		time.Sleep(25 * time.Millisecond)
 	}
 	t.Fatalf("dial relay client: %v", lastErr)
@@ -191,7 +222,7 @@ func eventuallyDialRelayClient(t *testing.T, relayURL, serverID string) *websock
 
 func handshakePairingClient(t *testing.T, conn *websocket.Conn, offer remote.PairingOffer) *remote.NoiseTransport {
 	t.Helper()
-	readRelayDesktopOnline(t, conn)
+	// desktop_online greeting is already consumed by eventuallyDialRelayClient.
 	if err := conn.WriteJSON(map[string]string{"type": "noise_init", "mode": remote.PairingMode}); err != nil {
 		t.Fatalf("write pairing hello: %v", err)
 	}
@@ -225,7 +256,7 @@ func handshakePairingClient(t *testing.T, conn *websocket.Conn, offer remote.Pai
 
 func handshakeDeviceClient(t *testing.T, conn *websocket.Conn, offer remote.PairingOffer, deviceKey noise.DHKey) *remote.NoiseTransport {
 	t.Helper()
-	readRelayDesktopOnline(t, conn)
+	// desktop_online greeting is already consumed by eventuallyDialRelayClient.
 	if err := conn.WriteJSON(map[string]string{"type": "noise_init", "mode": remote.DeviceMode}); err != nil {
 		t.Fatalf("write device hello: %v", err)
 	}
@@ -262,19 +293,6 @@ func handshakeDeviceClient(t *testing.T, conn *websocket.Conn, offer remote.Pair
 		t.Fatalf("send device handshake 3: %v", err)
 	}
 	return remote.NewNoiseTransport(conn, send, recv)
-}
-
-func readRelayDesktopOnline(t *testing.T, conn *websocket.Conn) {
-	t.Helper()
-	var status struct {
-		Type string `json:"type"`
-	}
-	if err := conn.ReadJSON(&status); err != nil {
-		t.Fatalf("read relay desktop status: %v", err)
-	}
-	if status.Type != "desktop_online" {
-		t.Fatalf("unexpected relay desktop status: %q", status.Type)
-	}
 }
 
 func rpcCall(t *testing.T, conn *websocket.Conn, method string, params any) json.RawMessage {
