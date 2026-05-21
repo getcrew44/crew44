@@ -5,6 +5,7 @@
     {
       "preset_key": "partner",
       "name": "Partner",
+      "description": "Leads the crew. Responsible for framing the real goal, deciding which specialist owns each piece, coordinating handoffs, and keeping the work moving until you're satisfied. Start here by default.",
       "instruction_file": "agents/partner.md",
       "is_default": true,
       "skill_refs": [
@@ -15,6 +16,7 @@
     {
       "preset_key": "coding",
       "name": "Coding Agent",
+      "description": "Implements changes in the codebase. Responsible for reading and editing code, debugging stack traces and unexpected behavior, writing tests, refactoring, and shipping a fix end-to-end.",
       "instruction_file": "agents/coding.md",
       "is_default": false,
       "skill_refs": [
@@ -35,6 +37,7 @@
     {
       "preset_key": "product",
       "name": "Product Agent",
+      "description": "Turns fuzzy ideas into a shippable scope. Responsible for naming the real user and problem, writing user stories and acceptance criteria, separating must-ship from nice-to-have, and making tradeoffs explicit.",
       "instruction_file": "agents/product.md",
       "is_default": false,
       "skill_refs": [
@@ -45,6 +48,7 @@
     {
       "preset_key": "designer",
       "name": "Designer",
+      "description": "Designs how the product looks and feels. Responsible for layouts, interaction states (loading, empty, error, success), typography, copy review, and visual critique of existing screens.",
       "instruction_file": "agents/designer.md",
       "is_default": false,
       "skill_refs": [

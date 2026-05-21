@@ -412,7 +412,7 @@ func (a *App) GetAgent(id string) (model.AgentConfig, error) {
 	return record, a.mapError(err)
 }
 
-func (a *App) CreateAgent(name, instruction, runtimeID, modelName string) (model.AgentConfig, error) {
+func (a *App) CreateAgent(name, description, instruction, runtimeID, modelName string) (model.AgentConfig, error) {
 	runtimeRecord, err := a.requireAvailableRuntime(runtimeID)
 	if err != nil {
 		return model.AgentConfig{}, err
@@ -420,10 +420,15 @@ func (a *App) CreateAgent(name, instruction, runtimeID, modelName string) (model
 	if modelName == "" {
 		modelName = defaultRuntimeModel(runtimeRecord)
 	}
+	description = strings.TrimSpace(description)
+	if description == "" {
+		description = model.DeriveAgentDescription(instruction)
+	}
 	now := time.Now().UTC()
 	agent := model.AgentConfig{
 		ID:          id.New(),
 		Name:        name,
+		Description: description,
 		Instruction: instruction,
 		RuntimeID:   runtimeID,
 		Model:       modelName,
@@ -437,7 +442,17 @@ func (a *App) CreateAgent(name, instruction, runtimeID, modelName string) (model
 	return agent, nil
 }
 
-func (a *App) UpdateAgent(agent model.AgentConfig) (model.AgentConfig, error) {
+// AgentPatch wraps an AgentConfig payload with explicit presence flags for
+// fields whose absent-vs-empty distinction matters. Today only Description
+// needs this: omitting the key leaves the existing value alone; sending an
+// empty string asks the server to regenerate from the instruction.
+type AgentPatch struct {
+	model.AgentConfig
+	DescriptionSet bool
+}
+
+func (a *App) UpdateAgent(patch AgentPatch) (model.AgentConfig, error) {
+	agent := patch.AgentConfig
 	current, err := a.store.GetAgent(agent.ID)
 	if err != nil {
 		return model.AgentConfig{}, a.mapError(err)
@@ -447,6 +462,16 @@ func (a *App) UpdateAgent(agent model.AgentConfig) (model.AgentConfig, error) {
 	}
 	if agent.Instruction != "" {
 		current.Instruction = agent.Instruction
+	}
+	if patch.DescriptionSet {
+		next := strings.TrimSpace(agent.Description)
+		if next == "" {
+			next = model.DeriveAgentDescription(current.Instruction)
+		}
+		current.Description = next
+	} else if current.Description == "" {
+		// Lazy backfill for legacy agents stored before this field existed.
+		current.Description = model.DeriveAgentDescription(current.Instruction)
 	}
 	runtimeChanged := false
 	if agent.RuntimeID != "" {

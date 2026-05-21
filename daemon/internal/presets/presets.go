@@ -57,6 +57,7 @@ type Manifest struct {
 type ManifestAgent struct {
 	PresetKey       string   `json:"preset_key"`
 	Name            string   `json:"name"`
+	Description     string   `json:"description,omitempty"`
 	InstructionFile string   `json:"instruction_file"`
 	IsDefault       bool     `json:"is_default"`
 	SkillRefs       []string `json:"skill_refs"`

@@ -2,6 +2,7 @@ package presets
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/getcrew44/crew44/daemon/internal/id"
@@ -105,9 +106,14 @@ func resetOneAgent(store Store, manifest Manifest, manifestAgent ManifestAgent, 
 	}
 
 	now := nowUTC()
+	description := strings.TrimSpace(manifestAgent.Description)
+	if description == "" {
+		description = model.DeriveAgentDescription(instruction)
+	}
 	resetAgent := model.AgentConfig{
 		ID:          firstNonEmpty(current.ID, foundID),
 		Name:        manifestAgent.Name,
+		Description: description,
 		Instruction: instruction,
 		RuntimeID:   runtimeID,
 		Model:       modelName,

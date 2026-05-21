@@ -2,6 +2,7 @@ package presets
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/getcrew44/crew44/daemon/internal/id"
 	"github.com/getcrew44/crew44/daemon/internal/model"
@@ -113,9 +114,14 @@ func applyPresetSeed(store Store, manifest Manifest, runtime model.RuntimeRecord
 		}
 
 		now := nowUTC()
+		description := strings.TrimSpace(agent.Description)
+		if description == "" {
+			description = model.DeriveAgentDescription(instruction)
+		}
 		newAgent := model.AgentConfig{
 			ID:          id.New(),
 			Name:        agent.Name,
+			Description: description,
 			Instruction: instruction,
 			RuntimeID:   runtime.ID,
 			Model:       defaultRuntimeModel(runtime),
