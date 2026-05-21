@@ -15,31 +15,22 @@ import (
 type LocalScanner struct{}
 
 type providerSpec struct {
-	Provider    string
-	PathEnv     string
-	LegacyEnv   string
-	ModelEnv    string
-	LegacyModel string
-	DefaultBin  string
+	Provider   string
+	PathEnv    string
+	ModelEnv   string
+	DefaultBin string
 }
 
 var localProviderSpecs = []providerSpec{
-	{
-		Provider:    "claude",
-		PathEnv:     "CREW44_CLAUDE_PATH",
-		LegacyEnv:   "MULTICA_CLAUDE_PATH",
-		ModelEnv:    "CREW44_CLAUDE_MODEL",
-		LegacyModel: "MULTICA_CLAUDE_MODEL",
-		DefaultBin:  "claude",
-	},
-	{
-		Provider:    "codex",
-		PathEnv:     "CREW44_CODEX_PATH",
-		LegacyEnv:   "MULTICA_CODEX_PATH",
-		ModelEnv:    "CREW44_CODEX_MODEL",
-		LegacyModel: "MULTICA_CODEX_MODEL",
-		DefaultBin:  "codex",
-	},
+	{Provider: "claude", PathEnv: "CREW44_CLAUDE_PATH", ModelEnv: "CREW44_CLAUDE_MODEL", DefaultBin: "claude"},
+	{Provider: "codex", PathEnv: "CREW44_CODEX_PATH", ModelEnv: "CREW44_CODEX_MODEL", DefaultBin: "codex"},
+	{Provider: "cursor", PathEnv: "CREW44_CURSOR_PATH", ModelEnv: "CREW44_CURSOR_MODEL", DefaultBin: "cursor-agent"},
+	{Provider: "gemini", PathEnv: "CREW44_GEMINI_PATH", ModelEnv: "CREW44_GEMINI_MODEL", DefaultBin: "gemini"},
+	{Provider: "hermes", PathEnv: "CREW44_HERMES_PATH", ModelEnv: "CREW44_HERMES_MODEL", DefaultBin: "hermes"},
+	{Provider: "kimi", PathEnv: "CREW44_KIMI_PATH", ModelEnv: "CREW44_KIMI_MODEL", DefaultBin: "kimi"},
+	{Provider: "opencode", PathEnv: "CREW44_OPENCODE_PATH", ModelEnv: "CREW44_OPENCODE_MODEL", DefaultBin: "opencode"},
+	{Provider: "openclaw", PathEnv: "CREW44_OPENCLAW_PATH", ModelEnv: "CREW44_OPENCLAW_MODEL", DefaultBin: "openclaw"},
+	{Provider: "pi", PathEnv: "CREW44_PI_PATH", ModelEnv: "CREW44_PI_MODEL", DefaultBin: "pi"},
 }
 
 func (LocalScanner) Scan(ctx context.Context) ([]model.RuntimeRecord, error) {
@@ -67,10 +58,7 @@ func (LocalScanner) Scan(ctx context.Context) ([]model.RuntimeRecord, error) {
 			runtimeScanDebugf(debug, "provider=%s min_version=failed error=%q", spec.Provider, err.Error())
 			continue
 		}
-		modelName := firstNonEmpty(
-			strings.TrimSpace(os.Getenv(spec.ModelEnv)),
-			strings.TrimSpace(os.Getenv(spec.LegacyModel)),
-		)
+		modelName := strings.TrimSpace(os.Getenv(spec.ModelEnv))
 		record := model.RuntimeRecord{
 			ID:         spec.Provider,
 			Provider:   spec.Provider,
@@ -93,9 +81,6 @@ func (LocalScanner) Scan(ctx context.Context) ([]model.RuntimeRecord, error) {
 func runtimePathCandidate(spec providerSpec) (string, string) {
 	if value := strings.TrimSpace(os.Getenv(spec.PathEnv)); value != "" {
 		return value, spec.PathEnv
-	}
-	if value := strings.TrimSpace(os.Getenv(spec.LegacyEnv)); value != "" {
-		return value, spec.LegacyEnv
 	}
 	return spec.DefaultBin, "default"
 }
@@ -131,16 +116,22 @@ func displayRuntimeName(provider string) string {
 		return "Claude Code"
 	case "codex":
 		return "Codex"
+	case "cursor":
+		return "Cursor Agent"
+	case "gemini":
+		return "Gemini CLI"
+	case "hermes":
+		return "Hermes"
+	case "kimi":
+		return "Kimi"
+	case "opencode":
+		return "OpenCode"
+	case "openclaw":
+		return "OpenClaw"
+	case "pi":
+		return "Pi"
 	default:
 		return strings.Title(provider)
 	}
 }
 
-func firstNonEmpty(values ...string) string {
-	for _, value := range values {
-		if strings.TrimSpace(value) != "" {
-			return value
-		}
-	}
-	return ""
-}

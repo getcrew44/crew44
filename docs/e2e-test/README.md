@@ -19,11 +19,17 @@ The machine running this suite must already have authenticated local CLIs for:
 - `codex`
 - `claude`
 
-`runtimes.rescan` uses the multica-derived local scan path now wired
-into this repo. The suite expects exactly two detected runtimes today:
+`runtimes.rescan` runs the daemon's local scanner, which checks PATH (and
+the Windows registry on Windows) for the supported CLIs. The suite expects
+the following runtimes to be detected when their CLIs are installed:
 
-- `codex`
 - `claude`
+- `codex`
+- `cursor` (cursor-agent)
+- `gemini`
+- `opencode`
+- `openclaw`
+- `kimi`
 
 ## Test Commands
 
