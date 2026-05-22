@@ -3485,6 +3485,17 @@ export default function TaskView({ chatId, agentsMap, skills = [], projects = []
       streamCleanupRef.current();
       setIsStreaming(false);
       setPendingSteers([]);
+      // Freeze the header's elapsed counter at the moment of Stop. The
+      // daemon closes the run asynchronously and we've just disposed
+      // the SSE subscription, so chat.stream.status in local state
+      // would otherwise stay "streaming" forever — leaving the
+      // per-second tick running with Date.now() as the end time.
+      const stoppedAt = new Date(Date.now()).toISOString();
+      setChat(prev => prev ? {
+        ...prev,
+        stream: { ...(prev.stream || {}), status: 'idle', pending_steers: [] },
+        updated_at: stoppedAt,
+      } : prev);
     } catch (err) {
       console.error('Cancel failed:', err);
     }
