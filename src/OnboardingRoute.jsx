@@ -37,7 +37,7 @@ export const DEFAULT_CREW = [
   },
   {
     key: 'product',
-    name: 'Product Agent',
+    name: 'Product Lead',
     role: 'Product & UX lens',
     blurb: 'Reviews work from the user’s point of view, catches rough edges, and proposes copy and flow improvements.',
     instruction:
@@ -284,7 +284,7 @@ function WelcomeStep({ onNext }) {
           offset={28}
         />
         <PreviewCard
-          agentKey="product" agentName="Product Agent" code="CRW-38"
+          agentKey="product" agentName="Product Lead" code="CRW-38"
           body="Reviewed the draft — left 3 notes on copy and one on the empty state. Otherwise looks shippable."
           status="In review" statusColor="#3E7A4A" statusDot="#5B9C5F"
           offset={0}

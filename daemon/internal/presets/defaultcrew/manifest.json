@@ -36,24 +36,32 @@
     },
     {
       "preset_key": "product",
-      "name": "Product Agent",
-      "description": "Turns fuzzy ideas into a shippable scope. Responsible for naming the real user and problem, writing user stories and acceptance criteria, separating must-ship from nice-to-have, and making tradeoffs explicit.",
+      "name": "Product Lead",
+      "description": "Turns fuzzy ideas into shippable scope. Responsible for naming the real user and problem, writing user stories and acceptance criteria, separating must-ship from nice-to-have, surfacing tradeoffs, and being a sharp thinking partner before the spec gets written.",
       "instruction_file": "agents/product.md",
       "is_default": false,
       "skill_refs": [
         "product/product-review",
-        "product/requirements-shaping"
+        "product/requirements-shaping",
+        "product/write-spec",
+        "product/product-brainstorming",
+        "product/synthesize-research",
+        "product/competitive-brief"
       ]
     },
     {
       "preset_key": "designer",
       "name": "Designer",
-      "description": "Designs how the product looks and feels. Responsible for layouts, interaction states (loading, empty, error, success), typography, copy review, and visual critique of existing screens.",
+      "description": "Designs how the product looks and feels. Responsible for layouts, interaction states (loading, empty, error, success), typography, UX copy, accessibility, design handoff specs, and visual critique of existing screens.",
       "instruction_file": "agents/designer.md",
       "is_default": false,
       "skill_refs": [
         "designer/interaction-review",
-        "designer/visual-system-review"
+        "designer/visual-system-review",
+        "designer/design-critique",
+        "designer/design-handoff",
+        "designer/ux-copy",
+        "designer/accessibility-review"
       ]
     }
   ]

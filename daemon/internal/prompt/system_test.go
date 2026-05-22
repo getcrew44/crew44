@@ -135,7 +135,7 @@ func TestBuildSystemPromptStructuresRuntimeContext(t *testing.T) {
 	}
 	other := model.AgentConfig{
 		ID:          "agent-b",
-		Name:        "Product Agent",
+		Name:        "Product Lead",
 		Instruction: "Shape product requirements.",
 		RuntimeID:   "codex",
 	}
@@ -199,7 +199,7 @@ func TestBuildSystemPromptStructuresRuntimeContext(t *testing.T) {
 	}
 	for _, leak := range []string{
 		"Coding Agent —",
-		"Product Agent —",
+		"Product Lead —",
 		"Designer —",
 	} {
 		if strings.Contains(got, leak) {
@@ -212,7 +212,7 @@ func TestBuildSystemPromptUsesAgentDescriptionInHandoverList(t *testing.T) {
 	current := model.AgentConfig{ID: "agent-a", Name: "Aria"}
 	withDescription := model.AgentConfig{
 		ID:          "agent-b",
-		Name:        "Product Agent",
+		Name:        "Product Lead",
 		Description: "Product and UX reasoning specialist. Turns intent into scope and acceptance criteria.",
 		Instruction: "## Long Instruction Block\n\nThis very long instruction would otherwise be inlined…",
 	}
