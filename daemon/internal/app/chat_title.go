@@ -76,15 +76,27 @@ func (a *App) summarizeChatTitle(chatID, agentID, firstUserMessage string) error
 		RuntimeID: agent.RuntimeID,
 		Model:     agent.Model,
 	}
+	// Give the title call its own isolation shell (RuntimeEnvDir + WorkDir
+	// scoped to a dedicated "-title" sibling of the agent's main dir).
+	// Without this, prepareSkillEnvironment falls back to the user's host
+	// config, so the title call inherits the host's MCP servers, tool
+	// allowlists, and skills — and runs them under the runtimes that
+	// hardcode bypass-permissions / --allow-all / --yolo, with user
+	// content sitting directly in the prompt. Reusing the chat run's
+	// RuntimeEnvDir would race the main turn on the shared claude-config
+	// /skills tree (the original race this code was patched to dodge).
+	titleEnvDir := a.store.RuntimeEnvTitleDir(agent.ID)
 
 	ctx, cancel := context.WithTimeout(context.Background(), chatTitleSummaryTimeout)
 	defer cancel()
 
 	var collected strings.Builder
 	_, err = a.engine.Run(ctx, runtime.RunRequest{
-		Runtime: runtimeRecord,
-		Agent:   titlerAgent,
-		Prompt:  ChatTitleSummarySentinel + userMessage,
+		Runtime:       runtimeRecord,
+		Agent:         titlerAgent,
+		Prompt:        ChatTitleSummarySentinel + userMessage,
+		RuntimeEnvDir: titleEnvDir,
+		WorkDir:       titleEnvDir,
 	}, func(ev runtime.StreamEvent) error {
 		if ev.Type == model.EventTypeMessage && ev.Message != nil &&
 			ev.Message.Role == model.MessageRoleAssistant {

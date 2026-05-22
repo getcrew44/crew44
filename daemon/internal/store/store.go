@@ -87,6 +87,15 @@ func (s *Store) RuntimeEnvDir(agentID string) string {
 	return filepath.Join(s.root, "runtime-env", "agent-"+agentID)
 }
 
+// RuntimeEnvTitleDir is a per-agent runtime env dir scoped to the auto-title
+// summarizer. It lives alongside the main RuntimeEnvDir so the title call can
+// still claim isolation (separate claude-config / codex-home) without racing
+// the chat run on the same skills tree. The summarizer ships no AgentSkills,
+// so this dir just holds an empty isolation shell for runtimes that honor it.
+func (s *Store) RuntimeEnvTitleDir(agentID string) string {
+	return filepath.Join(s.root, "runtime-env", "agent-"+agentID+"-title")
+}
+
 func (s *Store) ListRuntimes() ([]model.RuntimeRecord, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

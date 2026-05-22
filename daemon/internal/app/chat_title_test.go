@@ -231,13 +231,21 @@ func (e *requestCapturingTitleEngine) Run(_ context.Context, request runtime.Run
 	})
 }
 
-// TestSummarizeChatTitleDoesNotShareRuntimeEnvDir guards against a race the
-// chat run hits when the title call uses the same runtime env dir: both
-// goroutines call prepareSkillEnvironment → writeSkillFiles on the same
-// claude-config/skills tree, and concurrent RemoveAll/MkdirAll/WriteFile
-// surfaces as "invalid argument" on macOS. Titles don't need workdir,
-// runtime env dir, or skills, so the summary request leaves them unset.
-func TestSummarizeChatTitleDoesNotShareRuntimeEnvDir(t *testing.T) {
+// TestSummarizeChatTitleUsesScopedRuntimeEnvDir locks in two constraints
+// the title call has to satisfy together: (1) it must NOT share the chat
+// run's RuntimeEnvDir — the original race that fired this code was both
+// goroutines hitting writeSkillFiles on the same claude-config/skills
+// tree, where concurrent RemoveAll/MkdirAll/WriteFile surfaced as
+// "invalid argument" on macOS; (2) it MUST keep some isolation shell of
+// its own so prepareSkillEnvironment doesn't fall back to the user's
+// host config — without that, the title call inherits host MCP servers,
+// tool allowlists, and skills and runs them under runtimes that
+// hardcode bypass-permissions / --allow-all / --yolo, with user content
+// embedded directly in the prompt (a textbook prompt-injection /
+// privilege boundary). The dedicated "-title" sibling dir satisfies
+// both: separate tree, still isolated, and AgentSkills stays empty so
+// the call ships no tools-by-construction.
+func TestSummarizeChatTitleUsesScopedRuntimeEnvDir(t *testing.T) {
 	engine := &requestCapturingTitleEngine{response: "Optimize Designer Prompt"}
 	a := newTitleEngineAppWith(t, engine)
 	agentID := firstAgentID(t, a)
@@ -254,14 +262,26 @@ func TestSummarizeChatTitleDoesNotShareRuntimeEnvDir(t *testing.T) {
 		t.Fatalf("summarizeChatTitle: %v", err)
 	}
 
-	if engine.request.WorkDir != "" {
-		t.Fatalf("summary WorkDir = %q, want empty (avoids racing chat run)", engine.request.WorkDir)
+	chatEnvDir := a.store.RuntimeEnvDir(agentID)
+	titleEnvDir := a.store.RuntimeEnvTitleDir(agentID)
+
+	if engine.request.RuntimeEnvDir == "" {
+		t.Fatal("summary RuntimeEnvDir is empty — would fall back to host config and inherit MCP/allowlist/skill surface")
 	}
-	if engine.request.RuntimeEnvDir != "" {
-		t.Fatalf("summary RuntimeEnvDir = %q, want empty (avoids racing chat run on shared skills dir)", engine.request.RuntimeEnvDir)
+	if engine.request.RuntimeEnvDir == chatEnvDir {
+		t.Fatalf("summary RuntimeEnvDir = %q matches chat env dir — would race the chat run on the shared skills tree", engine.request.RuntimeEnvDir)
+	}
+	if engine.request.RuntimeEnvDir != titleEnvDir {
+		t.Fatalf("summary RuntimeEnvDir = %q, want %q (dedicated title-scope dir)", engine.request.RuntimeEnvDir, titleEnvDir)
+	}
+	if engine.request.WorkDir == "" {
+		t.Fatal("summary WorkDir is empty — fallback runtimes need a non-empty workdir to resolve their per-runtime skills dir")
+	}
+	if engine.request.WorkDir == project.Workdir {
+		t.Fatalf("summary WorkDir = %q matches the project workdir — title call must not touch the user's project tree", engine.request.WorkDir)
 	}
 	if len(engine.request.AgentSkills) != 0 {
-		t.Fatalf("summary AgentSkills = %d, want 0 (avoids racing chat run on shared skills dir)", len(engine.request.AgentSkills))
+		t.Fatalf("summary AgentSkills = %d, want 0 (ship no tools by construction)", len(engine.request.AgentSkills))
 	}
 }
 
