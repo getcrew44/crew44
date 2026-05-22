@@ -156,7 +156,7 @@ func (e *titleEngine) Run(_ context.Context, request runtime.RunRequest, emit fu
 	e.calls.Add(1)
 	// Branch on whether this is the title-summary call so the same engine
 	// can serve both the main chat run and the post-run summarizer.
-	if strings.Contains(request.Agent.Instruction, ChatTitleSummarySentinel) {
+	if strings.HasPrefix(request.Prompt, ChatTitleSummarySentinel) {
 		return runtime.RunResult{}, emit(runtime.StreamEvent{
 			Type: model.EventTypeMessage,
 			Message: &model.MessagePayload{
@@ -212,6 +212,56 @@ func TestSummarizeChatTitleWritesCleanedTitleBack(t *testing.T) {
 	}
 	if got.Title != "Refactor Login Flow" {
 		t.Fatalf("title = %q, want Refactor Login Flow (quotes stripped)", got.Title)
+	}
+}
+
+type requestCapturingTitleEngine struct {
+	response string
+	request  runtime.RunRequest
+}
+
+func (e *requestCapturingTitleEngine) Run(_ context.Context, request runtime.RunRequest, emit func(runtime.StreamEvent) error) (runtime.RunResult, error) {
+	e.request = request
+	return runtime.RunResult{}, emit(runtime.StreamEvent{
+		Type: model.EventTypeMessage,
+		Message: &model.MessagePayload{
+			Role:    model.MessageRoleAssistant,
+			Content: e.response,
+		},
+	})
+}
+
+// TestSummarizeChatTitleDoesNotShareRuntimeEnvDir guards against a race the
+// chat run hits when the title call uses the same runtime env dir: both
+// goroutines call prepareSkillEnvironment → writeSkillFiles on the same
+// claude-config/skills tree, and concurrent RemoveAll/MkdirAll/WriteFile
+// surfaces as "invalid argument" on macOS. Titles don't need workdir,
+// runtime env dir, or skills, so the summary request leaves them unset.
+func TestSummarizeChatTitleDoesNotShareRuntimeEnvDir(t *testing.T) {
+	engine := &requestCapturingTitleEngine{response: "Optimize Designer Prompt"}
+	a := newTitleEngineAppWith(t, engine)
+	agentID := firstAgentID(t, a)
+	project, err := a.CreateProject("Project", t.TempDir(), agentID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	chat, err := a.CreateChat(project.ID, "raw first message", agentID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := a.summarizeChatTitle(chat.ID, agentID, "raw first message"); err != nil {
+		t.Fatalf("summarizeChatTitle: %v", err)
+	}
+
+	if engine.request.WorkDir != "" {
+		t.Fatalf("summary WorkDir = %q, want empty (avoids racing chat run)", engine.request.WorkDir)
+	}
+	if engine.request.RuntimeEnvDir != "" {
+		t.Fatalf("summary RuntimeEnvDir = %q, want empty (avoids racing chat run on shared skills dir)", engine.request.RuntimeEnvDir)
+	}
+	if len(engine.request.AgentSkills) != 0 {
+		t.Fatalf("summary AgentSkills = %d, want 0 (avoids racing chat run on shared skills dir)", len(engine.request.AgentSkills))
 	}
 }
 
@@ -282,7 +332,7 @@ type blockingChatEngine struct {
 }
 
 func (e *blockingChatEngine) Run(ctx context.Context, request runtime.RunRequest, emit func(runtime.StreamEvent) error) (runtime.RunResult, error) {
-	if strings.Contains(request.Agent.Instruction, ChatTitleSummarySentinel) {
+	if strings.HasPrefix(request.Prompt, ChatTitleSummarySentinel) {
 		return runtime.RunResult{}, emit(runtime.StreamEvent{
 			Type: model.EventTypeMessage,
 			Message: &model.MessagePayload{
