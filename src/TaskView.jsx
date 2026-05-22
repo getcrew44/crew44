@@ -2661,7 +2661,11 @@ function QueuedSteerCard({ item, isLast, queueCount, onCancel, onEdit, onDeliver
 }
 
 function Composer({ onSend, isStreaming, onCancel, pendingSteers = [], onCancelSteer, onEditSteer, onDeliverSteers, agentsMap, skills = [], projects = [], chatId, projectId, defaultTargetAgentId, targetAgentId, onChangeTargetAgent }) {
+  const composerDraftKey = React.useMemo(() => (
+    chatId && projectId ? `${projectId}:${chatId}` : ''
+  ), [chatId, projectId]);
   const [val, setVal] = React.useState(() => readComposerDraft(projectId, chatId).text || '');
+  const [draftReadyKey, setDraftReadyKey] = React.useState(composerDraftKey);
   const [attachments, setAttachments] = React.useState([]);
   const [cursor, setCursor] = React.useState(0);
   const [activeSuggestion, setActiveSuggestion] = React.useState(0);
@@ -2701,20 +2705,24 @@ function Composer({ onSend, isStreaming, onCancel, pendingSteers = [], onCancelS
   }, [val]);
 
   React.useEffect(() => {
-    if (!chatId || !projectId) return;
+    if (!composerDraftKey) {
+      setDraftReadyKey('');
+      return;
+    }
     const draft = readComposerDraft(projectId, chatId);
     setVal(draft.text || '');
     setAttachments([]);
     if (draft.targetAgentId) onChangeTargetAgent?.(draft.targetAgentId);
-  }, [chatId, projectId, onChangeTargetAgent]);
+    setDraftReadyKey(composerDraftKey);
+  }, [chatId, composerDraftKey, projectId, onChangeTargetAgent]);
 
   React.useEffect(() => {
-    if (!chatId || !projectId) return;
+    if (!composerDraftKey || draftReadyKey !== composerDraftKey) return;
     writeComposerDraft(projectId, chatId, {
       text: val,
       targetAgentId: targetAgentId && targetAgentId !== defaultTargetAgentId ? targetAgentId : '',
     });
-  }, [chatId, projectId, defaultTargetAgentId, targetAgentId, val]);
+  }, [chatId, composerDraftKey, defaultTargetAgentId, draftReadyKey, projectId, targetAgentId, val]);
 
   const activeToken = React.useMemo(() => suggestionBounds(val, cursor), [val, cursor]);
 
@@ -3511,6 +3519,7 @@ export default function TaskView({ chatId, agentsMap, skills = [], projects = []
 
   const drawerWidthExpr = `calc(${((1 - splitRatio) * 100).toFixed(3)}% - 3px)`;
   const drawerTransition = dragging ? 'none' : 'width 260ms cubic-bezier(0.22, 1, 0.36, 1), opacity 220ms ease';
+  const activeChat = chat?.id === chatId ? chat : null;
 
   return (
     <div
@@ -3589,8 +3598,8 @@ export default function TaskView({ chatId, agentsMap, skills = [], projects = []
           skills={skills}
           projects={projects}
           chatId={chatId}
-          projectId={chat?.project_id || ''}
-          defaultTargetAgentId={chat?.current_agent_id || chat?.main_agent_id || null}
+          projectId={activeChat?.project_id || ''}
+          defaultTargetAgentId={activeChat?.current_agent_id || activeChat?.main_agent_id || null}
           targetAgentId={targetAgentId}
           onChangeTargetAgent={setTargetAgentId}
         />

@@ -10,6 +10,7 @@ import { primeAudioContext } from './audio.js';
 import { textareaCaretPoint } from './textareaCaret.js';
 import {
   clearComposerDraft,
+  newTaskDraftChatId,
   readComposerDraft,
   readLastNewChatProjectId,
   writeComposerDraft,
@@ -170,8 +171,12 @@ const SUGGESTIONS = [
 const MENTION_MENU_WIDTH = 260;
 
 export default function NewTaskRoute({ projects, agents, skills = [], onNewTask, onExistingFolder, initialProjectId }) {
-  const initialStoredProjectId = React.useMemo(() => initialProjectId || readLastNewChatProjectId(), [initialProjectId]);
-  const initialDraft = React.useMemo(() => readComposerDraft(initialStoredProjectId, ''), [initialStoredProjectId]);
+  const draftStorageChatId = React.useMemo(() => newTaskDraftChatId(), []);
+  const initialDraft = React.useMemo(() => readComposerDraft('', draftStorageChatId), [draftStorageChatId]);
+  const initialStoredProjectId = React.useMemo(
+    () => initialProjectId || readLastNewChatProjectId(),
+    [initialProjectId]
+  );
   const [val, setVal] = React.useState(initialDraft.text || '');
   const [attachments, setAttachments] = React.useState([]);
   const [cursor, setCursor] = React.useState(0);
@@ -187,6 +192,7 @@ export default function NewTaskRoute({ projects, agents, skills = [], onNewTask,
   const listboxRef = React.useRef(null);
   const selectedProjectExists = projects.some(project => project.id === selectedProjectId);
   const canAttach = attachmentsSupported();
+  const defaultAgentId = agents[0]?.id || '';
   const selectedProject = projects.find(project => project.id === selectedProjectId);
   const hasWorkdir = Boolean(selectedProject?.workdir);
   const selectedAgent = agents.find(agent => agent.id === selectedAgentId);
@@ -208,10 +214,7 @@ export default function NewTaskRoute({ projects, agents, skills = [], onNewTask,
   }, [projects.length, selectedProjectExists, selectedProjectId]);
 
   React.useEffect(() => {
-    const draft = readComposerDraft(selectedProjectId, '');
-    setVal(current => draft.text || current);
     setAttachments([]);
-    setSelectedAgentId(draft.targetAgentId || '');
     if (selectedProjectExists) writeLastNewChatProjectId(selectedProjectId);
     else if (!selectedProjectId) writeLastNewChatProjectId('');
   }, [selectedProjectExists, selectedProjectId]);
@@ -221,12 +224,11 @@ export default function NewTaskRoute({ projects, agents, skills = [], onNewTask,
   }, [agents, selectedAgentId]);
 
   React.useEffect(() => {
-    writeComposerDraft(selectedProjectId, '', {
+    writeComposerDraft('', draftStorageChatId, {
       text: val,
-      targetAgentId: selectedAgentId,
-      targetProjectId: selectedProjectId,
+      targetAgentId: selectedAgentId && selectedAgentId !== defaultAgentId ? selectedAgentId : '',
     });
-  }, [selectedProjectId, selectedAgentId, val]);
+  }, [defaultAgentId, draftStorageChatId, selectedAgentId, val]);
 
   const projectItems = projects.map(p => ({ id: p.id, label: p.name }));
   const agentItems = agents.map(a => ({ id: a.id, label: a.name }));
@@ -358,7 +360,7 @@ export default function NewTaskRoute({ projects, agents, skills = [], onNewTask,
       const titleSource = text || attachments[0]?.display_name || 'Attachments';
       const chat = await api.createChat(projectId, titleSource, agentId);
       await api.postMessage(chat.id, text, chat.main_agent_id, attachments);
-      clearComposerDraft(projectId, '');
+      clearComposerDraft('', draftStorageChatId);
       onNewTask(chat.id);
     } catch (err) {
       setError(err.message);

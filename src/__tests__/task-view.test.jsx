@@ -727,6 +727,37 @@ describe('TaskView', () => {
     expect(screen.getByTestId('composer-agent-picker')).toHaveTextContent('Default Agent');
   });
 
+  it('does not write stale composer text to the next chat while switching chats', async () => {
+    api.getChat.mockImplementation(async (id) => (
+      {
+        ...chat,
+        id,
+        project_id: 'p1',
+        current_agent_id: 'agent-1',
+        main_agent_id: 'agent-1',
+      }
+    ));
+
+    const { rerender } = render(<TaskView chatId="chat-a" agentsMap={agentsMap} />);
+
+    await screen.findByText('chat-a');
+    const input = screen.getByTestId('composer-input');
+    fireEvent.change(input, { target: { value: 'draft for chat a' } });
+
+    await waitFor(() => {
+      expect(window.localStorage.getItem('crew44-composer-draft:v1:p1:chat-a')).toContain('draft for chat a');
+    });
+
+    rerender(<TaskView chatId="chat-b" agentsMap={agentsMap} />);
+    await waitFor(() => expect(api.getChat).toHaveBeenCalledWith('chat-b'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('composer-input')).toHaveValue('');
+    });
+    expect(window.localStorage.getItem('crew44-composer-draft:v1:p1:chat-a')).toContain('draft for chat a');
+    expect(window.localStorage.getItem('crew44-composer-draft:v1:p1:chat-b')).toBeNull();
+  });
+
   it('attributes a message from a deleted agent to that agent (not to the user)', async () => {
     // Seed the session cache so the deleted agent's original name is still known
     rememberAgents({
