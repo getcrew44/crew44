@@ -55,11 +55,6 @@ function ProjectMenu({ rect, onClose, onRename, onShowInFinder, onRemove }) {
       icon: <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M1.5 3a1 1 0 0 1 1-1h2.8l1 1.5H11a1 1 0 0 1 1 1V10a1 1 0 0 1-1 1H2.5a1 1 0 0 1-1-1V3z" stroke="currentColor" strokeWidth="1" strokeLinejoin="round"/><path d="M4.5 8l1.5-1.5 1.5 1.5 1.5-2" stroke="currentColor" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round"/></svg>,
       action: () => { onClose(); onShowInFinder?.(); },
     },
-    {
-      label: 'Archive',
-      icon: <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><rect x="1.5" y="2" width="10" height="2.5" rx="0.8" stroke="currentColor" strokeWidth="1"/><path d="M2.5 4.5v5a1 1 0 0 0 1 1h5a1 1 0 0 0 1-1v-5" stroke="currentColor" strokeWidth="1"/><path d="M5 7.5h3" stroke="currentColor" strokeWidth="1" strokeLinecap="round"/></svg>,
-      action: onClose,
-    },
     { divider: true },
     {
       label: 'Remove',

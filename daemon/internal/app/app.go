@@ -1018,6 +1018,12 @@ func (a *App) applyAutoChatTitle(chatID, title string) (model.ChatRecord, bool, 
 	if err := a.store.SaveChat(current); err != nil {
 		return model.ChatRecord{}, false, err
 	}
+	// Notify any subscribers (TaskView's chat stream, the sidebar) that the
+	// chat's metadata changed. The auto-summarizer can finish after the main
+	// chat run's done event has already triggered a refetch, so without this
+	// push the sidebar would keep showing the raw first-message title until
+	// the next app reload. Value is zero — the subscriber refetches.
+	a.broker.Publish(chatID, broker.Notification[model.Event]{Kind: broker.KindChatMeta})
 	return current, true, nil
 }
 

@@ -3069,7 +3069,7 @@ function Composer({ onSend, isStreaming, onCancel, pendingSteers = [], onCancelS
 
 // ─── TaskView ─────────────────────────────────────────────────────────────────
 
-export default function TaskView({ chatId, agentsMap, skills = [], projects = [], onStreamingChange }) {
+export default function TaskView({ chatId, agentsMap, skills = [], projects = [], onStreamingChange, onChatUpdated }) {
   const [chat, setChat] = React.useState(null);
   const [events, setEvents] = React.useState([]);
   const [isStreaming, setIsStreaming] = React.useState(false);
@@ -3095,6 +3095,11 @@ export default function TaskView({ chatId, agentsMap, skills = [], projects = []
   const waitingForAgentRef = React.useRef(false);
   const waitingAfterSeqRef = React.useRef(0);
   const agentActivitySinceSendRef = React.useRef(false);
+  // Holds the latest onChatUpdated prop so the connect callback (which is
+  // useCallback'd with [] deps to keep stream subscriptions stable) can call
+  // through to the current handler without resubscribing on every render.
+  const onChatUpdatedRef = React.useRef(onChatUpdated);
+  React.useEffect(() => { onChatUpdatedRef.current = onChatUpdated; }, [onChatUpdated]);
 
   // Three-phase animation:
   //   open click → drawerOpen=true → drawerMounted=true (still hidden) →
@@ -3351,6 +3356,16 @@ export default function TaskView({ chatId, agentsMap, skills = [], projects = []
       (err) => {
         console.error('Chat stream error:', err);
         setIsStreaming(false);
+      },
+      (updatedChat) => {
+        // chat.updated fires when the daemon-side auto-title summarizer (or
+        // any other metadata-only update) lands. The done-triggered refetch
+        // above can race the title summarizer and miss it; this push fills
+        // that gap so the header + sidebar refresh without waiting for the
+        // next mount.
+        if (!updatedChat?.id || updatedChat.id !== id) return;
+        setChat(prev => prev ? { ...prev, ...updatedChat } : updatedChat);
+        onChatUpdatedRef.current?.(updatedChat);
       }
     );
     streamCleanupRef.current = cleanup;
@@ -3470,6 +3485,17 @@ export default function TaskView({ chatId, agentsMap, skills = [], projects = []
       streamCleanupRef.current();
       setIsStreaming(false);
       setPendingSteers([]);
+      // Freeze the header's elapsed counter at the moment of Stop. The
+      // daemon closes the run asynchronously and we've just disposed
+      // the SSE subscription, so chat.stream.status in local state
+      // would otherwise stay "streaming" forever — leaving the
+      // per-second tick running with Date.now() as the end time.
+      const stoppedAt = new Date(Date.now()).toISOString();
+      setChat(prev => prev ? {
+        ...prev,
+        stream: { ...(prev.stream || {}), status: 'idle', pending_steers: [] },
+        updated_at: stoppedAt,
+      } : prev);
     } catch (err) {
       console.error('Cancel failed:', err);
     }

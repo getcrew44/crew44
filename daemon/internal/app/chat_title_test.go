@@ -156,7 +156,7 @@ func (e *titleEngine) Run(_ context.Context, request runtime.RunRequest, emit fu
 	e.calls.Add(1)
 	// Branch on whether this is the title-summary call so the same engine
 	// can serve both the main chat run and the post-run summarizer.
-	if strings.Contains(request.Agent.Instruction, ChatTitleSummarySentinel) {
+	if strings.HasPrefix(request.Prompt, ChatTitleSummarySentinel) {
 		return runtime.RunResult{}, emit(runtime.StreamEvent{
 			Type: model.EventTypeMessage,
 			Message: &model.MessagePayload{
@@ -212,6 +212,76 @@ func TestSummarizeChatTitleWritesCleanedTitleBack(t *testing.T) {
 	}
 	if got.Title != "Refactor Login Flow" {
 		t.Fatalf("title = %q, want Refactor Login Flow (quotes stripped)", got.Title)
+	}
+}
+
+type requestCapturingTitleEngine struct {
+	response string
+	request  runtime.RunRequest
+}
+
+func (e *requestCapturingTitleEngine) Run(_ context.Context, request runtime.RunRequest, emit func(runtime.StreamEvent) error) (runtime.RunResult, error) {
+	e.request = request
+	return runtime.RunResult{}, emit(runtime.StreamEvent{
+		Type: model.EventTypeMessage,
+		Message: &model.MessagePayload{
+			Role:    model.MessageRoleAssistant,
+			Content: e.response,
+		},
+	})
+}
+
+// TestSummarizeChatTitleUsesScopedRuntimeEnvDir locks in two constraints
+// the title call has to satisfy together: (1) it must NOT share the chat
+// run's RuntimeEnvDir — the original race that fired this code was both
+// goroutines hitting writeSkillFiles on the same claude-config/skills
+// tree, where concurrent RemoveAll/MkdirAll/WriteFile surfaced as
+// "invalid argument" on macOS; (2) it MUST keep some isolation shell of
+// its own so prepareSkillEnvironment doesn't fall back to the user's
+// host config — without that, the title call inherits host MCP servers,
+// tool allowlists, and skills and runs them under runtimes that
+// hardcode bypass-permissions / --allow-all / --yolo, with user content
+// embedded directly in the prompt (a textbook prompt-injection /
+// privilege boundary). The dedicated "-title" sibling dir satisfies
+// both: separate tree, still isolated, and AgentSkills stays empty so
+// the call ships no tools-by-construction.
+func TestSummarizeChatTitleUsesScopedRuntimeEnvDir(t *testing.T) {
+	engine := &requestCapturingTitleEngine{response: "Optimize Designer Prompt"}
+	a := newTitleEngineAppWith(t, engine)
+	agentID := firstAgentID(t, a)
+	project, err := a.CreateProject("Project", t.TempDir(), agentID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	chat, err := a.CreateChat(project.ID, "raw first message", agentID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := a.summarizeChatTitle(chat.ID, agentID, "raw first message"); err != nil {
+		t.Fatalf("summarizeChatTitle: %v", err)
+	}
+
+	chatEnvDir := a.store.RuntimeEnvDir(agentID)
+	titleEnvDir := a.store.RuntimeEnvTitleDir(agentID)
+
+	if engine.request.RuntimeEnvDir == "" {
+		t.Fatal("summary RuntimeEnvDir is empty — would fall back to host config and inherit MCP/allowlist/skill surface")
+	}
+	if engine.request.RuntimeEnvDir == chatEnvDir {
+		t.Fatalf("summary RuntimeEnvDir = %q matches chat env dir — would race the chat run on the shared skills tree", engine.request.RuntimeEnvDir)
+	}
+	if engine.request.RuntimeEnvDir != titleEnvDir {
+		t.Fatalf("summary RuntimeEnvDir = %q, want %q (dedicated title-scope dir)", engine.request.RuntimeEnvDir, titleEnvDir)
+	}
+	if engine.request.WorkDir == "" {
+		t.Fatal("summary WorkDir is empty — fallback runtimes need a non-empty workdir to resolve their per-runtime skills dir")
+	}
+	if engine.request.WorkDir == project.Workdir {
+		t.Fatalf("summary WorkDir = %q matches the project workdir — title call must not touch the user's project tree", engine.request.WorkDir)
+	}
+	if len(engine.request.AgentSkills) != 0 {
+		t.Fatalf("summary AgentSkills = %d, want 0 (ship no tools by construction)", len(engine.request.AgentSkills))
 	}
 }
 
@@ -282,7 +352,7 @@ type blockingChatEngine struct {
 }
 
 func (e *blockingChatEngine) Run(ctx context.Context, request runtime.RunRequest, emit func(runtime.StreamEvent) error) (runtime.RunResult, error) {
-	if strings.Contains(request.Agent.Instruction, ChatTitleSummarySentinel) {
+	if strings.HasPrefix(request.Prompt, ChatTitleSummarySentinel) {
 		return runtime.RunResult{}, emit(runtime.StreamEvent{
 			Type: model.EventTypeMessage,
 			Message: &model.MessagePayload{

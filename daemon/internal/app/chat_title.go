@@ -11,21 +11,15 @@ import (
 	"github.com/getcrew44/crew44/daemon/internal/runtime"
 )
 
-// ChatTitleSummarySentinel is the first line of the title-summary system
-// prompt. Mock engines in tests match on this prefix to distinguish a
-// title-summary call from a regular chat run.
-const ChatTitleSummarySentinel = "You generate short titles for chat conversations."
-
-// chatTitlePromptSystem instructs the runtime to emit a tight title for a
-// single user request. The output is normalized again on the daemon side
-// (NormalizeChatTitle); the prompt keeps the LLM honest about length.
-const chatTitlePromptSystem = ChatTitleSummarySentinel + `
-
-Given the user's first message, reply with a 3-6 word title that names what they want to do.
-Rules:
-- No quotes, no markdown, no trailing punctuation.
-- Title Case. Verbs in imperative form when natural ("Edit Conversation Titles", "Debug Login Flow").
-- Output the title only. No preamble, no explanation, no alternatives.`
+// ChatTitleSummarySentinel is the prompt prefix the summarizer uses so mock
+// engines (and any other observer) can identify the title-summary call. The
+// summarizer ships the prompt inline rather than via Agent.Instruction
+// because Claude Code's `--append-system-prompt` adds to (not replaces) the
+// default system prompt, and the default's "be helpful, answer the question"
+// directive outranks a short title-only rule — so a user message like
+// "hello, how's the weather" gets answered conversationally instead of
+// summarized. Inline instruction in the prompt is harder to ignore.
+const ChatTitleSummarySentinel = "Summarize the conversation title from the following: "
 
 // chatTitleSummaryTimeout caps the one-shot summarization. The user has
 // already seen the raw first-message fallback; we'd rather drop the
@@ -40,7 +34,8 @@ const summarizeFirstUserMessageInputCap = 4000
 // runChatTitleSummarizer is the post-run hook that updates the chat title
 // when the chat is on its first user turn and the user has not manually
 // renamed it. Errors are intentionally swallowed: the existing raw-message
-// title is already a serviceable fallback.
+// title (set at CreateChat time, truncated by NormalizeChatTitle) is
+// already a serviceable fallback.
 func (a *App) runChatTitleSummarizer(chatID, agentID, firstUserMessage string) {
 	if a == nil || a.engine == nil {
 		return
@@ -56,8 +51,11 @@ func (a *App) runChatTitleSummarizer(chatID, agentID, firstUserMessage string) {
 }
 
 // summarizeChatTitle dispatches one short runtime call to derive a title
-// and writes it back through applyAutoChatTitle (which respects an
-// existing manual rename if one raced in).
+// and writes it back through applyAutoChatTitle. The call deliberately
+// runs without any agent instruction, workdir, runtime env dir, or skills
+// — the prompt itself carries the only instruction the runtime needs. On
+// any failure the chat keeps the raw-user-message title set at create
+// time.
 func (a *App) summarizeChatTitle(chatID, agentID, firstUserMessage string) error {
 	agent, err := a.store.GetAgent(agentID)
 	if err != nil {
@@ -71,23 +69,34 @@ func (a *App) summarizeChatTitle(chatID, agentID, firstUserMessage string) error
 		return errors.New("runtime missing")
 	}
 
-	prompt := truncatePromptInput(firstUserMessage, summarizeFirstUserMessageInputCap)
+	userMessage := truncatePromptInput(firstUserMessage, summarizeFirstUserMessageInputCap)
 	titlerAgent := model.AgentConfig{
-		ID:          agent.ID,
-		Name:        agent.Name,
-		Instruction: chatTitlePromptSystem,
-		RuntimeID:   agent.RuntimeID,
-		Model:       agent.Model,
+		ID:        agent.ID,
+		Name:      agent.Name,
+		RuntimeID: agent.RuntimeID,
+		Model:     agent.Model,
 	}
+	// Give the title call its own isolation shell (RuntimeEnvDir + WorkDir
+	// scoped to a dedicated "-title" sibling of the agent's main dir).
+	// Without this, prepareSkillEnvironment falls back to the user's host
+	// config, so the title call inherits the host's MCP servers, tool
+	// allowlists, and skills — and runs them under the runtimes that
+	// hardcode bypass-permissions / --allow-all / --yolo, with user
+	// content sitting directly in the prompt. Reusing the chat run's
+	// RuntimeEnvDir would race the main turn on the shared claude-config
+	// /skills tree (the original race this code was patched to dodge).
+	titleEnvDir := a.store.RuntimeEnvTitleDir(agent.ID)
 
 	ctx, cancel := context.WithTimeout(context.Background(), chatTitleSummaryTimeout)
 	defer cancel()
 
 	var collected strings.Builder
 	_, err = a.engine.Run(ctx, runtime.RunRequest{
-		Runtime: runtimeRecord,
-		Agent:   titlerAgent,
-		Prompt:  prompt,
+		Runtime:       runtimeRecord,
+		Agent:         titlerAgent,
+		Prompt:        ChatTitleSummarySentinel + userMessage,
+		RuntimeEnvDir: titleEnvDir,
+		WorkDir:       titleEnvDir,
 	}, func(ev runtime.StreamEvent) error {
 		if ev.Type == model.EventTypeMessage && ev.Message != nil &&
 			ev.Message.Role == model.MessageRoleAssistant {

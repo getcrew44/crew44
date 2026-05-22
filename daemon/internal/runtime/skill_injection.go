@@ -20,8 +20,20 @@ type preparedSkillEnvironment struct {
 }
 
 func prepareSkillEnvironment(request RunRequest) (preparedSkillEnvironment, error) {
-	if len(request.AgentSkills) == 0 && request.Runtime.Provider != "claude" && request.Runtime.Provider != "codex" {
-		return preparedSkillEnvironment{}, nil
+	// Callers that want neither skill injection nor runtime isolation (for
+	// example the chat title summarizer, which runs in parallel with the
+	// main chat run and must not race it on the shared claude-config/skills
+	// tree) opt out by leaving AgentSkills and RuntimeEnvDir unset. Claude
+	// and codex normally require isolation, but the same opt-out applies —
+	// the spawned process falls back to the user's host config.
+	//
+	// For claude we still re-inject the host OAuth credential: the child
+	// inherits a stripped env (backendagent/claude.go:isFilteredChildEnvKey
+	// drops every CLAUDE_CODE_* var) and the spawned non-GUI process can't
+	// read the macOS keychain, so without the env vars the child has no
+	// way to authenticate.
+	if len(request.AgentSkills) == 0 && strings.TrimSpace(request.RuntimeEnvDir) == "" {
+		return preparedSkillEnvironment{Env: hostClaudeAuthEnv(request.Runtime.Provider)}, nil
 	}
 	if strings.TrimSpace(request.WorkDir) == "" {
 		return preparedSkillEnvironment{}, fmt.Errorf("runtime skill injection requires a workdir")
@@ -101,6 +113,34 @@ func prepareSkillEnvironment(request RunRequest) (preparedSkillEnvironment, erro
 		return preparedSkillEnvironment{}, fmt.Errorf("write skill files: %w", err)
 	}
 	return preparedSkillEnvironment{}, nil
+}
+
+// hostClaudeAuthEnv returns the OAuth env vars a non-isolated claude child
+// needs to authenticate against the host's existing Claude Code login. The
+// child's inherited env has CLAUDE_CODE_* stripped, so without re-injecting
+// these the child can't authenticate (the spawned non-GUI process can't
+// read the keychain entry on macOS either). Returns nil for non-claude
+// providers and when no credential is available — in the latter case
+// claude will fall back to its own login prompt, same as today.
+func hostClaudeAuthEnv(provider string) map[string]string {
+	if provider != "claude" {
+		return nil
+	}
+	cred := readClaudeOAuthCredential()
+	env := map[string]string{}
+	if cred.AccessToken != "" {
+		env["CLAUDE_CODE_OAUTH_TOKEN"] = cred.AccessToken
+	}
+	// Refresh token + scopes are an atomic pair per the env-vars docs;
+	// half a pair is a broken auth env.
+	if cred.RefreshToken != "" && cred.Scopes != "" {
+		env["CLAUDE_CODE_OAUTH_REFRESH_TOKEN"] = cred.RefreshToken
+		env["CLAUDE_CODE_OAUTH_SCOPES"] = cred.Scopes
+	}
+	if len(env) == 0 {
+		return nil
+	}
+	return env
 }
 
 func clearSkillDirs(skillsDir string, skills []SkillContext) error {

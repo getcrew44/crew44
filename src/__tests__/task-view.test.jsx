@@ -810,6 +810,54 @@ describe('TaskView', () => {
     }
   });
 
+  it('freezes the elapsed-time meta the moment Stop is clicked', async () => {
+    // Bug repro: after clicking Stop, the elapsed counter must stop
+    // advancing immediately. Previously the local chat object kept
+    // stream.status === 'streaming' (cancelChat returns {ok:true} and
+    // we dispose the SSE before the daemon's chat.done arrives), so
+    // the header's per-second tick kept running with Date.now() as
+    // the end-time and the counter ticked forever.
+    const realSetInterval = global.setInterval;
+    const tickCallbacks = [];
+    const intervalSpy = vi.spyOn(global, 'setInterval').mockImplementation((cb, delay) => {
+      if (delay === 1000) {
+        tickCallbacks.push(cb);
+        return -1;
+      }
+      return realSetInterval(cb, delay);
+    });
+    const dateNowSpy = vi.spyOn(Date, 'now').mockReturnValue(
+      new Date('2026-05-12T10:01:00Z').getTime()
+    );
+    try {
+      api.getChat.mockResolvedValue({ ...chat, stream: { status: 'streaming' } });
+      api.streamChatEvents.mockImplementation(() => vi.fn());
+      api.cancelChat.mockResolvedValue({});
+
+      render(<TaskView chatId="chat-1" agentsMap={agentsMap} />);
+
+      await screen.findByText(/elapsed 1m 0s/);
+
+      // User clicks Stop at 10:02:00 — freeze must happen here.
+      dateNowSpy.mockReturnValue(new Date('2026-05-12T10:02:00Z').getTime());
+      fireEvent.click(await screen.findByRole('button', { name: /stop/i }));
+      await waitFor(() => expect(api.cancelChat).toHaveBeenCalledWith('chat-1'));
+      await screen.findByText(/elapsed 2m 0s/);
+
+      // Subsequent ticks (and any later wall-clock advance) must NOT
+      // bump the counter past the moment of Stop.
+      dateNowSpy.mockReturnValue(new Date('2026-05-12T10:03:00Z').getTime());
+      await act(async () => {
+        tickCallbacks.forEach(cb => cb());
+      });
+      expect(screen.getByText(/elapsed 2m 0s/)).toBeInTheDocument();
+      expect(screen.queryByText(/elapsed 3m 0s/)).not.toBeInTheDocument();
+    } finally {
+      intervalSpy.mockRestore();
+      dateNowSpy.mockRestore();
+    }
+  });
+
   it('does NOT install a per-second tick when the chat is not streaming', async () => {
     const realSetInterval = global.setInterval;
     const tickCallbacks = [];

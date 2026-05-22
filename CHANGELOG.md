@@ -2,6 +2,20 @@
 
 All notable changes to this project are documented here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.7] - 2026-05-22
+
+### Added
+- **42-skill product management library.** The default Product Lead now ships with a full product-management skill library covering discovery (jobs-to-be-done, discovery-process, customer-journey-map, pol-probe), strategy (positioning-statement, tam-sam-som-calculator, pestel-analysis, opportunity-solution-tree), planning (prd-development, lean-ux-canvas, recommendation-canvas, prioritization-advisor, feature-investment-advisor, roadmap-planning), delivery (user-story / -splitting / -mapping / workshop, storyboard, press-release, workshop-facilitation), and growth and metrics (acquisition-channel-advisor, organic-growth-advisor, saas-revenue-growth-metrics, saas-economics-efficiency-metrics, finance-based-pricing-advisor, finance-metrics-quickref, business-health-diagnostic). Each skill ships as a SKILL.md with templates and examples where useful.
+- **Rewritten Product Lead and Designer prompts.** Both default agents are rebuilt as coaching specialists. The Product Lead picks the narrowest matching skill from the library, calibrates evidence (observed / inferred / assumed / unknown), and produces decision-ready PM artifacts. The Designer treats HTML as the preferred medium for artifacts (canvases, hi-fi prototypes, decks, specs, critiques) and grounds every design in real context — brand, existing UI, tokens, copy voice — instead of training-data defaults.
+- **Real-time auto-title push.** A new `chat.updated` broker event and SSE notification streams the auto-summarizer's title to the frontend the moment it lands, so the sidebar entry refreshes without waiting for the next mount. The chat stream subscription stays open after the main run's done event to receive post-stream metadata pushes.
+
+### Changed
+- **Title summarizer no longer races the chat run on the shared skills directory.** The auto-title call moves its prompt prefix inline (instead of using `Agent.Instruction`, which Claude Code's `--append-system-prompt` couldn't override against the default "be helpful" rule), and the runtime skill-injection step now treats empty `AgentSkills` plus empty `RuntimeEnvDir` as an opt-out — so the title call no longer touches the main turn's `claude-config/skills` tree. Non-isolated Claude invocations get the host's `CLAUDE_CODE_OAUTH_*` env re-injected so the spawned child can still authenticate.
+
+### Fixed
+- **Stop button freezes the elapsed-time counter immediately.** Clicking Stop now patches `chat.stream.status` to `idle` in local state and stamps `updated_at`, so the per-second tick locks in at the moment of click instead of running forever against `Date.now()` while waiting for the daemon's async `chat.done`.
+- **Sidebar Archive entry removed.** The Archive item on the project context menu was wired to `onClose` with no action behind it. Dropped until the archive flow exists; Remove still covers the destructive path.
+
 ## [0.5.6] - 2026-05-21
 
 ### Added

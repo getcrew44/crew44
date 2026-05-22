@@ -304,7 +304,7 @@ describe('CrewRoute agents tab', () => {
 
   it.each([
     ['coding', 'Coding Agent'],
-    ['product', 'Product Agent'],
+    ['product', 'Product Lead'],
     ['designer', 'Designer'],
   ])('offers removal for the %s preset agent', (presetKey, name) => {
     render(<CrewRoute

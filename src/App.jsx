@@ -311,6 +311,24 @@ export default function App() {
     loadData();
   }, [loadData]);
 
+  // handleChatMetaUpdate handles the daemon's `chat.updated` push (currently
+  // emitted when the auto-title summarizer applies a title). The
+  // streaming-change refetch path can race the summarizer and miss the new
+  // title; this push fills that gap so the sidebar entry refreshes without
+  // waiting for the next app reload.
+  const handleChatMetaUpdate = React.useCallback((updatedChat) => {
+    if (!updatedChat?.id || !updatedChat?.project_id) return;
+    setProjectChats(prev => {
+      const list = prev[updatedChat.project_id];
+      if (!list) return prev;
+      const idx = list.findIndex(x => x.id === updatedChat.id);
+      if (idx === -1) return prev;
+      const next = list.slice();
+      next[idx] = { ...next[idx], title: updatedChat.title, updated_at: updatedChat.updated_at };
+      return { ...prev, [updatedChat.project_id]: next };
+    });
+  }, []);
+
   const handleChatStreamingChange = React.useCallback((chatId, isStreaming) => {
     setChatStatusOverrides(prev => {
       if (isStreaming && archivedChatIdsRef.current.has(chatId)) return prev;
@@ -711,6 +729,7 @@ export default function App() {
         skills={skills}
         projects={projects}
         onStreamingChange={handleChatStreamingChange}
+        onChatUpdated={handleChatMetaUpdate}
       />
     );
   } else if (route === 'new') {

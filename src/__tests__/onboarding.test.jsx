@@ -41,7 +41,7 @@ describe('Onboarding — welcome step', () => {
     render(<OnboardingRoute runtimes={[]} onComplete={() => {}} onSkip={() => {}} />);
     expect(screen.getByText('You')).toBeInTheDocument();
     expect(screen.getByText('Coding Agent')).toBeInTheDocument();
-    expect(screen.getByText('Product Agent')).toBeInTheDocument();
+    expect(screen.getByText('Product Lead')).toBeInTheDocument();
     expect(screen.getByText('Partner')).toBeInTheDocument();
   });
 
