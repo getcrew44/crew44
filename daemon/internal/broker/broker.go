@@ -5,9 +5,10 @@ import "sync"
 type Kind string
 
 const (
-	KindEvent Kind = "event"
-	KindDone  Kind = "done"
-	KindError Kind = "error"
+	KindEvent    Kind = "event"
+	KindDone     Kind = "done"
+	KindError    Kind = "error"
+	KindChatMeta Kind = "chat_meta"
 )
 
 type Notification[T any] struct {

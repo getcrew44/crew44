@@ -215,8 +215,9 @@ export async function cancelChat(chatId) {
 }
 
 // Returns a cleanup function. Connects to the chat RPC subscription, calls
-// onEvent for each event, onDone when the stream ends, and onError on failure.
-export function streamChatEvents(chatId, after, onEvent, onDone, onError) {
+// onEvent for each event, onChatUpdated when chat metadata changes (e.g.
+// auto-title applied), onDone when the stream ends, and onError on failure.
+export function streamChatEvents(chatId, after, onEvent, onDone, onError, onChatUpdated) {
   let disposed = false;
   let subscriptionId = '';
   const cleanups = [];
@@ -228,6 +229,10 @@ export function streamChatEvents(chatId, after, onEvent, onDone, onError) {
   cleanups.push(rpc.on('chat.event', params => {
     if (!matches(params)) return;
     onEvent(params.event);
+  }));
+  cleanups.push(rpc.on('chat.updated', params => {
+    if (!matches(params)) return;
+    onChatUpdated?.(params.chat);
   }));
   cleanups.push(rpc.on('chat.done', params => {
     if (!matches(params)) return;

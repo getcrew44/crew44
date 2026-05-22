@@ -88,13 +88,17 @@ func (s *Server) runChatSubscription(
 		}
 	}
 
+	// Emit chat.done up-front if the chat isn't currently streaming, but
+	// keep the subscription alive so out-of-stream metadata pushes (e.g.
+	// the auto-title summarizer, which can finish after the main turn's
+	// KindDone) still reach the frontend. The frontend explicitly
+	// unsubscribes on unmount or when reconnecting for a new turn.
 	chat, err := s.app.GetChat(chatID)
-	if err != nil || chat.Stream.Status != "streaming" {
+	if err == nil && chat.Stream.Status != "streaming" {
 		conn.Notify("chat.done", map[string]any{
 			"subscription_id": subscriptionID,
 			"chat_id":         chatID,
 		})
-		return
 	}
 
 	for {
@@ -118,12 +122,32 @@ func (s *Server) runChatSubscription(
 				}) {
 					return
 				}
-			case broker.KindDone:
-				conn.Notify("chat.done", map[string]any{
+			case broker.KindChatMeta:
+				// Chat metadata changed (typically auto-title applied). Refetch
+				// here rather than passing the record through the broker so
+				// subscribers always see the canonical store record.
+				chat, err := s.app.GetChat(chatID)
+				if err != nil {
+					continue
+				}
+				if !conn.Notify("chat.updated", map[string]any{
 					"subscription_id": subscriptionID,
 					"chat_id":         chatID,
-				})
-				return
+					"chat":            chat,
+				}) {
+					return
+				}
+			case broker.KindDone:
+				// Notify but keep listening — the auto-title summarizer (and
+				// any future post-stream metadata work) can fire after the
+				// main run's KindDone, and closing the subscription here
+				// would silently drop those pushes.
+				if !conn.Notify("chat.done", map[string]any{
+					"subscription_id": subscriptionID,
+					"chat_id":         chatID,
+				}) {
+					return
+				}
 			case broker.KindError:
 				conn.Notify("chat.error", map[string]any{
 					"subscription_id": subscriptionID,
