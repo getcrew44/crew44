@@ -4,6 +4,7 @@ import { mapBackendEvent, mergeToolResults, relativeTime, formatTime, HUMAN_USER
 import * as api from './api.js';
 import { clearComposerDraft, readComposerDraft, writeComposerDraft } from './draftStore.js';
 import { AttachmentTray } from './AttachmentChips.jsx';
+import { MessageCopyButton } from './MessageCopyButton.jsx';
 import { attachmentsSupported, dedupeAttachments, droppedAttachments, pickAttachments } from './attachments.js';
 import { dataTransferHasFiles } from './dragDrop.js';
 import { primeAudioContext, playDoneSound } from './audio.js';
@@ -163,6 +164,7 @@ function MessageEvent({
           />
           <AttachmentTray attachments={event.attachments} />
         </div>
+        <MessageCopyButton text={event.body} align="right" />
         {event.userSteer && (
           <div style={{
             marginTop: 6,
@@ -213,6 +215,7 @@ function MessageEvent({
             getSearchMatchIndex={getSearchMatchIndex}
           />
         </div>
+        <MessageCopyButton text={event.body} />
       </div>
     </div>
   );

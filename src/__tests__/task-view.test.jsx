@@ -414,6 +414,50 @@ describe('TaskView', () => {
     await waitFor(() => expect(timeline.scrollTop).toBe(900));
   });
 
+  it('copies message text and mentions without attachments', async () => {
+    const writeText = vi.fn().mockResolvedValue();
+    Object.defineProperty(window.navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText },
+    });
+    api.streamChatEvents.mockImplementation(() => vi.fn());
+    render(<TaskView chatId="chat-1" agentsMap={agentsMap} />);
+
+    await screen.findByTestId('composer-input');
+    const stream = api.streamChatEvents.mock.calls[0];
+    await emitEvent(stream, {
+      seq: 3,
+      type: 'message',
+      ts: '2026-05-12T10:02:00Z',
+      actor_agent_id: 'agent-1',
+      message: {
+        role: 'assistant',
+        content: 'Hello {{ref:Default Agent}}',
+        attachments: [{ path: '/tmp/screen.png', display_name: 'screen.png', kind: 'image' }],
+      },
+    });
+    await emitEvent(stream, {
+      seq: 4,
+      type: 'message',
+      ts: '2026-05-12T10:03:00Z',
+      actor_agent_id: '',
+      message: {
+        role: 'user',
+        content: '@Aria please inspect this',
+        attachments: [{ path: '/tmp/notes.txt', display_name: 'notes.txt', kind: 'file' }],
+      },
+    });
+
+    const copyButtons = await screen.findAllByRole('button', { name: 'Copy message' });
+    fireEvent.click(copyButtons[0]);
+    fireEvent.click(copyButtons[1]);
+
+    await waitFor(() => {
+      expect(writeText).toHaveBeenNthCalledWith(1, 'Hello @Default Agent');
+      expect(writeText).toHaveBeenNthCalledWith(2, '@Aria please inspect this');
+    });
+  });
+
   it('opens conversation find with Cmd+F on macOS and ignores Ctrl+F', async () => {
     mockNavigatorPlatform('MacIntel');
     api.streamChatEvents.mockImplementation(() => vi.fn());

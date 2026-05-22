@@ -408,6 +408,10 @@ export function Icon({ name, size = 16 }) {
       return <svg {...s} viewBox="0 0 16 16"><path d="M5.5 5.5v7M8 5.5v7M10.5 5.5v7" {...p}/><path d="M3 4h10M6.2 4V2.8h3.6V4M4 4l.6 10h6.8L12 4" {...p}/></svg>;
     case 'edit':
       return <svg {...s} viewBox="0 0 16 16"><path d="M3 12.5l.8-3 6.8-6.8a1.3 1.3 0 0 1 1.8 1.8L5.6 11.3l-2.6 1.2z" {...p}/><path d="M9.6 3.7l2.7 2.7" {...p}/></svg>;
+    case 'copy':
+      return <svg {...s} viewBox="0 0 16 16"><rect x="5" y="5" width="8" height="8" rx="1.4" {...p}/><path d="M3 10.5V3.8A.8.8 0 0 1 3.8 3h6.7" {...p}/></svg>;
+    case 'check':
+      return <svg {...s} viewBox="0 0 16 16"><path d="M3.5 8.2l3 3L12.8 5" {...p}/></svg>;
     case 'more':
       return <svg {...s} viewBox="0 0 16 16"><circle cx="3.5" cy="8" r="1.1" fill="currentColor" stroke="none"/><circle cx="8" cy="8" r="1.1" fill="currentColor" stroke="none"/><circle cx="12.5" cy="8" r="1.1" fill="currentColor" stroke="none"/></svg>;
     default: return null;
