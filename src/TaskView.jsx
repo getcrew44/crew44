@@ -7,6 +7,7 @@ import { AttachmentTray } from './AttachmentChips.jsx';
 import { attachmentsSupported, dedupeAttachments, droppedAttachments, pickAttachments } from './attachments.js';
 import { dataTransferHasFiles } from './dragDrop.js';
 import { primeAudioContext, playDoneSound } from './audio.js';
+import { SendShortcutMenu, shortcutPlaceholderHint, shouldSendFromEnterKey, useSendShortcutMode } from './sendShortcut.jsx';
 
 function isAgentActivityEvent(event) {
   if (!event) return false;
@@ -2667,6 +2668,7 @@ function Composer({ onSend, isStreaming, onCancel, pendingSteers = [], onCancelS
   const [activeSuggestion, setActiveSuggestion] = React.useState(0);
   const [fileMatches, setFileMatches] = React.useState([]);
   const [scrollTop, setScrollTop] = React.useState(0);
+  const [sendShortcutMode, setSendShortcutMode] = useSendShortcutMode();
   const ta = React.useRef(null);
   const listboxRef = React.useRef(null);
   const canAttach = attachmentsSupported();
@@ -2851,6 +2853,12 @@ function Composer({ onSend, isStreaming, onCancel, pendingSteers = [], onCancelS
       }
     }
 
+    if (e.key === 'Escape' && isStreaming) {
+      e.preventDefault();
+      onCancel?.();
+      return;
+    }
+
     if (suggestionOptions.length > 0) {
       if (e.key === 'ArrowDown') {
         e.preventDefault();
@@ -2873,7 +2881,10 @@ function Composer({ onSend, isStreaming, onCancel, pendingSteers = [], onCancelS
         return;
       }
     }
-    if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); send(); }
+    if (shouldSendFromEnterKey(e, sendShortcutMode)) {
+      e.preventDefault();
+      send();
+    }
   };
 
   const canSend = Boolean(val.trim()) || attachments.length > 0;
@@ -2999,7 +3010,7 @@ function Composer({ onSend, isStreaming, onCancel, pendingSteers = [], onCancelS
               e.stopPropagation();
             }}
             onDrop={handleDrop}
-            placeholder={isStreaming ? 'Steer this run…' : 'Steer the crew — @agent to direct, ⌘↵ to send'}
+            placeholder={isStreaming ? 'Steer this run…' : `Steer the crew — @agent to direct, ${shortcutPlaceholderHint(sendShortcutMode)}`}
             rows={1}
             style={{
               position: 'relative', zIndex: 1,
@@ -3034,7 +3045,7 @@ function Composer({ onSend, isStreaming, onCancel, pendingSteers = [], onCancelS
             <AgentPicker value={targetAgentId} onChange={onChangeTargetAgent} agents={agents} />
           )}
           <div style={{ flex: 1 }} />
-          <span style={{ fontSize: 11.5, color: '#A89F92' }}>⌘↵ send</span>
+          <SendShortcutMenu mode={sendShortcutMode} onChange={setSendShortcutMode} />
           {isStreaming && (
             <button
               type="button"
