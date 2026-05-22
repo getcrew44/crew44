@@ -332,7 +332,10 @@ export default function App() {
           const idx = list.findIndex(x => x.id === c.id);
           if (idx === -1) return prev;
           const updated = list.slice();
-          updated[idx] = { ...updated[idx], updated_at: c.updated_at, status: c.status };
+          // title is included so an auto-summarized title (set by the daemon
+          // after the first turn) propagates to the sidebar entry that the
+          // user can see while the chat is closed.
+          updated[idx] = { ...updated[idx], title: c.title, updated_at: c.updated_at, status: c.status };
           return { ...prev, [c.project_id]: updated };
         });
       }).catch(() => {});
@@ -518,6 +521,55 @@ export default function App() {
     }
   }, [currentChatId, projectChats, loadData, showToast]);
 
+  const handleRenameChat = React.useCallback(async (chatId, nextTitle) => {
+    const title = (nextTitle || '').trim();
+    if (!title) return;
+    const projectId = Object.entries(projectChats).find(([, chats]) =>
+      chats.some(c => c.id === chatId)
+    )?.[0];
+    // Optimistic local update so the sidebar row reflects the new title
+    // immediately; the daemon round-trip can replace the value if the
+    // backend rewrites it (e.g., trims or normalizes).
+    if (projectId) {
+      setProjectChats(prev => {
+        const list = prev[projectId];
+        if (!list) return prev;
+        return {
+          ...prev,
+          [projectId]: list.map(c => c.id === chatId ? { ...c, title } : c),
+        };
+      });
+    }
+    try {
+      const updated = await api.updateChat(chatId, { title });
+      if (projectId && updated?.title && updated.title !== title) {
+        setProjectChats(prev => {
+          const list = prev[projectId];
+          if (!list) return prev;
+          return {
+            ...prev,
+            [projectId]: list.map(c => c.id === chatId ? { ...c, title: updated.title } : c),
+          };
+        });
+      }
+    } catch (err) {
+      showToast(`Failed to rename chat: ${err.message}`);
+      if (projectId) {
+        try {
+          const fresh = await api.getChat(chatId);
+          setProjectChats(prev => {
+            const list = prev[projectId];
+            if (!list) return prev;
+            return {
+              ...prev,
+              [projectId]: list.map(c => c.id === chatId ? { ...c, title: fresh.title } : c),
+            };
+          });
+        } catch {}
+      }
+    }
+  }, [projectChats, showToast]);
+
   const handleArchiveChat = React.useCallback(async (chatId) => {
     const projectId = Object.entries(projectChats).find(([, chats]) =>
       chats.some(c => c.id === chatId)
@@ -666,6 +718,7 @@ export default function App() {
       <NewTaskRoute
         projects={projects}
         agents={agentsList}
+        skills={skills}
         onNewTask={handleNewTask}
         onExistingFolder={handleExistingFolder}
         initialProjectId={newTaskProjectId}
@@ -691,7 +744,7 @@ export default function App() {
   } else if (route === 'auto') {
     content = <AutoRoute onToast={showToast} onPickChat={handlePickChat} />;
   } else {
-    content = <NewTaskRoute projects={projects} agents={agentsList} onNewTask={handleNewTask} onExistingFolder={handleExistingFolder} initialProjectId={newTaskProjectId} />;
+    content = <NewTaskRoute projects={projects} agents={agentsList} skills={skills} onNewTask={handleNewTask} onExistingFolder={handleExistingFolder} initialProjectId={newTaskProjectId} />;
   }
 
   return (
@@ -748,6 +801,7 @@ export default function App() {
         onCreateProject={handleCreateProject}
         onRemoveProject={handleRemoveProject}
         onArchiveChat={handleArchiveChat}
+        onRenameChat={handleRenameChat}
         onResetOnboarding={resetOnboarding}
         onPairMobile={openMobileDialog}
         hasMobileDevice={mobileDevices.length > 0}

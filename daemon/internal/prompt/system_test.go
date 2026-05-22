@@ -146,6 +146,7 @@ func TestBuildSystemPromptStructuresRuntimeContext(t *testing.T) {
 		AvailableAgents: []model.AgentConfig{current, other},
 		Skills:          []Skill{{Name: "problem-framing"}},
 		SummaryPath:     "/tmp/chat-summary.md",
+		ChatSessionDir:  "/home/user/.crew44/chats/chat-abc",
 		HandoverNote:    "Tell the user an English story.",
 	})
 
@@ -178,15 +179,92 @@ func TestBuildSystemPromptStructuresRuntimeContext(t *testing.T) {
 	if strings.Contains(got, "uuid: agent-a\n  name: Personal partner") {
 		t.Fatalf("current agent should not appear in handover targets:\n%s", got)
 	}
-	for _, policy := range []string{
-		"Only hand over when another listed agent is better suited to continue.",
-		"Code edits",
-		"Requirements",
-		"Layout",
-		"handoff-routing",
+	// Shared routing guidance lets every agent route — not just the Partner.
+	// The phrasing is generic (scope-based) so it does not name specific roles.
+	for _, want := range []string{
+		"Routing:",
+		"hand off rather than attempting the work yourself",
+		"Route the moment you recognize the scope match",
+		"/home/user/.crew44/chats/chat-abc/handover/<short-slug>.md",
+		"do not create files under `/tmp` or the project workdir",
+		"**Handover at:**",
+		"## User report",
+		"## Context",
+		"## Goal",
+		"## Suggested approach",
 	} {
-		if strings.Contains(got, policy) {
-			t.Fatalf("system prompt should not inject routing policy %q:\n%s", policy, got)
+		if !strings.Contains(got, want) {
+			t.Fatalf("system prompt missing shared routing guidance %q:\n%s", want, got)
+		}
+	}
+	for _, leak := range []string{
+		"Coding Agent —",
+		"Product Agent —",
+		"Designer —",
+	} {
+		if strings.Contains(got, leak) {
+			t.Fatalf("shared routing guidance should not name specific agent roles %q:\n%s", leak, got)
+		}
+	}
+}
+
+func TestBuildSystemPromptUsesAgentDescriptionInHandoverList(t *testing.T) {
+	current := model.AgentConfig{ID: "agent-a", Name: "Aria"}
+	withDescription := model.AgentConfig{
+		ID:          "agent-b",
+		Name:        "Product Agent",
+		Description: "Product and UX reasoning specialist. Turns intent into scope and acceptance criteria.",
+		Instruction: "## Long Instruction Block\n\nThis very long instruction would otherwise be inlined…",
+	}
+	derivedOnly := model.AgentConfig{
+		ID:          "agent-c",
+		Name:        "Designer",
+		Instruction: "First paragraph that becomes the description.\n\nSecond paragraph that should not leak into the description.",
+	}
+
+	got := BuildSystemPrompt(SystemPromptInput{
+		Agent:           current,
+		Runtime:         model.RuntimeRecord{ID: "claude", Provider: "claude"},
+		AvailableAgents: []model.AgentConfig{current, withDescription, derivedOnly},
+	})
+
+	if !strings.Contains(got, "Product and UX reasoning specialist. Turns intent into scope and acceptance criteria.") {
+		t.Fatalf("expected explicit Description to appear in handover list:\n%s", got)
+	}
+	if strings.Contains(got, "Long Instruction Block") {
+		t.Fatalf("Description should win over Instruction for agents with both:\n%s", got)
+	}
+	if !strings.Contains(got, "First paragraph that becomes the description.") {
+		t.Fatalf("expected derived description from first paragraph:\n%s", got)
+	}
+	if strings.Contains(got, "Second paragraph that should not leak") {
+		t.Fatalf("derived description should stop at the first paragraph:\n%s", got)
+	}
+}
+
+func TestBuildSystemPromptDoesNotInvitePermissionBeforeClearHandover(t *testing.T) {
+	current := model.AgentConfig{
+		ID:          "partner",
+		Name:        "Partner",
+		Description: "Leads the crew and coordinates handoffs.",
+	}
+	coding := model.AgentConfig{
+		ID:          "coding",
+		Name:        "Coding Agent",
+		Description: "Implements changes in the codebase. Responsible for reading and editing code, debugging stack traces and unexpected behavior, writing tests, refactoring, and shipping a fix end-to-end.",
+	}
+
+	got := BuildSystemPrompt(SystemPromptInput{
+		Agent:           current,
+		Runtime:         model.RuntimeRecord{ID: "claude", Provider: "claude"},
+		AvailableAgents: []model.AgentConfig{current, coding},
+	})
+
+	for _, want := range []string{
+		"Make the handover decision yourself. Do not ask the user whether to hand over.",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("system prompt missing routing guard %q:\n%s", want, got)
 		}
 	}
 }

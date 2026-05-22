@@ -217,7 +217,7 @@ describe('CrewRoute agents tab', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Create agent' }));
 
     await waitFor(() => {
-      expect(api.createAgent).toHaveBeenCalledWith('Coding Agent', '', 'codex', 'gpt-5.5');
+      expect(api.createAgent).toHaveBeenCalledWith('Coding Agent', '', '', 'codex', 'gpt-5.5');
     });
     expect(onDataRefresh).toHaveBeenCalledOnce();
   });
@@ -373,6 +373,24 @@ describe('CrewRoute agent detail', () => {
 
     fireEvent.change(editor, { target: { value: Array.from({ length: 40 }, (_, i) => `Line ${i + 1}`).join('\n') } });
     expect(editor).toHaveStyle({ height: '560px', overflowY: 'auto' });
+  });
+
+  it('does not save an auto-derived description when only instructions are edited', async () => {
+    api.updateAgent.mockResolvedValue({});
+    const onDataRefresh = vi.fn();
+    render(<CrewRoute {...agentProps} onDataRefresh={onDataRefresh} />);
+
+    fireEvent.click(screen.getByText('Planning Agent'));
+    fireEvent.change(screen.getByTestId('agent-instruction-input'), {
+      target: { value: 'You are a different planning agent.\n\nYour job is to sequence release work.' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => expect(api.updateAgent).toHaveBeenCalledOnce());
+    const [, payload] = api.updateAgent.mock.calls[0];
+    expect(payload.instruction).toBe('You are a different planning agent.\n\nYour job is to sequence release work.');
+    expect(payload).not.toHaveProperty('description');
+    expect(onDataRefresh).toHaveBeenCalledOnce();
   });
 
   it('updates the pinned model from the agent detail model picker', async () => {

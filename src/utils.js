@@ -14,6 +14,55 @@ export function agentInitial(name) {
   return (name || '?')[0].toUpperCase();
 }
 
+// Mirrors the backend model.DeriveAgentDescription: distill an instruction
+// into a short "Role: X. Responsibility: to Y." summary by extracting the
+// "You are …" and "Your job is to …" clauses. Falls back to the first non-
+// empty paragraph when neither pattern matches. Capped at 240 chars with an
+// ellipsis. Kept in sync so the UI can preview the value the daemon will
+// fall back to when an agent has no explicit description.
+const AGENT_DESCRIPTION_MAX = 240;
+const ROLE_RE = /^You are (?:an? |the )?(.+?)\./im;
+const RESPONSIBILITY_RE = /^Your (?:job|responsibility|role) is to (.+?)\./im;
+
+function extractAgentRole(instruction) {
+  const m = instruction.match(ROLE_RE);
+  if (!m) return '';
+  let role = m[1].trim();
+  const colon = role.indexOf(':');
+  if (colon >= 0) role = role.slice(colon + 1).trim();
+  return role;
+}
+
+function extractAgentResponsibility(instruction) {
+  const m = instruction.match(RESPONSIBILITY_RE);
+  if (!m) return '';
+  return m[1].trim();
+}
+
+function composeRoleAndResponsibility(role, responsibility) {
+  const parts = [];
+  if (role) parts.push(`Role: ${role}.`);
+  if (responsibility) parts.push(`Responsibility: to ${responsibility}.`);
+  return parts.join(' ');
+}
+
+export function deriveAgentDescription(instruction) {
+  if (!instruction) return '';
+  const trimmed = String(instruction).trim();
+  if (!trimmed) return '';
+  let summary = composeRoleAndResponsibility(
+    extractAgentRole(trimmed),
+    extractAgentResponsibility(trimmed),
+  );
+  if (!summary) {
+    const paragraphs = trimmed.split(/\n\s*\n/);
+    summary = (paragraphs.find(p => p.trim().length > 0) || '').trim();
+  }
+  const collapsed = summary.replace(/\s+/g, ' ');
+  if ([...collapsed].length <= AGENT_DESCRIPTION_MAX) return collapsed;
+  return [...collapsed].slice(0, AGENT_DESCRIPTION_MAX).join('').trimEnd() + '…';
+}
+
 export function relativeTime(isoString) {
   if (!isoString) return '';
   const d = new Date(isoString);

@@ -65,7 +65,19 @@ func (s StaticScanner) Scan(context.Context) ([]model.RuntimeRecord, error) {
 	return out, nil
 }
 
+// MockChatTitleSummarySentinel mirrors the title-summary system-prompt
+// sentinel exported by the app package. Duplicated as a string literal so
+// mock engines can identify summarizer calls without taking a dependency
+// on the app package (which would introduce an import cycle).
+const MockChatTitleSummarySentinel = "You generate short titles for chat conversations."
+
 func (MockEngine) Run(ctx context.Context, request RunRequest, emit func(StreamEvent) error) (RunResult, error) {
+	// Title-summary calls reuse the engine. The mock returns silently so
+	// the chat's title stays whatever createChat set (usually the raw
+	// first message), which is what existing tests assert against.
+	if strings.HasPrefix(request.Agent.Instruction, MockChatTitleSummarySentinel) {
+		return RunResult{}, nil
+	}
 	if err := emit(StreamEvent{
 		Type: model.EventTypeThinking,
 		Thinking: &model.ThinkingPayload{

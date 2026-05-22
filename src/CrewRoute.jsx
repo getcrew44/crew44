@@ -1,6 +1,6 @@
 import React from 'react';
 import { Avatar, Icon, Toggle, ghostBtn, primaryBtn, card, MONO_FONT, UI_FONT } from './components.jsx';
-import { relativeTime } from './utils.js';
+import { relativeTime, deriveAgentDescription } from './utils.js';
 import { runtimeIconUrl } from './runtime-icons/index.js';
 import * as api from './api.js';
 
@@ -508,6 +508,7 @@ const inputStyle = {
 
 function AgentFormDialog({ mode, initial, runtimes, onCancel, onSubmit }) {
   const [name, setName] = React.useState(initial?.name || '');
+  const [description, setDescription] = React.useState(initial?.description || '');
   const [runtimeId, setRuntimeId] = React.useState(initial?.runtime_id || runtimes[0]?.id || '');
   const [model, setModel] = React.useState('');
   const [models, setModels] = React.useState([]);
@@ -547,7 +548,7 @@ function AgentFormDialog({ mode, initial, runtimes, onCancel, onSubmit }) {
     setSubmitting(true);
     setError(null);
     try {
-      await onSubmit({ name: name.trim(), runtime_id: runtimeId, model });
+      await onSubmit({ name: name.trim(), description: description.trim(), runtime_id: runtimeId, model });
     } catch (err) {
       setError(err?.message || 'Something went wrong');
       setSubmitting(false);
@@ -582,6 +583,16 @@ function AgentFormDialog({ mode, initial, runtimes, onCancel, onSubmit }) {
 
         {isCreate && (
           <>
+            <label style={{ fontSize: 12, fontWeight: 500, color: '#5C544B', display: 'block', marginBottom: 6 }}>Description <span style={{ color: '#A89F92', fontWeight: 400 }}>· optional</span></label>
+            <textarea
+              value={description}
+              onChange={e => setDescription(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Escape') onCancel(); }}
+              placeholder="One sentence other agents see when deciding to hand off to this agent. Leave empty to auto-derive from the instructions."
+              rows={2}
+              style={{ ...inputStyle, marginBottom: 14, resize: 'vertical', minHeight: 48, lineHeight: 1.5, fontFamily: UI_FONT }}
+            />
+
             <label style={{ fontSize: 12, fontWeight: 500, color: '#5C544B', display: 'block', marginBottom: 6 }}>Runtime</label>
             {runtimes.length === 0 ? (
               <div style={{ fontSize: 12.5, color: '#A89F92', fontStyle: 'italic', marginBottom: 8 }}>
@@ -884,8 +895,8 @@ function AgentsSection({ agents, runtimes, onPickAgent, onDataRefresh, onToast, 
   const noAgents = agents.length === 0;
   const needsRuntimeSetup = noRuntimes && noAgents;
 
-  const handleCreate = async ({ name, runtime_id, model }) => {
-    await api.createAgent(name, '', runtime_id, model || '');
+  const handleCreate = async ({ name, description, runtime_id, model }) => {
+    await api.createAgent(name, description || '', '', runtime_id, model || '');
     setShowCreate(false);
     onDataRefresh?.();
   };
@@ -1058,14 +1069,14 @@ function AgentsSection({ agents, runtimes, onPickAgent, onDataRefresh, onToast, 
                   )}
                 </div>
               </div>
-              {a.instruction && (
+              {(a.description || a.instruction) && (
                 <div style={{
                   fontSize: 12.5, color: '#9C9488', lineHeight: 1.5,
                   display: '-webkit-box', WebkitBoxOrient: 'vertical',
                   WebkitLineClamp: 2, overflow: 'hidden',
                   marginTop: -4,
                 }}>
-                  {a.instruction}
+                  {a.description || a.instruction}
                 </div>
               )}
               <div style={{
@@ -1161,6 +1172,12 @@ function resizeInstructionEditor(editor) {
 function AgentDetail({ agent, skills, runtimes, agentsMap, onBack, onSave, onRefresh, onOpenSkill }) {
   const [tab, setTab] = React.useState('instructions');
   const [instruction, setInstruction] = React.useState(agent.instruction || '');
+  // Pre-fill with the stored description, or fall back to the value the daemon
+  // would derive — so the user sees the live preview as text, not a placeholder.
+  const [description, setDescription] = React.useState(
+    agent.description || deriveAgentDescription(agent.instruction || '')
+  );
+  const [descriptionDirty, setDescriptionDirty] = React.useState(false);
   const [saving, setSaving] = React.useState(false);
   const [confirmDelete, setConfirmDelete] = React.useState(false);
   const [models, setModels] = React.useState([]);
@@ -1188,7 +1205,10 @@ function AgentDetail({ agent, skills, runtimes, agentsMap, onBack, onSave, onRef
   const handleSave = async () => {
     setSaving(true);
     try {
-      await api.updateAgent(agent.id, { ...agent, instruction });
+      const payload = { ...agent, instruction };
+      if (descriptionDirty) payload.description = description;
+      else delete payload.description;
+      await api.updateAgent(agent.id, payload);
       onSave?.();
     } catch (err) {
       console.error('Save failed:', err);
@@ -1352,7 +1372,7 @@ function AgentDetail({ agent, skills, runtimes, agentsMap, onBack, onSave, onRef
           {/* Right: tabs */}
           <main>
             <div style={{ display: 'flex', gap: 4, borderBottom: '1px solid #ECE6D5', marginBottom: 18 }}>
-              {[['instructions', 'Instructions'], ['skills', 'Skills']].map(([k, l]) => (
+              {[['instructions', 'Instructions'], ['skills', 'Skills'], ['description', 'Description']].map(([k, l]) => (
                 <div key={k} onClick={() => setTab(k)} style={{
                   padding: '8px 12px', fontSize: 13, cursor: 'pointer',
                   color: tab === k ? '#1C1A17' : '#807972',
@@ -1383,6 +1403,46 @@ function AgentDetail({ agent, skills, runtimes, agentsMap, onBack, onSave, onRef
                     width: '100%', maxHeight: INSTRUCTION_EDITOR_MAX_HEIGHT, border: 'none', outline: 'none', resize: 'none',
                     padding: 16, background: 'transparent', fontFamily: MONO_FONT, fontSize: 12.5,
                     color: '#1C1A17', lineHeight: 1.6,
+                  }}
+                />
+              </div>
+            )}
+
+            {tab === 'description' && (
+              <div style={{ ...card, padding: 0 }}>
+                <div style={{ padding: '10px 16px', borderBottom: '1px solid #ECE6D5' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <span style={{ fontSize: 12.5, color: '#807972' }}>description</span>
+                    <div style={{ flex: 1 }} />
+                    <button
+                      style={ghostBtn}
+                      onClick={() => {
+                        setDescription(agent.description || deriveAgentDescription(agent.instruction || ''));
+                        setDescriptionDirty(false);
+                      }}
+                    >
+                      Revert
+                    </button>
+                    <button style={primaryBtn} onClick={handleSave} disabled={saving}>
+                      {saving ? 'Saving…' : 'Save'}
+                    </button>
+                  </div>
+                  <div style={{ marginTop: 6, fontSize: 12, color: '#A89F92', lineHeight: 1.5 }}>
+                    A short summary of what this agent is good at. The rest of your crew reads it to decide when to hand work over.
+                  </div>
+                </div>
+                <textarea
+                  data-testid="agent-description-input"
+                  value={description}
+                  onChange={e => {
+                    setDescription(e.target.value);
+                    setDescriptionDirty(true);
+                  }}
+                  rows={3}
+                  style={{
+                    width: '100%', border: 'none', outline: 'none', resize: 'vertical',
+                    padding: 16, background: 'transparent', fontFamily: UI_FONT, fontSize: 13.5,
+                    color: '#1C1A17', lineHeight: 1.55, minHeight: 96, boxSizing: 'border-box',
                   }}
                 />
               </div>

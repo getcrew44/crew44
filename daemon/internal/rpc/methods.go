@@ -194,6 +194,7 @@ func (s *Server) agentsList(context.Context, Peer, json.RawMessage) (any, error)
 func (s *Server) agentsCreate(_ context.Context, _ Peer, params json.RawMessage) (any, error) {
 	var body struct {
 		Name        string `json:"name"`
+		Description string `json:"description"`
 		Instruction string `json:"instruction"`
 		RuntimeID   string `json:"runtime_id"`
 		Model       string `json:"model"`
@@ -201,7 +202,7 @@ func (s *Server) agentsCreate(_ context.Context, _ Peer, params json.RawMessage)
 	if err := decodeParams(params, &body); err != nil {
 		return nil, err
 	}
-	return s.app.CreateAgent(body.Name, body.Instruction, body.RuntimeID, body.Model)
+	return s.app.CreateAgent(body.Name, body.Description, body.Instruction, body.RuntimeID, body.Model)
 }
 
 func (s *Server) agentsGet(_ context.Context, _ Peer, params json.RawMessage) (any, error) {
@@ -215,11 +216,21 @@ func (s *Server) agentsGet(_ context.Context, _ Peer, params json.RawMessage) (a
 }
 
 func (s *Server) agentsUpdate(_ context.Context, _ Peer, params json.RawMessage) (any, error) {
+	// Parse twice: first into the struct (typed fields), then into a raw
+	// map so we can detect which keys the caller actually included. The
+	// Description field treats absence vs empty differently — empty means
+	// "regenerate from instruction"; absence means "leave alone".
 	var body model.AgentConfig
 	if err := decodeParams(params, &body); err != nil {
 		return nil, err
 	}
-	return s.app.UpdateAgent(body)
+	var keys map[string]json.RawMessage
+	_ = decodeParams(params, &keys)
+	patch := app.AgentPatch{AgentConfig: body}
+	if _, ok := keys["description"]; ok {
+		patch.DescriptionSet = true
+	}
+	return s.app.UpdateAgent(patch)
 }
 
 func (s *Server) agentsArchive(_ context.Context, _ Peer, params json.RawMessage) (any, error) {

@@ -29,6 +29,7 @@ type SystemPromptInput struct {
 	AvailableAgents         []model.AgentConfig
 	Skills                  []Skill
 	SummaryPath             string
+	ChatSessionDir          string // ~/.crew44/chats/chat-<id>; agents write handover scratch files here so they are scoped to this chat
 	HandoverNote            string
 	UserMemoryDir           string // ~/.crew44/memory; reader expands MEMORY.md + per-entry files
 	ProjectMemoryDir        string // ~/.crew44/projects/<id>/memory
@@ -52,7 +53,7 @@ func BuildSystemPrompt(input SystemPromptInput) string {
 	if skills := skillSummary(input.Runtime.Provider, input.Skills); skills != "" {
 		writeSection(&b, "Available Skills", skills)
 	}
-	writeSection(&b, "Available Agents For Handover", availableAgents(input.Agent.ID, input.AvailableAgents))
+	writeSection(&b, "Available Agents For Handover", availableAgents(input.Agent.ID, input.AvailableAgents, input.ChatSessionDir))
 	writeSection(&b, "Handover Output Protocol", handoverProtocol())
 	return strings.TrimSpace(b.String())
 }
@@ -241,7 +242,7 @@ func skillSummary(provider string, skills []Skill) string {
 	return strings.TrimSpace(b.String())
 }
 
-func availableAgents(currentAgentID string, agents []model.AgentConfig) string {
+func availableAgents(currentAgentID string, agents []model.AgentConfig, chatSessionDir string) string {
 	var b strings.Builder
 	count := 0
 	for _, agent := range agents {
@@ -249,16 +250,58 @@ func availableAgents(currentAgentID string, agents []model.AgentConfig) string {
 			continue
 		}
 		count++
-		fmt.Fprintf(&b, "- uuid: %s\n  name: %s\n  description: %s\n", agent.ID, agent.Name, handoverDescription(agent.Instruction))
+		fmt.Fprintf(&b, "- uuid: %s\n  name: %s\n  description: %s\n", agent.ID, agent.Name, agentBriefDescription(agent))
 	}
 	if count == 0 {
 		b.WriteString("- none")
 	}
 	b.WriteString("\n\nRules:\n")
 	b.WriteString("- Use only UUIDs listed above as handover targets.\n")
-	b.WriteString("- Do not hand over to yourself.\n")
-	b.WriteString("- If you are receiving a handover, perform the Handover Task directly. Do not describe the handover.")
+	b.WriteString("- You should handover task to other agents if they're more capable. Do not hand over to yourself.\n")
+	b.WriteString("- Make the handover decision yourself. Do not ask the user whether to hand over.\n")
+	b.WriteString("- If you are receiving a handover, perform the Handover Task directly. Do not describe the handover.\n")
+	b.WriteString("\nRouting:\n")
+	b.WriteString("- Compare every request against the listed agents' descriptions. If another listed agent's scope clearly fits the request better than yours, hand off rather than attempting the work yourself.\n")
+	b.WriteString("- Route the moment you recognize the scope match. Do not partial-answer first and then hand over — the partial answer competes with the specialist's framing and wastes the user's turn.\n")
+	b.WriteString("- When handing over, include the user's goal, the relevant context, and the specific deliverable expected of the next agent.\n")
+	b.WriteString(handoverScratchInstruction(chatSessionDir))
+	b.WriteString("- Handle directly only when the request fits your scope or when no listed agent clearly fits better.")
 	return strings.TrimSpace(b.String())
+}
+
+// handoverScratchInstruction tells the agent where to persist intermediate
+// work before a handover and what shape that handover document should take.
+// Files belong with the chat session, not under /tmp or the project workdir
+// — that way the next agent in this chat can find them and they get cleaned
+// up with the chat. Falls back to a chat-scoped relative path when no
+// session dir is available (tests, edge cases).
+func handoverScratchInstruction(chatSessionDir string) string {
+	chatSessionDir = strings.TrimSpace(chatSessionDir)
+	location := "this chat's session directory (alongside `summary.md`) at `handover/<short-slug>.md`"
+	pathConstraint := ""
+	if chatSessionDir != "" {
+		location = fmt.Sprintf("this chat's session directory at `%s/handover/<short-slug>.md`", chatSessionDir)
+		pathConstraint = " The chat session directory already exists; do not create files under `/tmp` or the project workdir."
+	}
+	return "- Before handing over, save any meaningful intermediate work to a file under " + location + ", and reference that absolute path in the handover note." + pathConstraint + " The file MUST follow this structure so the receiving agent can pick up cold:\n" +
+		"  ```markdown\n" +
+		"  # <one-line title of the task>\n" +
+		"\n" +
+		"  **Handover at:** <RFC3339 timestamp, e.g. 2026-05-21T19:42:00Z>\n" +
+		"\n" +
+		"  ## User report\n" +
+		"  <Quote or tightly paraphrase what the user asked, including the exact phrasing of any reproduction steps or symptoms. Preserve their words for ambiguous requests.>\n" +
+		"\n" +
+		"  ## Context\n" +
+		"  <Current branch, files already modified, related code paths, prior attempts, and anything you learned that isn't obvious from the diff. Cite paths and line numbers.>\n" +
+		"\n" +
+		"  ## Goal\n" +
+		"  <One or two sentences naming the concrete deliverable the next agent must produce. What does \"done\" look like?>\n" +
+		"\n" +
+		"  ## Suggested approach\n" +
+		"  <Numbered steps you would take next. Specific commands, files to read, comparisons to make. Mark anything you tried that didn't work so the next agent doesn't repeat it.>\n" +
+		"  ```\n" +
+		"  Other agents read files; they cannot see your scrollback. A handover note that just points at the file without these sections is not a handover — fill all four sections.\n"
 }
 
 func handoverProtocol() string {
@@ -267,16 +310,11 @@ func handoverProtocol() string {
 		"\nReplace agent_uuid with the target agent uuid from the list above. Replace the sentence with a concise instruction for the next agent. Do not put any other text on that output line."
 }
 
-func handoverDescription(instruction string) string {
-	description := strings.Join(strings.Fields(instruction), " ")
-	if description == "" {
-		return "No description provided."
+func agentBriefDescription(agent model.AgentConfig) string {
+	if d := model.EffectiveAgentDescription(agent); d != "" {
+		return d
 	}
-	const maxDescriptionLen = 240
-	if len(description) <= maxDescriptionLen {
-		return description
-	}
-	return strings.TrimSpace(description[:maxDescriptionLen]) + "..."
+	return "No description provided."
 }
 
 func valueOrNone(value string) string {

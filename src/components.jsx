@@ -93,8 +93,44 @@ export function Toggle({ on, onChange }) {
   );
 }
 
+function renderSearchHighlights(text, searchQuery, keyPrefix, getSearchMatchIndex, activeSearchMatchIndex) {
+  if (!searchQuery) return text;
+  const needle = searchQuery.toLowerCase();
+  if (!needle) return text;
+
+  const lower = text.toLowerCase();
+  const parts = [];
+  let cursor = 0;
+  let match = lower.indexOf(needle, cursor);
+  while (match !== -1) {
+    if (match > cursor) parts.push(text.slice(cursor, match));
+    const value = text.slice(match, match + searchQuery.length);
+    const index = getSearchMatchIndex?.() ?? 0;
+    const active = index === activeSearchMatchIndex;
+    parts.push(
+      <mark
+        key={`${keyPrefix}match-${index}-${match}`}
+        data-testid="conversation-search-match"
+        data-conversation-search-active={active ? 'true' : undefined}
+        style={{
+          background: active ? '#1C1A17' : '#F4CF56',
+          color: active ? '#FCFBF7' : '#1C1A17',
+          borderRadius: 3,
+          padding: '0 1px',
+        }}
+      >
+        {value}
+      </mark>
+    );
+    cursor = match + searchQuery.length;
+    match = lower.indexOf(needle, cursor);
+  }
+  if (cursor < text.length) parts.push(text.slice(cursor));
+  return parts;
+}
+
 // Inline tokens: {{file:...}}, {{ref:...}}, **bold**, *italic*, `code`.
-function renderInline(text, keyPrefix = '') {
+function renderInline(text, keyPrefix = '', searchQuery = '', getSearchMatchIndex, activeSearchMatchIndex = 0) {
   if (!text) return null;
   const tokens = [];
   const re = /\{\{(file|ref):([^}]+)\}\}|\*\*([^*]+)\*\*|\*([^*\n]+)\*|`([^`]+)`/g;
@@ -117,24 +153,30 @@ function renderInline(text, keyPrefix = '') {
       <code key={key} style={{
         fontFamily: MONO_FONT, fontSize: 12.5, color: '#C4644A',
         background: '#F7EFDD', padding: '1px 5px', borderRadius: 4,
-      }}>{p.value}</code>
+      }}>{renderSearchHighlights(p.value, searchQuery, `${key}-`, getSearchMatchIndex, activeSearchMatchIndex)}</code>
     );
     if (p.kind === 'code') return (
       <code key={key} style={{
         fontFamily: MONO_FONT, fontSize: 12.5, color: '#1C1A17',
         background: '#ECE6D5', padding: '1px 5px', borderRadius: 4,
-      }}>{p.value}</code>
+      }}>{renderSearchHighlights(p.value, searchQuery, `${key}-`, getSearchMatchIndex, activeSearchMatchIndex)}</code>
     );
     if (p.kind === 'bold') return (
-      <strong key={key} style={{ fontWeight: 600, color: '#1C1A17' }}>{p.value}</strong>
+      <strong key={key} style={{ fontWeight: 600, color: '#1C1A17' }}>
+        {renderSearchHighlights(p.value, searchQuery, `${key}-`, getSearchMatchIndex, activeSearchMatchIndex)}
+      </strong>
     );
     if (p.kind === 'italic') return (
-      <em key={key} style={{ fontStyle: 'italic' }}>{p.value}</em>
+      <em key={key} style={{ fontStyle: 'italic' }}>
+        {renderSearchHighlights(p.value, searchQuery, `${key}-`, getSearchMatchIndex, activeSearchMatchIndex)}
+      </em>
     );
     if (p.kind === 'ref') return (
-      <span key={key} style={{ color: '#C4644A', fontWeight: 500 }}>{'@' + p.value}</span>
+      <span key={key} style={{ color: '#C4644A', fontWeight: 500 }}>
+        {renderSearchHighlights('@' + p.value, searchQuery, `${key}-`, getSearchMatchIndex, activeSearchMatchIndex)}
+      </span>
     );
-    return <React.Fragment key={key}>{p.value}</React.Fragment>;
+    return <React.Fragment key={key}>{renderSearchHighlights(p.value, searchQuery, `${key}-`, getSearchMatchIndex, activeSearchMatchIndex)}</React.Fragment>;
   });
 }
 
@@ -153,7 +195,7 @@ const CODE_BLOCK_STYLE = {
   overflowX: 'auto',
 };
 
-function CodeBlock({ lines, margin }) {
+function CodeBlock({ lines, margin, searchQuery = '', getSearchMatchIndex, activeSearchMatchIndex = 0 }) {
   const [copied, setCopied] = React.useState(false);
   const [hovered, setHovered] = React.useState(false);
   const text = lines.join('\n');
@@ -170,7 +212,14 @@ function CodeBlock({ lines, margin }) {
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
     >
-      <pre style={CODE_BLOCK_STYLE}>{text}</pre>
+      <pre style={CODE_BLOCK_STYLE}>
+        {lines.map((line, index) => (
+          <React.Fragment key={index}>
+            {index > 0 && '\n'}
+            {renderSearchHighlights(line, searchQuery, `code-${index}-`, getSearchMatchIndex, activeSearchMatchIndex)}
+          </React.Fragment>
+        ))}
+      </pre>
       {(hovered || copied) && (
         <button
           type="button"
@@ -194,11 +243,11 @@ function CodeBlock({ lines, margin }) {
 }
 
 // Render an inline paragraph's lines, preserving single newlines as <br>.
-function renderParagraphLines(lines, keyPrefix) {
+function renderParagraphLines(lines, keyPrefix, searchQuery, getSearchMatchIndex, activeSearchMatchIndex) {
   return lines.map((line, idx) => (
     <React.Fragment key={`${keyPrefix}${idx}`}>
       {idx > 0 && <br />}
-      {renderInline(line, `${keyPrefix}${idx}-`)}
+      {renderInline(line, `${keyPrefix}${idx}-`, searchQuery, getSearchMatchIndex, activeSearchMatchIndex)}
     </React.Fragment>
   ));
 }
@@ -207,7 +256,7 @@ function renderParagraphLines(lines, keyPrefix) {
 // code blocks (```lang … ```), bullet lists (`- `/`* `), ordered lists (`1.`),
 // ATX headings (`#`–`####`), and horizontal rules (`---`/`***`). A single
 // paragraph body renders without wrapping so inline layouts stay tight.
-export function RichText({ text }) {
+export function RichText({ text, searchQuery = '', getSearchMatchIndex, activeSearchMatchIndex = 0 }) {
   if (!text) return null;
   const lines = text.split('\n');
   const blocks = [];
@@ -273,7 +322,7 @@ export function RichText({ text }) {
   flushList();
 
   if (blocks.length === 1 && blocks[0].kind === 'p') {
-    return <>{renderParagraphLines(blocks[0].lines, '')}</>;
+    return <>{renderParagraphLines(blocks[0].lines, '', searchQuery, getSearchMatchIndex, activeSearchMatchIndex)}</>;
   }
 
   return (
@@ -284,7 +333,7 @@ export function RichText({ text }) {
           const s = HEADING_STYLE[b.level] || HEADING_STYLE[4];
           return (
             <Tag key={i} style={{ ...s, color: '#1C1A17', marginTop: i === 0 ? 0 : s.margin.split(' ')[0] }}>
-              {renderInline(b.text, `${i}-`)}
+              {renderInline(b.text, `${i}-`, searchQuery, getSearchMatchIndex, activeSearchMatchIndex)}
             </Tag>
           );
         }
@@ -295,11 +344,18 @@ export function RichText({ text }) {
           }} />
         );
         if (b.kind === 'code') return (
-          <CodeBlock key={i} lines={b.lines} margin={i === 0 ? '0 0 8px' : '8px 0'} />
+          <CodeBlock
+            key={i}
+            lines={b.lines}
+            margin={i === 0 ? '0 0 8px' : '8px 0'}
+            searchQuery={searchQuery}
+            getSearchMatchIndex={getSearchMatchIndex}
+            activeSearchMatchIndex={activeSearchMatchIndex}
+          />
         );
         if (b.kind === 'p') return (
           <p key={i} style={{ margin: i === 0 ? '0 0 8px' : '8px 0' }}>
-            {renderParagraphLines(b.lines, `${i}-`)}
+            {renderParagraphLines(b.lines, `${i}-`, searchQuery, getSearchMatchIndex, activeSearchMatchIndex)}
           </p>
         );
         if (b.kind === 'ul' || b.kind === 'ol') {
@@ -311,7 +367,7 @@ export function RichText({ text }) {
               listStyle: b.kind === 'ol' ? 'decimal' : 'disc',
             }}>
               {b.items.map((it, j) => (
-                <li key={j} style={{ margin: '2px 0' }}>{renderInline(it, `${i}-${j}-`)}</li>
+                <li key={j} style={{ margin: '2px 0' }}>{renderInline(it, `${i}-${j}-`, searchQuery, getSearchMatchIndex, activeSearchMatchIndex)}</li>
               ))}
             </ListTag>
           );

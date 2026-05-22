@@ -47,7 +47,15 @@ func (s *Store) Root() string {
 }
 
 func (s *Store) SummaryPath(chatID string) string {
-	return filepath.Join(s.root, "chats", "chat-"+chatID, "summary.md")
+	return filepath.Join(s.ChatSessionDir(chatID), "summary.md")
+}
+
+// ChatSessionDir is the per-chat session storage directory under
+// ~/.crew44/chats. Holds events.jsonl, summary.md, and any per-chat
+// scratch files agents persist alongside the session (e.g. handover
+// notes, intermediate drafts).
+func (s *Store) ChatSessionDir(chatID string) string {
+	return filepath.Join(s.root, "chats", "chat-"+chatID)
 }
 
 // UserMemoryPath is the legacy global per-user memory file (single bulleted

@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/getcrew44/crew44/daemon/internal/app"
 	"github.com/getcrew44/crew44/daemon/internal/model"
 	"github.com/getcrew44/crew44/daemon/internal/runtime"
 )
@@ -25,7 +26,12 @@ type interruptRestartEngine struct {
 	requests     chan runtime.RunRequest
 }
 
-func (e *cancelAwareEngine) Run(ctx context.Context, _ runtime.RunRequest, emit func(runtime.StreamEvent) error) (runtime.RunResult, error) {
+func (e *cancelAwareEngine) Run(ctx context.Context, request runtime.RunRequest, emit func(runtime.StreamEvent) error) (runtime.RunResult, error) {
+	// Skip the post-run title summarizer — it reuses the same engine but
+	// isn't exercised by cancel-path tests.
+	if strings.HasPrefix(request.Agent.Instruction, app.ChatTitleSummarySentinel) {
+		return runtime.RunResult{}, nil
+	}
 	close(e.started)
 	if err := emit(runtime.StreamEvent{
 		Type: model.EventTypeThinking,
@@ -40,6 +46,11 @@ func (e *cancelAwareEngine) Run(ctx context.Context, _ runtime.RunRequest, emit 
 }
 
 func (e *interruptRestartEngine) Run(ctx context.Context, request runtime.RunRequest, emit func(runtime.StreamEvent) error) (runtime.RunResult, error) {
+	// The post-run title summarizer reuses the same engine. Skip it here:
+	// these tests only care about the steer/restart logic, not auto-titles.
+	if strings.HasPrefix(request.Agent.Instruction, app.ChatTitleSummarySentinel) {
+		return runtime.RunResult{}, nil
+	}
 	e.requests <- request
 	if request.Prompt == "start work" {
 		if err := emit(runtime.StreamEvent{

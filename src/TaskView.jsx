@@ -1,5 +1,5 @@
 import React from 'react';
-import { Avatar, RichText, UI_FONT, MONO_FONT, HeadingTooltip } from './components.jsx';
+import { Avatar, RichText, UI_FONT, MONO_FONT, HeadingTooltip, Icon } from './components.jsx';
 import { mapBackendEvent, mergeToolResults, relativeTime, formatTime, HUMAN_USER, resolveAuthor } from './utils.js';
 import * as api from './api.js';
 import { clearComposerDraft, readComposerDraft, writeComposerDraft } from './draftStore.js';
@@ -129,7 +129,15 @@ function ThoughtChip({ thought }) {
   );
 }
 
-function MessageEvent({ event, agentsMap, thought, showHeader = true }) {
+function MessageEvent({
+  event,
+  agentsMap,
+  thought,
+  showHeader = true,
+  searchQuery = '',
+  activeSearchMatchIndex = 0,
+  getSearchMatchIndex,
+}) {
   const agent = resolveAuthor(event.author, agentsMap) || HUMAN_USER;
   const isUser = agent.kind === 'human';
 
@@ -146,7 +154,12 @@ function MessageEvent({ event, agentsMap, thought, showHeader = true }) {
           borderRadius: 18,
           fontFamily: UI_FONT,
         }}>
-          <RichText text={event.body} />
+          <RichText
+            text={event.body}
+            searchQuery={searchQuery}
+            activeSearchMatchIndex={activeSearchMatchIndex}
+            getSearchMatchIndex={getSearchMatchIndex}
+          />
           <AttachmentTray attachments={event.attachments} />
         </div>
         {event.userSteer && (
@@ -192,7 +205,12 @@ function MessageEvent({ event, agentsMap, thought, showHeader = true }) {
           </div>
         )}
         <div style={{ fontSize: 14, color: '#1C1A17', lineHeight: 1.55 }}>
-          <RichText text={event.body} />
+          <RichText
+            text={event.body}
+            searchQuery={searchQuery}
+            activeSearchMatchIndex={activeSearchMatchIndex}
+            getSearchMatchIndex={getSearchMatchIndex}
+          />
         </div>
       </div>
     </div>
@@ -601,8 +619,26 @@ function StreamingIndicator({ agentsMap, currentAgentId, showHeader = true }) {
   );
 }
 
-function EventRouter({ event, agentsMap, showHeader = true, thought }) {
-  if (event.kind === 'message') return <MessageEvent event={event} agentsMap={agentsMap} thought={thought} showHeader={showHeader} />;
+function EventRouter({
+  event,
+  agentsMap,
+  showHeader = true,
+  thought,
+  searchQuery = '',
+  activeSearchMatchIndex = 0,
+  getSearchMatchIndex,
+}) {
+  if (event.kind === 'message') return (
+    <MessageEvent
+      event={event}
+      agentsMap={agentsMap}
+      thought={thought}
+      showHeader={showHeader}
+      searchQuery={searchQuery}
+      activeSearchMatchIndex={activeSearchMatchIndex}
+      getSearchMatchIndex={getSearchMatchIndex}
+    />
+  );
   if (event.kind === 'thinking') return <ThinkingEvent event={event} agentsMap={agentsMap} showHeader={showHeader} />;
   if (event.kind === 'tool') return <ToolEvent event={event} agentsMap={agentsMap} showHeader={showHeader} />;
   if (event.kind === 'tool_group') return <ToolGroupEvent events={event.events} agentsMap={agentsMap} showHeader={showHeader} />;
@@ -650,7 +686,95 @@ function elapsedText(start, end) {
   return parts.join(' ');
 }
 
-function TaskHeader({ chat, events, fileCount, drawerOpen, onToggleDrawer }) {
+function EditableChatTitle({ chat, onSaved }) {
+  const [editing, setEditing] = React.useState(false);
+  const [draft, setDraft] = React.useState('');
+  const [saving, setSaving] = React.useState(false);
+  const inputRef = React.useRef(null);
+  const titleText = chat?.title || 'Untitled chat';
+
+  React.useEffect(() => {
+    if (!editing) return;
+    const el = inputRef.current;
+    if (!el) return;
+    el.focus();
+    el.select();
+  }, [editing]);
+
+  function startEditing() {
+    if (!chat?.id || saving) return;
+    setDraft(chat?.title || '');
+    setEditing(true);
+  }
+
+  async function commit() {
+    if (!editing) return;
+    const next = draft.trim();
+    setEditing(false);
+    if (!next || next === (chat?.title || '')) return;
+    setSaving(true);
+    try {
+      const updated = await api.updateChat(chat.id, { title: next });
+      onSaved?.(updated);
+    } catch (err) {
+      console.error('Rename chat failed:', err);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function cancel() {
+    setEditing(false);
+    setDraft('');
+  }
+
+  const titleStyle = {
+    margin: 0, fontSize: 22, fontWeight: 600,
+    color: '#1C1A17', letterSpacing: 0, lineHeight: 1.2,
+    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+    minWidth: 0,
+  };
+
+  if (editing) {
+    return (
+      <input
+        ref={inputRef}
+        data-testid="chat-title-input"
+        value={draft}
+        onChange={e => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={e => {
+          if (e.key === 'Enter') { e.preventDefault(); commit(); }
+          else if (e.key === 'Escape') { e.preventDefault(); cancel(); }
+        }}
+        maxLength={128}
+        style={{
+          ...titleStyle,
+          width: '100%',
+          background: '#FCFAF1',
+          border: '1px solid #DCD3BC',
+          borderRadius: 6,
+          padding: '2px 8px',
+          fontFamily: 'inherit',
+          WebkitAppRegion: 'no-drag',
+        }}
+      />
+    );
+  }
+
+  return (
+    <h1
+      data-testid="chat-title"
+      onDoubleClick={(e) => { e.stopPropagation(); startEditing(); }}
+      title={`${titleText} — double-click to rename`}
+      style={{ ...titleStyle, cursor: 'text', WebkitAppRegion: 'no-drag' }}
+    >
+      {titleText}
+    </h1>
+  );
+}
+
+function TaskHeader({ chat, events, fileCount, drawerOpen, onToggleDrawer, onChatUpdated }) {
   // Find the most recent error event — when an agent runtime errors out, the
   // SSE stream stays open but no useful work is happening, so freeze the
   // elapsed counter at the error's timestamp.
@@ -691,12 +815,7 @@ function TaskHeader({ chat, events, fileCount, drawerOpen, onToggleDrawer }) {
     <div onDoubleClick={handleDoubleClick} style={{ padding: '20px 36px 16px', borderBottom: '1px solid #ECE6D5', background: '#FAF5E8', WebkitAppRegion: 'drag' }}>
       <div style={{ ...headerColumn, display: 'flex', alignItems: 'flex-start', gap: 12 }}>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <h1 style={{
-            margin: 0, fontSize: 22, fontWeight: 600,
-            color: '#1C1A17', letterSpacing: 0, lineHeight: 1.2,
-            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-            minWidth: 0,
-          }} title={chat.title || 'Untitled chat'}>{chat.title || 'Untitled chat'}</h1>
+          <EditableChatTitle chat={chat} onSaved={onChatUpdated} />
           <div style={{
             display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 10,
             fontSize: 12.5, color: '#A89F92', marginTop: 8,
@@ -1919,7 +2038,13 @@ function groupConsecutiveTools(events) {
   return out.map(e => (e._toolRun && e.events.length === 1) ? e.events[0] : e);
 }
 
-function renderEventsWithHandovers({ events, agentsMap }) {
+function renderEventsWithHandovers({
+  events,
+  agentsMap,
+  searchQuery = '',
+  activeSearchMatchIndex = 0,
+  getSearchMatchIndex,
+}) {
   const prepared = groupConsecutiveTools(prepareEvents(events));
   const out = [];
   // Track the last *agent* actor, not the last event author. A human turn
@@ -2024,6 +2149,9 @@ function renderEventsWithHandovers({ events, agentsMap }) {
         agentsMap={agentsMap}
         showHeader={showHeader}
         thought={e._thought}
+        searchQuery={searchQuery}
+        activeSearchMatchIndex={activeSearchMatchIndex}
+        getSearchMatchIndex={getSearchMatchIndex}
       />
     );
 
@@ -2072,6 +2200,164 @@ const miniBtnIcon = {
 
 function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function countTextMatches(text, query) {
+  if (!text || !query) return 0;
+  const haystack = String(text).toLowerCase();
+  const needle = query.toLowerCase();
+  let count = 0;
+  let cursor = haystack.indexOf(needle);
+  while (cursor !== -1) {
+    count += 1;
+    cursor = haystack.indexOf(needle, cursor + needle.length);
+  }
+  return count;
+}
+
+function countConversationMatches(events, query) {
+  if (!query) return 0;
+  return (events || []).reduce((total, event) => {
+    if (event?.kind !== 'message') return total;
+    return total + countTextMatches(event.body, query);
+  }, 0);
+}
+
+function isAppleKeyboardPlatform() {
+  const platform = window.navigator?.userAgentData?.platform || window.navigator?.platform || '';
+  return /^(Mac|iPhone|iPad|iPod)/i.test(platform);
+}
+
+function isConversationFindShortcut(e) {
+  if (String(e.key).toLowerCase() !== 'f') return false;
+  const isApple = isAppleKeyboardPlatform();
+  return isApple
+    ? e.metaKey && !e.ctrlKey
+    : e.ctrlKey && !e.metaKey;
+}
+
+function ConversationFindBar({
+  inputRef,
+  query,
+  onQueryChange,
+  matchCount,
+  activeIndex,
+  onNext,
+  onPrevious,
+  onClose,
+}) {
+  const status = query.trim()
+    ? `${matchCount ? activeIndex + 1 : 0} / ${matchCount}`
+    : '0 / 0';
+
+  const handleKeyDown = (e) => {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      onClose();
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      if (e.shiftKey) onPrevious();
+      else onNext();
+    }
+  };
+
+  return (
+    <div style={{
+      background: '#FAF5E8',
+      borderBottom: '1px solid #ECE6D5',
+      padding: '8px 36px',
+    }}>
+      <div style={{
+        ...headerColumn,
+        display: 'flex',
+        justifyContent: 'flex-end',
+      }}>
+        <div role="search" aria-label="Find in conversation" style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 8,
+          width: 320,
+          maxWidth: '100%',
+          padding: '5px 8px',
+          border: '1px solid #DCD3BC',
+          borderRadius: 8,
+          background: '#FFFEF8',
+          boxShadow: '0 1px 0 rgba(0,0,0,0.02)',
+        }}>
+          <span style={{ display: 'inline-flex', color: '#807972', flexShrink: 0 }}>
+            <Icon name="search" size={14} />
+          </span>
+          <input
+            ref={inputRef}
+            data-testid="conversation-find-input"
+            aria-label="Find in conversation"
+            value={query}
+            onChange={e => onQueryChange(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder="Find in conversation"
+            style={{
+              flex: 1,
+              minWidth: 0,
+              border: 'none',
+              outline: 'none',
+              background: 'transparent',
+              color: '#1C1A17',
+              fontFamily: UI_FONT,
+              fontSize: 13,
+              lineHeight: 1.4,
+            }}
+          />
+          <span
+            data-testid="conversation-find-status"
+            style={{
+              minWidth: 44,
+              textAlign: 'right',
+              color: query.trim() && matchCount === 0 ? '#B23A2E' : '#807972',
+              fontFamily: MONO_FONT,
+              fontSize: 11.5,
+              flexShrink: 0,
+            }}
+          >
+            {status}
+          </span>
+          <button
+            type="button"
+            aria-label="Previous match"
+            disabled={!matchCount}
+            onClick={onPrevious}
+            style={{
+              ...miniBtnIcon,
+              opacity: matchCount ? 1 : 0.45,
+              cursor: matchCount ? 'pointer' : 'default',
+            }}
+          >
+            ↑
+          </button>
+          <button
+            type="button"
+            aria-label="Next match"
+            disabled={!matchCount}
+            onClick={onNext}
+            style={{
+              ...miniBtnIcon,
+              opacity: matchCount ? 1 : 0.45,
+              cursor: matchCount ? 'pointer' : 'default',
+            }}
+          >
+            ↓
+          </button>
+          <button
+            type="button"
+            aria-label="Close find"
+            onClick={onClose}
+            style={miniBtnIcon}
+          >
+            ×
+          </button>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function suggestionBounds(value, cursor) {
@@ -2798,8 +3084,12 @@ export default function TaskView({ chatId, agentsMap, skills = [], projects = []
   const [drawerVisible, setDrawerVisible] = React.useState(false);
   const [splitRatio, setSplitRatio] = React.useState(0.58);
   const [dragging, setDragging] = React.useState(false);
+  const [findOpen, setFindOpen] = React.useState(false);
+  const [findQuery, setFindQuery] = React.useState('');
+  const [activeFindIndex, setActiveFindIndex] = React.useState(0);
   const splitRef = React.useRef(null);
   const timelineRef = React.useRef(null);
+  const findInputRef = React.useRef(null);
   const lastSeqRef = React.useRef(0);
   const streamCleanupRef = React.useRef(() => {});
   const waitingForAgentRef = React.useRef(false);
@@ -2874,6 +3164,59 @@ export default function TaskView({ chatId, agentsMap, skills = [], projects = []
     workingTreeFileCount.count !== null
     ? workingTreeFileCount.count
     : editedEventFileCount;
+  const normalizedFindQuery = findOpen ? findQuery.trim() : '';
+  const findMatchCount = React.useMemo(
+    () => countConversationMatches(events, normalizedFindQuery),
+    [events, normalizedFindQuery],
+  );
+
+  const closeFind = React.useCallback(() => {
+    setFindOpen(false);
+    setFindQuery('');
+    setActiveFindIndex(0);
+  }, []);
+
+  const moveFindMatch = React.useCallback((delta) => {
+    setActiveFindIndex(prev => {
+      if (!findMatchCount) return 0;
+      return (prev + delta + findMatchCount) % findMatchCount;
+    });
+  }, [findMatchCount]);
+
+  React.useEffect(() => {
+    setActiveFindIndex(0);
+  }, [normalizedFindQuery]);
+
+  React.useEffect(() => {
+    if (findMatchCount === 0) {
+      if (activeFindIndex !== 0) setActiveFindIndex(0);
+      return;
+    }
+    if (activeFindIndex >= findMatchCount) setActiveFindIndex(0);
+  }, [activeFindIndex, findMatchCount]);
+
+  React.useEffect(() => {
+    if (!findOpen) return;
+    findInputRef.current?.focus();
+    findInputRef.current?.select();
+  }, [findOpen]);
+
+  React.useEffect(() => {
+    const onKeyDown = (e) => {
+      if (isConversationFindShortcut(e)) {
+        e.preventDefault();
+        setFindOpen(true);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
+
+  React.useEffect(() => {
+    if (!normalizedFindQuery || !findMatchCount) return;
+    const active = timelineRef.current?.querySelector('[data-conversation-search-active="true"]');
+    active?.scrollIntoView?.({ block: 'center', inline: 'nearest' });
+  }, [activeFindIndex, findMatchCount, normalizedFindQuery, events.length]);
 
   const onSplitDragStart = React.useCallback((e) => {
     e.preventDefault();
@@ -3159,7 +3502,20 @@ export default function TaskView({ chatId, agentsMap, skills = [], projects = []
           fileCount={fileCount}
           drawerOpen={drawerOpen}
           onToggleDrawer={() => setDrawerOpen(true)}
+          onChatUpdated={setChat}
         />
+        {findOpen && (
+          <ConversationFindBar
+            inputRef={findInputRef}
+            query={findQuery}
+            onQueryChange={setFindQuery}
+            matchCount={findMatchCount}
+            activeIndex={activeFindIndex}
+            onNext={() => moveFindMatch(1)}
+            onPrevious={() => moveFindMatch(-1)}
+            onClose={closeFind}
+          />
+        )}
         <div
           ref={timelineRef}
           data-testid="conversation-scroll"
@@ -3167,7 +3523,16 @@ export default function TaskView({ chatId, agentsMap, skills = [], projects = []
         >
           <div data-testid="conversation-column" style={conversationColumn}>
             {(() => {
-              const { nodes, lastDisplayedActor, lastAgentActor } = renderEventsWithHandovers({ events, agentsMap });
+              let searchMatchIndex = 0;
+              const searchQuery = findMatchCount ? normalizedFindQuery : '';
+              const getSearchMatchIndex = () => searchMatchIndex++;
+              const { nodes, lastDisplayedActor, lastAgentActor } = renderEventsWithHandovers({
+                events,
+                agentsMap,
+                searchQuery,
+                activeSearchMatchIndex: activeFindIndex,
+                getSearchMatchIndex,
+              });
               const streamingAgentId = lastAgentActor || chat?.current_agent_id;
               const showStreamingHeader = lastDisplayedActor !== streamingAgentId;
               return (

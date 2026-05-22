@@ -110,7 +110,7 @@ function MenuRow({ icon, label, danger, onClick }) {
   );
 }
 
-function ProjectGroup({ project, openIds, currentChatId, onToggle, onPick, onNewChat, onRename, onShowInFinder, onRemove, onArchiveChat }) {
+function ProjectGroup({ project, openIds, currentChatId, onToggle, onPick, onNewChat, onRename, onShowInFinder, onRemove, onArchiveChat, onRenameChat }) {
   const open = openIds.has(project.id);
   const [hover, setHover] = React.useState(false);
   const [newChatTooltipRect, setNewChatTooltipRect] = React.useState(null);
@@ -264,6 +264,7 @@ function ProjectGroup({ project, openIds, currentChatId, onToggle, onPick, onNew
               active={currentChatId === s.id}
               onPick={() => onPick(s.id)}
               onArchive={() => onArchiveChat?.(s.id)}
+              onRename={onRenameChat}
             />
           ))}
           {project.sessions.length === 0 && (
@@ -302,14 +303,109 @@ function SessionProgress({ title }) {
   );
 }
 
-function SessionItem({ session, active, onPick, onArchive }) {
+// Session row context menu — opened via right-click on a chat row. Items
+// mirror ProjectMenu's visual treatment. Positioned at the mouse cursor
+// (point) rather than below an anchor so right-clicks feel native.
+function SessionMenu({ point, onClose, onRename, onArchive, canArchive = true }) {
+  const ref = React.useRef(null);
+
+  React.useEffect(() => {
+    const close = (e) => { if (ref.current && !ref.current.contains(e.target)) onClose(); };
+    const keyClose = (e) => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('mousedown', close);
+    document.addEventListener('keydown', keyClose);
+    return () => {
+      document.removeEventListener('mousedown', close);
+      document.removeEventListener('keydown', keyClose);
+    };
+  }, [onClose]);
+
+  const items = [
+    {
+      label: 'Rename',
+      icon: <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M2 10.5l.8-3 6-6a1.2 1.2 0 0 1 1.7 1.7l-6 6-2.5.3z" stroke="currentColor" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round"/></svg>,
+      action: () => { onClose(); onRename?.(); },
+    },
+    ...(canArchive ? [
+      { divider: true },
+      {
+      label: 'Archive',
+      icon: <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><rect x="1.5" y="2" width="10" height="2.5" rx="0.8" stroke="currentColor" strokeWidth="1"/><path d="M2.5 4.5v5a1 1 0 0 0 1 1h5a1 1 0 0 0 1-1v-5" stroke="currentColor" strokeWidth="1"/><path d="M5 7.5h3" stroke="currentColor" strokeWidth="1" strokeLinecap="round"/></svg>,
+      danger: true,
+      action: () => { onClose(); onArchive?.(); },
+      },
+    ] : []),
+  ];
+
+  return (
+    <div
+      ref={ref}
+      data-testid="session-menu"
+      style={{
+        position: 'fixed',
+        top: point.y,
+        left: point.x,
+        zIndex: 9999,
+        background: '#FFFFFF', borderRadius: 10,
+        boxShadow: '0 8px 24px rgba(0,0,0,0.14), 0 0 0 0.5px rgba(0,0,0,0.07)',
+        padding: '4px', minWidth: 172,
+        fontFamily: '-apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif',
+      }}
+    >
+      {items.map((item, i) => item.divider ? (
+        <div key={i} style={{ height: 1, background: '#ECE6D5', margin: '3px 0' }} />
+      ) : (
+        <MenuRow key={i} icon={item.icon} label={item.label} danger={item.danger} onClick={item.action} />
+      ))}
+    </div>
+  );
+}
+
+function SessionItem({ session, active, onPick, onArchive, onRename }) {
   const [hover, setHover] = React.useState(false);
   const [confirming, setConfirming] = React.useState(false);
+  const [menuPoint, setMenuPoint] = React.useState(null);
+  const [renaming, setRenaming] = React.useState(false);
+  const [renameVal, setRenameVal] = React.useState(session.title || '');
+  const renameInputRef = React.useRef(null);
   const isRunning = session.status === 'running';
+
+  // Reset the draft if the chat's title changes upstream (e.g., auto-title
+  // arrived) while we're not actively editing.
+  React.useEffect(() => {
+    if (!renaming) setRenameVal(session.title || '');
+  }, [session.title, renaming]);
+
+  React.useEffect(() => {
+    if (renaming && renameInputRef.current) {
+      renameInputRef.current.focus();
+      renameInputRef.current.select();
+    }
+  }, [renaming]);
 
   const handleMouseLeave = () => {
     setHover(false);
     setConfirming(false);
+  };
+
+  const beginRename = () => {
+    setRenameVal(session.title || '');
+    setRenaming(true);
+  };
+
+  const commitRename = () => {
+    const next = renameVal.trim();
+    setRenaming(false);
+    if (!next || next === (session.title || '')) {
+      setRenameVal(session.title || '');
+      return;
+    }
+    onRename?.(session.id, next);
+  };
+
+  const cancelRename = () => {
+    setRenaming(false);
+    setRenameVal(session.title || '');
   };
 
   const archiveBtn = {
@@ -319,56 +415,95 @@ function SessionItem({ session, active, onPick, onArchive }) {
   };
 
   return (
-    <div
-      data-testid={`chat-${session.id}`}
-      onClick={confirming ? undefined : onPick}
-      onMouseEnter={() => setHover(true)}
-      onMouseLeave={handleMouseLeave}
-      style={{
-        display: 'flex', alignItems: 'center', gap: 8,
-        padding: '5px 10px 5px 32px', margin: '1px 8px',
-        borderRadius: 7, cursor: confirming ? 'default' : 'pointer',
-        userSelect: 'none', fontSize: 14,
-        background: active ? '#EBE5D6' : hover ? '#EFE9DB' : 'transparent',
-        color: active ? '#1C1A17' : '#3A352E',
-        fontWeight: 400,
-      }}
-    >
-      <span
-        title={session.title}
-        style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', lineHeight: '18px' }}
+    <>
+      <div
+        data-testid={`chat-${session.id}`}
+        onClick={renaming || confirming ? undefined : onPick}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          if (renaming) return;
+          setConfirming(false);
+          setMenuPoint({ x: e.clientX, y: e.clientY });
+        }}
+        onMouseEnter={() => setHover(true)}
+        onMouseLeave={handleMouseLeave}
+        style={{
+          display: 'flex', alignItems: 'center', gap: 8,
+          padding: '5px 10px 5px 32px', margin: '1px 8px',
+          borderRadius: 7, cursor: renaming || confirming ? 'default' : 'pointer',
+          userSelect: 'none', fontSize: 14,
+          background: active ? '#EBE5D6' : (hover || menuPoint) ? '#EFE9DB' : 'transparent',
+          color: active ? '#1C1A17' : '#3A352E',
+          fontWeight: 400,
+        }}
       >
-        {session.title}
-      </span>
-      {isRunning ? (
-        <SessionProgress title={session.title} />
-      ) : confirming ? (
-        <span style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
-          <span style={{ fontSize: 11.5, color: '#A89F92', whiteSpace: 'nowrap' }}>Archive?</span>
+        {renaming ? (
+          <input
+            ref={renameInputRef}
+            data-testid={`chat-${session.id}-rename-input`}
+            value={renameVal}
+            onChange={e => setRenameVal(e.target.value)}
+            onBlur={commitRename}
+            onClick={e => e.stopPropagation()}
+            onKeyDown={e => {
+              if (e.key === 'Enter') { e.preventDefault(); commitRename(); }
+              else if (e.key === 'Escape') { e.preventDefault(); cancelRename(); }
+            }}
+            maxLength={128}
+            style={{
+              flex: 1, minWidth: 0, border: 'none',
+              outline: '1.5px solid #C4644A', borderRadius: 4,
+              background: '#FFFEF8', padding: '1px 4px',
+              fontFamily: 'inherit', fontSize: 14, color: '#1C1A17', fontWeight: 400,
+            }}
+          />
+        ) : (
+          <span
+            title={session.title}
+            style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', lineHeight: '18px' }}
+          >
+            {session.title}
+          </span>
+        )}
+        {renaming ? null : isRunning ? (
+          <SessionProgress title={session.title} />
+        ) : confirming ? (
+          <span style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
+            <span style={{ fontSize: 11.5, color: '#A89F92', whiteSpace: 'nowrap' }}>Archive?</span>
+            <button
+              title="Confirm archive"
+              onClick={(e) => { e.stopPropagation(); onArchive?.(); }}
+              style={{ ...archiveBtn, width: 18, height: 18, color: '#C4644A' }}
+            >
+              <svg width="11" height="11" viewBox="0 0 11 11" fill="none">
+                <path d="M1.5 5.5l3 3 5-5.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+              </svg>
+            </button>
+          </span>
+        ) : hover ? (
           <button
-            title="Confirm archive"
-            onClick={(e) => { e.stopPropagation(); onArchive?.(); }}
-            style={{ ...archiveBtn, width: 18, height: 18, color: '#C4644A' }}
+            title="Archive chat"
+            onClick={(e) => { e.stopPropagation(); setConfirming(true); }}
+            style={{ ...archiveBtn, width: 18, height: 18, color: '#A89F92' }}
           >
             <svg width="11" height="11" viewBox="0 0 11 11" fill="none">
-              <path d="M1.5 5.5l3 3 5-5.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+              <path d="M1.5 1.5l8 8M9.5 1.5l-8 8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
             </svg>
           </button>
-        </span>
-      ) : hover ? (
-        <button
-          title="Archive chat"
-          onClick={(e) => { e.stopPropagation(); setConfirming(true); }}
-          style={{ ...archiveBtn, width: 18, height: 18, color: '#A89F92' }}
-        >
-          <svg width="11" height="11" viewBox="0 0 11 11" fill="none">
-            <path d="M1.5 1.5l8 8M9.5 1.5l-8 8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
-          </svg>
-        </button>
-      ) : session.age ? (
-        <span style={{ color: '#A89F92', fontSize: 12.5, flexShrink: 0 }}>{session.age}</span>
-      ) : null}
-    </div>
+        ) : session.age ? (
+          <span style={{ color: '#A89F92', fontSize: 12.5, flexShrink: 0 }}>{session.age}</span>
+        ) : null}
+      </div>
+      {menuPoint && (
+        <SessionMenu
+          point={menuPoint}
+          onClose={() => setMenuPoint(null)}
+          onRename={beginRename}
+          onArchive={() => onArchive?.()}
+          canArchive={!isRunning}
+        />
+      )}
+    </>
   );
 }
 
@@ -530,7 +665,7 @@ function DropItem({ icon, label, onClick }) {
   );
 }
 
-export default function Sidebar({ projects, currentChatId, route, setRoute, onPick, deskName, backendOnline, onNewProject, onNewChat, onRenameProject, onShowInFinder, onCreateProject, onRemoveProject, onArchiveChat, onResetOnboarding, onPairMobile, hasMobileDevice = false, onDroppedProjectFolders }) {
+export default function Sidebar({ projects, currentChatId, route, setRoute, onPick, deskName, backendOnline, onNewProject, onNewChat, onRenameProject, onShowInFinder, onCreateProject, onRemoveProject, onArchiveChat, onRenameChat, onResetOnboarding, onPairMobile, hasMobileDevice = false, onDroppedProjectFolders }) {
   const [openIds, setOpenIds] = React.useState(() => new Set(projects.map(p => p.id)));
   const [creatingProject, setCreatingProject] = React.useState(false);
   const [newProjectName, setNewProjectName] = React.useState('');
@@ -682,6 +817,7 @@ export default function Sidebar({ projects, currentChatId, route, setRoute, onPi
               onShowInFinder={onShowInFinder}
               onRemove={onRemoveProject}
               onArchiveChat={onArchiveChat}
+              onRenameChat={onRenameChat}
             />
           ))
         )}

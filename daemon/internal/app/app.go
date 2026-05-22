@@ -412,7 +412,7 @@ func (a *App) GetAgent(id string) (model.AgentConfig, error) {
 	return record, a.mapError(err)
 }
 
-func (a *App) CreateAgent(name, instruction, runtimeID, modelName string) (model.AgentConfig, error) {
+func (a *App) CreateAgent(name, description, instruction, runtimeID, modelName string) (model.AgentConfig, error) {
 	runtimeRecord, err := a.requireAvailableRuntime(runtimeID)
 	if err != nil {
 		return model.AgentConfig{}, err
@@ -420,10 +420,15 @@ func (a *App) CreateAgent(name, instruction, runtimeID, modelName string) (model
 	if modelName == "" {
 		modelName = defaultRuntimeModel(runtimeRecord)
 	}
+	description = strings.TrimSpace(description)
+	if description == "" {
+		description = model.DeriveAgentDescription(instruction)
+	}
 	now := time.Now().UTC()
 	agent := model.AgentConfig{
 		ID:          id.New(),
 		Name:        name,
+		Description: description,
 		Instruction: instruction,
 		RuntimeID:   runtimeID,
 		Model:       modelName,
@@ -437,7 +442,17 @@ func (a *App) CreateAgent(name, instruction, runtimeID, modelName string) (model
 	return agent, nil
 }
 
-func (a *App) UpdateAgent(agent model.AgentConfig) (model.AgentConfig, error) {
+// AgentPatch wraps an AgentConfig payload with explicit presence flags for
+// fields whose absent-vs-empty distinction matters. Today only Description
+// needs this: omitting the key leaves the existing value alone; sending an
+// empty string asks the server to regenerate from the instruction.
+type AgentPatch struct {
+	model.AgentConfig
+	DescriptionSet bool
+}
+
+func (a *App) UpdateAgent(patch AgentPatch) (model.AgentConfig, error) {
+	agent := patch.AgentConfig
 	current, err := a.store.GetAgent(agent.ID)
 	if err != nil {
 		return model.AgentConfig{}, a.mapError(err)
@@ -447,6 +462,16 @@ func (a *App) UpdateAgent(agent model.AgentConfig) (model.AgentConfig, error) {
 	}
 	if agent.Instruction != "" {
 		current.Instruction = agent.Instruction
+	}
+	if patch.DescriptionSet {
+		next := strings.TrimSpace(agent.Description)
+		if next == "" {
+			next = model.DeriveAgentDescription(current.Instruction)
+		}
+		current.Description = next
+	} else if current.Description == "" {
+		// Lazy backfill for legacy agents stored before this field existed.
+		current.Description = model.DeriveAgentDescription(current.Instruction)
 	}
 	runtimeChanged := false
 	if agent.RuntimeID != "" {
@@ -954,6 +979,9 @@ func (a *App) UpdateChat(chat model.ChatRecord) (model.ChatRecord, error) {
 	}
 	if chat.Title != "" {
 		current.Title = model.NormalizeChatTitle(chat.Title)
+		// Any title that lands here came from a user-driven rename
+		// (RPC chats.update). Lock it against the auto-summarizer.
+		current.TitleSetByUser = true
 	}
 	if chat.Status != "" {
 		current.Status = chat.Status
@@ -964,6 +992,33 @@ func (a *App) UpdateChat(chat model.ChatRecord) (model.ChatRecord, error) {
 		return model.ChatRecord{}, err
 	}
 	return current, nil
+}
+
+// applyAutoChatTitle writes a machine-derived title onto the chat, but only
+// when the user has not explicitly renamed it. Returns the resulting chat
+// (or the unchanged record when the auto-title was rejected). Errors from
+// the store flow back to the caller; a locked title is not an error.
+func (a *App) applyAutoChatTitle(chatID, title string) (model.ChatRecord, bool, error) {
+	title = model.NormalizeChatTitle(title)
+	if title == "" {
+		return model.ChatRecord{}, false, nil
+	}
+	current, err := a.store.GetChat(chatID)
+	if err != nil {
+		return model.ChatRecord{}, false, a.mapError(err)
+	}
+	if current.TitleSetByUser {
+		return current, false, nil
+	}
+	if current.Title == title {
+		return current, false, nil
+	}
+	current.Title = title
+	current.UpdatedAt = time.Now().UTC()
+	if err := a.store.SaveChat(current); err != nil {
+		return model.ChatRecord{}, false, err
+	}
+	return current, true, nil
 }
 
 func (a *App) DeleteChat(id string) error {

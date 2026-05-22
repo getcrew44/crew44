@@ -17,6 +17,7 @@ vi.mock('../api.js', () => ({
   listProjectFiles: vi.fn(),
   readProjectFile: vi.fn(),
   getProjectGitDiff: vi.fn(),
+  updateChat: vi.fn(),
 }));
 
 vi.mock('../thumbnail.js', () => ({
@@ -86,11 +87,19 @@ beforeEach(() => {
   api.listProjectFiles.mockResolvedValue([]);
   api.readProjectFile.mockResolvedValue({ path: '', content: '', size: 0, truncated: false, binary: false });
   api.getProjectGitDiff.mockResolvedValue([]);
+  api.updateChat.mockImplementation(async (id, data) => ({ ...chat, ...data, id }));
 });
 
 function emitEvent(stream, event) {
   return act(async () => {
     stream[2](event);
+  });
+}
+
+function mockNavigatorPlatform(platform) {
+  Object.defineProperty(window.navigator, 'platform', {
+    configurable: true,
+    value: platform,
   });
 }
 
@@ -358,6 +367,74 @@ describe('TaskView', () => {
     });
 
     await waitFor(() => expect(timeline.scrollTop).toBe(900));
+  });
+
+  it('opens conversation find with Cmd+F on macOS and ignores Ctrl+F', async () => {
+    mockNavigatorPlatform('MacIntel');
+    api.streamChatEvents.mockImplementation(() => vi.fn());
+    render(<TaskView chatId="chat-1" agentsMap={agentsMap} />);
+
+    await screen.findByTestId('composer-input');
+    const stream = api.streamChatEvents.mock.calls[0];
+    await emitEvent(stream, {
+      seq: 3,
+      type: 'message',
+      ts: '2026-05-12T10:02:00Z',
+      actor_agent_id: 'agent-1',
+      message: { role: 'assistant', content: 'Alpha beta alpha' },
+    });
+
+    fireEvent.keyDown(window, { key: 'f', ctrlKey: true });
+    expect(screen.queryByTestId('conversation-find-input')).not.toBeInTheDocument();
+
+    fireEvent.keyDown(window, { key: 'f', metaKey: true });
+
+    const findInput = await screen.findByTestId('conversation-find-input');
+    expect(findInput).toHaveFocus();
+
+    fireEvent.change(findInput, { target: { value: 'alpha' } });
+
+    const matches = await screen.findAllByTestId('conversation-search-match');
+    expect(matches).toHaveLength(2);
+    expect(screen.getByTestId('conversation-find-status')).toHaveTextContent('1 / 2');
+  });
+
+  it('opens conversation find with Ctrl+F on Windows/Linux and ignores Cmd+F', async () => {
+    mockNavigatorPlatform('Win32');
+    api.streamChatEvents.mockImplementation(() => vi.fn());
+    render(<TaskView chatId="chat-1" agentsMap={agentsMap} />);
+
+    await screen.findByTestId('composer-input');
+
+    fireEvent.keyDown(window, { key: 'f', metaKey: true });
+    expect(screen.queryByTestId('conversation-find-input')).not.toBeInTheDocument();
+
+    fireEvent.keyDown(window, { key: 'f', ctrlKey: true });
+
+    expect(await screen.findByTestId('conversation-find-input')).toHaveFocus();
+  });
+
+  it('highlights conversation find matches inside fenced code blocks', async () => {
+    mockNavigatorPlatform('MacIntel');
+    api.streamChatEvents.mockImplementation(() => vi.fn());
+    render(<TaskView chatId="chat-1" agentsMap={agentsMap} />);
+
+    await screen.findByTestId('composer-input');
+    const stream = api.streamChatEvents.mock.calls[0];
+    await emitEvent(stream, {
+      seq: 3,
+      type: 'message',
+      ts: '2026-05-12T10:02:00Z',
+      actor_agent_id: 'agent-1',
+      message: { role: 'assistant', content: '```js\nconst alpha = 1;\n```' },
+    });
+
+    fireEvent.keyDown(window, { key: 'f', metaKey: true });
+    const findInput = await screen.findByTestId('conversation-find-input');
+    fireEvent.change(findInput, { target: { value: 'alpha' } });
+
+    expect(await screen.findByTestId('conversation-search-match')).toHaveTextContent('alpha');
+    expect(screen.getByTestId('conversation-find-status')).toHaveTextContent('1 / 1');
   });
 
   it('moves the running cancel action into the composer stop button', async () => {
@@ -1576,6 +1653,68 @@ describe('TaskView', () => {
         () => expect(screen.queryByTestId('files-drawer-close')).not.toBeInTheDocument(),
         { timeout: 1000 },
       );
+    });
+  });
+
+  describe('chat title rename', () => {
+    it('shows the current title and switches to an input on double-click', async () => {
+      render(<TaskView chatId="chat-1" agentsMap={agentsMap} />);
+      const title = await screen.findByTestId('chat-title');
+      expect(title.textContent).toBe('Demo chat');
+
+      fireEvent.doubleClick(title);
+
+      const input = await screen.findByTestId('chat-title-input');
+      expect(input).toHaveValue('Demo chat');
+    });
+
+    it('saves the new title on Enter via api.updateChat and updates the header', async () => {
+      render(<TaskView chatId="chat-1" agentsMap={agentsMap} />);
+      fireEvent.doubleClick(await screen.findByTestId('chat-title'));
+
+      const input = await screen.findByTestId('chat-title-input');
+      fireEvent.change(input, { target: { value: 'Refactor login flow' } });
+      fireEvent.keyDown(input, { key: 'Enter' });
+
+      await waitFor(() => expect(api.updateChat).toHaveBeenCalledWith('chat-1', { title: 'Refactor login flow' }));
+      await waitFor(() => expect(screen.getByTestId('chat-title').textContent).toBe('Refactor login flow'));
+    });
+
+    it('cancels the edit on Escape without calling updateChat', async () => {
+      render(<TaskView chatId="chat-1" agentsMap={agentsMap} />);
+      fireEvent.doubleClick(await screen.findByTestId('chat-title'));
+
+      const input = await screen.findByTestId('chat-title-input');
+      fireEvent.change(input, { target: { value: 'Discarded' } });
+      fireEvent.keyDown(input, { key: 'Escape' });
+
+      await waitFor(() => expect(screen.queryByTestId('chat-title-input')).not.toBeInTheDocument());
+      expect(api.updateChat).not.toHaveBeenCalled();
+      expect(screen.getByTestId('chat-title').textContent).toBe('Demo chat');
+    });
+
+    it('does not call updateChat when the title is unchanged', async () => {
+      render(<TaskView chatId="chat-1" agentsMap={agentsMap} />);
+      fireEvent.doubleClick(await screen.findByTestId('chat-title'));
+
+      const input = await screen.findByTestId('chat-title-input');
+      fireEvent.keyDown(input, { key: 'Enter' });
+
+      await waitFor(() => expect(screen.queryByTestId('chat-title-input')).not.toBeInTheDocument());
+      expect(api.updateChat).not.toHaveBeenCalled();
+    });
+
+    it('does not call updateChat when the trimmed new title is empty', async () => {
+      render(<TaskView chatId="chat-1" agentsMap={agentsMap} />);
+      fireEvent.doubleClick(await screen.findByTestId('chat-title'));
+
+      const input = await screen.findByTestId('chat-title-input');
+      fireEvent.change(input, { target: { value: '   ' } });
+      fireEvent.keyDown(input, { key: 'Enter' });
+
+      await waitFor(() => expect(screen.queryByTestId('chat-title-input')).not.toBeInTheDocument());
+      expect(api.updateChat).not.toHaveBeenCalled();
+      expect(screen.getByTestId('chat-title').textContent).toBe('Demo chat');
     });
   });
 });

@@ -23,6 +23,7 @@ type RuntimeRecord struct {
 type AgentConfig struct {
 	ID          string    `json:"id"`
 	Name        string    `json:"name"`
+	Description string    `json:"description"`
 	Instruction string    `json:"instruction"`
 	RuntimeID   string    `json:"runtime_id"`
 	Model       string    `json:"model"`
@@ -104,6 +105,10 @@ type ChatRecord struct {
 	ID                     string             `json:"id"`
 	ProjectID              string             `json:"project_id"`
 	Title                  string             `json:"title"`
+	// TitleSetByUser is true when the user explicitly renamed this chat.
+	// Locks the title against automatic summarization so a manual rename
+	// always wins over the LLM-derived title.
+	TitleSetByUser         bool               `json:"title_set_by_user,omitempty"`
 	MainAgentID            string             `json:"main_agent_id"`
 	CurrentAgentID         string             `json:"current_agent_id"`
 	PendingHandoverAgentID string             `json:"pending_handover_agent_id,omitempty"`

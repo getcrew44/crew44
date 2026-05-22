@@ -74,6 +74,11 @@ func (a *App) PostMessage(chatID, content, targetAgentID string, attachments []m
 		return model.ChatRecord{}, err
 	}
 
+	// Snapshot whether this is the chat's first user turn *before*
+	// appending the new event. Used by runChat after the run finishes
+	// to decide whether to dispatch the title summarizer.
+	isFirstUserTurn := !chatHasPriorUserMessage(a, chatID)
+
 	userEvent, err := a.store.AppendEvent(chatID, model.Event{
 		Type:         model.EventTypeMessage,
 		TS:           now,
@@ -94,7 +99,32 @@ func (a *App) PostMessage(chatID, content, targetAgentID string, attachments []m
 	controller := &chatRunController{cancel: cancel}
 	a.runs[chatID] = controller
 	go a.runChat(ctx, controller, chatID, targetAgentID, turnID, model.AppendAttachmentLinks(content, attachments))
+	// Title summarization runs in parallel to the chat run, not after it,
+	// so long-running first turns don't leave the chat showing the raw
+	// first message as its title for the whole duration. The summarizer
+	// has its own timeout (chatTitleSummaryTimeout) and respects an
+	// existing manual rename, so it's safe to dispatch unconditionally on
+	// the chat's first user turn.
+	if isFirstUserTurn && strings.TrimSpace(content) != "" {
+		go a.runChatTitleSummarizer(chatID, targetAgentID, content)
+	}
 	return chat, nil
+}
+
+// chatHasPriorUserMessage returns true when the chat's event log already
+// holds at least one user-role message. Errors are treated as "yes" so we
+// never re-run the title summarizer on an existing chat we couldn't read.
+func chatHasPriorUserMessage(a *App, chatID string) bool {
+	events, err := a.store.ListEvents(chatID, 0)
+	if err != nil {
+		return true
+	}
+	for _, ev := range events {
+		if ev.Type == model.EventTypeMessage && ev.Message != nil && ev.Message.Role == model.MessageRoleUser {
+			return true
+		}
+	}
+	return false
 }
 
 func (a *App) InterruptMessage(chatID, content string, attachments []model.MessageAttachment) (model.ChatRecord, error) {
@@ -266,6 +296,7 @@ func (a *App) runChat(ctx context.Context, controller *chatRunController, chatID
 			AvailableAgents:         availableAgents,
 			Skills:                  promptSkills(agentSkills),
 			SummaryPath:             a.store.SummaryPath(chatID),
+			ChatSessionDir:          a.store.ChatSessionDir(chatID),
 			HandoverNote:            currentHandoverNote,
 			UserMemoryDir:           a.store.UserMemoryDir(),
 			ProjectMemoryDir:        a.store.ProjectMemoryDir(project.ID),
