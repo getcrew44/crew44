@@ -169,6 +169,17 @@ const SUGGESTIONS = [
 ];
 
 const MENTION_MENU_WIDTH = 260;
+const NEW_TASK_INPUT_MIN_HEIGHT = 100;
+const NEW_TASK_INPUT_TEXT_STYLE = {
+  fontFamily: UI_FONT,
+  fontSize: 15,
+  lineHeight: 1.55,
+  padding: 0,
+  margin: 0,
+  whiteSpace: 'pre-wrap',
+  overflowWrap: 'break-word',
+  minHeight: NEW_TASK_INPUT_MIN_HEIGHT,
+};
 
 export default function NewTaskRoute({ projects, agents, skills = [], onNewTask, onExistingFolder, initialProjectId }) {
   const draftStorageChatId = React.useMemo(() => newTaskDraftChatId(), []);
@@ -469,16 +480,12 @@ export default function NewTaskRoute({ projects, agents, skills = [], onNewTask,
             {val && (
               <div
                 aria-hidden="true"
+                data-testid="new-task-input-overlay"
                 style={{
+                  ...NEW_TASK_INPUT_TEXT_STYLE,
                   position: 'absolute',
                   inset: 0,
                   pointerEvents: 'none',
-                  whiteSpace: 'pre-wrap',
-                  overflowWrap: 'break-word',
-                  fontFamily: UI_FONT,
-                  fontSize: 15,
-                  lineHeight: 1.55,
-                  minHeight: 100,
                   color: '#1C1A17',
                   transform: `translateY(${-scrollTop}px)`,
                 }}
@@ -506,11 +513,12 @@ export default function NewTaskRoute({ projects, agents, skills = [], onNewTask,
               placeholder="Describe a task. The lead agent will plan it and assign subtasks."
               rows={1}
               style={{
+                ...NEW_TASK_INPUT_TEXT_STYLE,
                 position: 'relative', zIndex: 1,
                 width: '100%', border: 'none', outline: 'none', resize: 'none',
-                background: 'transparent', fontFamily: UI_FONT, fontSize: 15,
+                background: 'transparent',
                 color: val ? 'transparent' : '#1C1A17', caretColor: '#1C1A17',
-                lineHeight: 1.55, minHeight: 100,
+                display: 'block',
               }}
             />
             </div>

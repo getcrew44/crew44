@@ -247,6 +247,31 @@ describe('NewTaskRoute', () => {
     expect(listbox.style.width).toBe('260px');
   });
 
+  it('keeps the native textarea and visible overlay on identical text metrics', () => {
+    render(
+      <NewTaskRoute
+        projects={projects}
+        agents={agents}
+        onNewTask={() => {}}
+        initialProjectId="p1"
+      />
+    );
+
+    const input = screen.getByTestId('new-task-input');
+    fireEvent.change(input, {
+      target: {
+        value: 'Now the new task input box has a cursor positioning problem\n\nUse a worktree for this fix',
+        selectionStart: 89,
+        selectionEnd: 89,
+      },
+    });
+
+    const overlay = screen.getByTestId('new-task-input-overlay');
+    for (const prop of ['fontFamily', 'fontSize', 'lineHeight', 'padding', 'margin', 'whiteSpace', 'overflowWrap', 'minHeight']) {
+      expect(input.style[prop]).toBe(overlay.style[prop]);
+    }
+  });
+
   it('requires an explicit project selection before starting', async () => {
     render(
       <NewTaskRoute
