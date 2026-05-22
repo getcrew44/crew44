@@ -284,6 +284,66 @@ func TestResetAgentPresetRestoresFactoryFields(t *testing.T) {
 	}
 }
 
+// TestResetAgentPresetRestoresAuxiliarySkillFiles guards against a
+// regression where reset only rewrote SKILL.md and silently dropped
+// helper scripts, templates, and examples shipped with the preset.
+// tam-sam-som-calculator/SKILL.md explicitly references
+// scripts/market-sizing.py at runtime, so a reset that drops it leaves
+// the freshly-resetted skill pointing at a missing helper.
+func TestResetAgentPresetRestoresAuxiliarySkillFiles(t *testing.T) {
+	env := newTestEnv(t)
+
+	var agentsResp map[string]any
+	callRPCStatus(t, env.server, "agents.list", nil, http.StatusOK, &agentsResp)
+	var productAgentID string
+	for _, raw := range agentsResp["items"].([]any) {
+		a, _ := raw.(map[string]any)
+		if a["preset_key"] == "product" {
+			productAgentID = a["id"].(string)
+			break
+		}
+	}
+	if productAgentID == "" {
+		t.Fatalf("product preset agent not found")
+	}
+
+	var skillsResp map[string]any
+	callRPCStatus(t, env.server, "skills.list", nil, http.StatusOK, &skillsResp)
+	var targetSkillID string
+	for _, raw := range skillsResp["items"].([]any) {
+		s, _ := raw.(map[string]any)
+		if s["preset_key"] == "product/tam-sam-som-calculator" {
+			targetSkillID = s["id"].(string)
+			break
+		}
+	}
+	if targetSkillID == "" {
+		t.Fatalf("tam-sam-som-calculator preset skill not found in seeded crew")
+	}
+
+	skillDir := filepath.Join(env.stateDir, "skills", "skill-"+targetSkillID)
+	helperPath := filepath.Join(skillDir, "scripts", "market-sizing.py")
+	if _, err := os.Stat(helperPath); err != nil {
+		t.Fatalf("seed should have written %s, got %v", helperPath, err)
+	}
+
+	// User (or upgrade gap) wipes the helper script.
+	if err := os.Remove(helperPath); err != nil {
+		t.Fatalf("remove helper: %v", err)
+	}
+
+	callRPCStatus(t, env.server, "agents.preset.reset",
+		rpcParams("id", productAgentID), http.StatusOK, nil)
+
+	restored, err := os.ReadFile(helperPath)
+	if err != nil {
+		t.Fatalf("reset must rewrite auxiliary file %s, got %v", helperPath, err)
+	}
+	if len(restored) == 0 {
+		t.Fatalf("restored helper script is empty")
+	}
+}
+
 func TestResetAgentPresetRejectsNonPresetAgent(t *testing.T) {
 	env := newTestEnv(t)
 	callRPCStatus(t, env.server, "runtimes.rescan", nil, http.StatusOK, nil)

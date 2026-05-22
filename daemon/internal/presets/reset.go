@@ -19,8 +19,12 @@ type ResetResult struct {
 // ResetDefaultCrew resets every preset-backed agent in the default crew back
 // to factory definitions. Deleted preset agents are recreated.
 //
-// Per-skill semantics: only SKILL.md is overwritten. Other files in the
-// skill directory (user-added) are left untouched.
+// Per-skill semantics: every file shipped in the embedded preset is rewritten
+// (SKILL.md, template.md, examples/*, scripts/*, etc.). Files the user added
+// on top — that don't exist in the embedded set — are left alone. The earlier
+// implementation only rewrote SKILL.md, which silently dropped factory updates
+// to auxiliary files and left freshly-resetted skills referencing missing
+// helper scripts whenever the user (or a daemon upgrade) had wiped them.
 func ResetDefaultCrew(store Store, runtime model.RuntimeRecord) (ResetResult, error) {
 	manifest, err := LoadDefaultCrewManifest()
 	if err != nil {
@@ -210,19 +214,21 @@ func resetSkillsForAgent(store Store, presetID string, agent ManifestAgent, mapp
 			return nil, nil, err
 		}
 	}
-	// Overwrite SKILL.md content for each ref.
+	// Rewrite every factory-shipped file for each ref. We loop over the
+	// embedded set, so files the user added on top stay untouched.
 	for _, ref := range agent.SkillRefs {
 		files, fileErr := readEmbeddedSkillFiles(ref)
 		if fileErr != nil {
 			return nil, nil, fileErr
 		}
-		content, hasSkill := files["SKILL.md"]
-		if !hasSkill {
+		if _, hasSkill := files["SKILL.md"]; !hasSkill {
 			return nil, nil, fmt.Errorf("preset skill %q missing SKILL.md", ref)
 		}
 		skillID := mapping.SkillIDs[ref]
-		if err := store.PutSkillFile(skillID, "SKILL.md", content); err != nil {
-			return nil, nil, err
+		for fileID, content := range files {
+			if err := store.PutSkillFile(skillID, fileID, content); err != nil {
+				return nil, nil, err
+			}
 		}
 	}
 	return skillIDs, resetRefs, nil
