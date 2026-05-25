@@ -207,7 +207,26 @@ describe('TaskView', () => {
     ]);
   });
 
-  it('sends from Cmd/Ctrl Enter by default and can switch Enter into the send key', async () => {
+  it('labels the modifier send shortcut for the current platform', async () => {
+    mockNavigatorPlatform('MacIntel');
+    const { unmount } = render(<TaskView chatId="chat-1" agentsMap={agentsMap} />);
+
+    await screen.findByTestId('composer-input');
+    expect(screen.getByTestId('send-shortcut-menu-button')).toHaveTextContent('Cmd+Enter send');
+    fireEvent.click(screen.getByTestId('send-shortcut-menu-button'));
+    expect(screen.getByRole('menuitemradio', { name: 'Cmd+Enter Enter inserts a newline' })).toBeInTheDocument();
+
+    unmount();
+    mockNavigatorPlatform('Win32');
+    render(<TaskView chatId="chat-1" agentsMap={agentsMap} />);
+
+    await screen.findByTestId('composer-input');
+    expect(screen.getByTestId('send-shortcut-menu-button')).toHaveTextContent('Ctrl+Enter send');
+    fireEvent.click(screen.getByTestId('send-shortcut-menu-button'));
+    expect(screen.getByRole('menuitemradio', { name: 'Ctrl+Enter Enter inserts a newline' })).toBeInTheDocument();
+  });
+
+  it('sends from Cmd or Ctrl Enter by default and can switch Enter into the send key', async () => {
     render(<TaskView chatId="chat-1" agentsMap={agentsMap} />);
 
     const input = await screen.findByTestId('composer-input');

@@ -9,20 +9,29 @@ export const SEND_SHORTCUT_MODES = {
 
 const STORAGE_KEY = 'crew44:send-shortcut-mode';
 
-const OPTIONS = [
-  {
-    id: SEND_SHORTCUT_MODES.MOD_ENTER,
-    label: 'Cmd/Ctrl Enter',
-    hint: 'Enter inserts a newline',
-    indicator: '⌘↵ send',
-  },
-  {
-    id: SEND_SHORTCUT_MODES.ENTER,
-    label: 'Enter',
-    hint: 'Shift or Option Enter inserts a newline',
-    indicator: 'Enter send',
-  },
-];
+function isAppleKeyboardPlatform() {
+  if (typeof window === 'undefined') return false;
+  const platform = window.navigator?.userAgentData?.platform || window.navigator?.platform || '';
+  return /^(Mac|iPhone|iPad|iPod)/i.test(platform);
+}
+
+function shortcutCopy(isMac) {
+  const modEnterLabel = isMac ? 'Cmd+Enter' : 'Ctrl+Enter';
+  return {
+    placeholderHint: `${modEnterLabel} to send`,
+    options: [{
+      id: SEND_SHORTCUT_MODES.MOD_ENTER,
+      label: modEnterLabel,
+      hint: 'Enter inserts a newline',
+      indicator: `${modEnterLabel} send`,
+    }, {
+      id: SEND_SHORTCUT_MODES.ENTER,
+      label: 'Enter',
+      hint: 'Shift or Option Enter inserts a newline',
+      indicator: 'Enter send',
+    }],
+  };
+}
 
 function normalizeMode(mode) {
   return mode === SEND_SHORTCUT_MODES.ENTER ? mode : SEND_SHORTCUT_MODES.MOD_ENTER;
@@ -60,7 +69,8 @@ export function shouldSendFromEnterKey(event, mode) {
 }
 
 export function shortcutPlaceholderHint(mode) {
-  return mode === SEND_SHORTCUT_MODES.ENTER ? 'Enter to send' : '⌘↵ to send';
+  if (mode === SEND_SHORTCUT_MODES.ENTER) return 'Enter to send';
+  return shortcutCopy(isAppleKeyboardPlatform()).placeholderHint;
 }
 
 const menuStyle = {
@@ -118,7 +128,8 @@ function ShortcutOption({ option, selected, onSelect }) {
 export function SendShortcutMenu({ mode, onChange, align = 'right' }) {
   const [open, setOpen] = React.useState(false);
   const ref = React.useRef(null);
-  const selected = OPTIONS.find(option => option.id === normalizeMode(mode)) || OPTIONS[0];
+  const { options } = shortcutCopy(isAppleKeyboardPlatform());
+  const selected = options.find(option => option.id === normalizeMode(mode)) || options[0];
 
   React.useEffect(() => {
     if (!open) return undefined;
@@ -165,7 +176,7 @@ export function SendShortcutMenu({ mode, onChange, align = 'right' }) {
             ...(align === 'left' ? { left: 0, right: 'auto' } : { right: 0 }),
           }}
         >
-          {OPTIONS.map(option => (
+          {options.map(option => (
             <ShortcutOption
               key={option.id}
               option={option}
