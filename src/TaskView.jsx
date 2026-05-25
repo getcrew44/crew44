@@ -136,6 +136,7 @@ function MessageEvent({
   agentsMap,
   thought,
   showHeader = true,
+  copyText = null,
   searchQuery = '',
   activeSearchMatchIndex = 0,
   getSearchMatchIndex,
@@ -215,7 +216,7 @@ function MessageEvent({
             getSearchMatchIndex={getSearchMatchIndex}
           />
         </div>
-        <MessageCopyButton text={event.body} />
+        {copyText != null && <MessageCopyButton text={copyText} />}
       </div>
     </div>
   );
@@ -628,6 +629,7 @@ function EventRouter({
   agentsMap,
   showHeader = true,
   thought,
+  copyText,
   searchQuery = '',
   activeSearchMatchIndex = 0,
   getSearchMatchIndex,
@@ -638,6 +640,7 @@ function EventRouter({
       agentsMap={agentsMap}
       thought={thought}
       showHeader={showHeader}
+      copyText={copyText}
       searchQuery={searchQuery}
       activeSearchMatchIndex={activeSearchMatchIndex}
       getSearchMatchIndex={getSearchMatchIndex}
@@ -2042,6 +2045,44 @@ function groupConsecutiveTools(events) {
   return out.map(e => (e._toolRun && e.events.length === 1) ? e.events[0] : e);
 }
 
+function eventRenderKey(event, index) {
+  return event._seq ?? index;
+}
+
+function buildAssistantCopyTextByEvent(events) {
+  const copyTextByEvent = new Map();
+  let currentAuthor = null;
+  let messages = [];
+
+  const flush = () => {
+    if (messages.length > 0) {
+      const text = messages.map(message => message.body).filter(Boolean).join('\n\n');
+      if (text.trim()) copyTextByEvent.set(messages[messages.length - 1].key, text);
+    }
+    messages = [];
+  };
+
+  events.forEach((event, index) => {
+    if (event.kind === 'handover') return;
+    const actor = event.author;
+    if (!actor || actor === '__human__') {
+      flush();
+      currentAuthor = null;
+      return;
+    }
+    if (actor !== currentAuthor) {
+      flush();
+      currentAuthor = actor;
+    }
+    if (event.kind === 'message') {
+      messages.push({ key: eventRenderKey(event, index), body: event.body || '' });
+    }
+  });
+  flush();
+
+  return copyTextByEvent;
+}
+
 function renderEventsWithHandovers({
   events,
   agentsMap,
@@ -2050,6 +2091,7 @@ function renderEventsWithHandovers({
   getSearchMatchIndex,
 }) {
   const prepared = groupConsecutiveTools(prepareEvents(events));
+  const assistantCopyTextByEvent = buildAssistantCopyTextByEvent(prepared);
   const out = [];
   // Track the last *agent* actor, not the last event author. A human turn
   // between two agents (e.g. "@Designer take it from here") should still let
@@ -2148,11 +2190,12 @@ function renderEventsWithHandovers({
     const showHeader = isHeaderless ? true : prevDisplayedActor !== actor;
     out.push(
       <EventRouter
-        key={e._seq ?? i}
+        key={eventRenderKey(e, i)}
         event={e}
         agentsMap={agentsMap}
         showHeader={showHeader}
         thought={e._thought}
+        copyText={assistantCopyTextByEvent.get(eventRenderKey(e, i))}
         searchQuery={searchQuery}
         activeSearchMatchIndex={activeSearchMatchIndex}
         getSearchMatchIndex={getSearchMatchIndex}

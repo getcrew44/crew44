@@ -458,6 +458,49 @@ describe('TaskView', () => {
     });
   });
 
+  it('shows one copy button for a multi-part assistant run', async () => {
+    const writeText = vi.fn().mockResolvedValue();
+    Object.defineProperty(window.navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText },
+    });
+    api.streamChatEvents.mockImplementation(() => vi.fn());
+    render(<TaskView chatId="chat-1" agentsMap={agentsMap} />);
+
+    await screen.findByTestId('composer-input');
+    const stream = api.streamChatEvents.mock.calls[0];
+    await emitEvent(stream, {
+      seq: 3,
+      type: 'message',
+      ts: '2026-05-12T10:02:00Z',
+      actor_agent_id: 'agent-1',
+      message: { role: 'assistant', content: 'First chunk' },
+    });
+    await emitEvent(stream, {
+      seq: 4,
+      type: 'tool_call',
+      ts: '2026-05-12T10:02:10Z',
+      actor_agent_id: 'agent-1',
+      tool_call: { call_id: 'call-1', name: 'Read', input: { path: 'README.md' } },
+    });
+    await emitEvent(stream, {
+      seq: 5,
+      type: 'message',
+      ts: '2026-05-12T10:02:20Z',
+      actor_agent_id: 'agent-1',
+      message: { role: 'assistant', content: 'Second chunk' },
+    });
+
+    const copyButtons = await screen.findAllByRole('button', { name: 'Copy message' });
+    expect(copyButtons).toHaveLength(1);
+
+    fireEvent.click(copyButtons[0]);
+
+    await waitFor(() => {
+      expect(writeText).toHaveBeenCalledWith('First chunk\n\nSecond chunk');
+    });
+  });
+
   it('opens conversation find with Cmd+F on macOS and ignores Ctrl+F', async () => {
     mockNavigatorPlatform('MacIntel');
     api.streamChatEvents.mockImplementation(() => vi.fn());

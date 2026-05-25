@@ -43,12 +43,12 @@ export function MessageCopyButton({ text, align = 'left' }) {
         title={copied ? 'Copied' : 'Copy message'}
         onClick={copy}
         style={{
-          width: 26,
-          height: 26,
+          width: 22,
+          height: 22,
           padding: 0,
-          borderRadius: 6,
-          border: '1px solid ' + (copied ? '#6E9E5B' : '#E6DFCC'),
-          background: copied ? '#EEF6E9' : 'transparent',
+          borderRadius: 4,
+          border: 'none',
+          background: 'transparent',
           color: copied ? '#47773B' : '#807972',
           cursor: 'pointer',
           display: 'inline-flex',
