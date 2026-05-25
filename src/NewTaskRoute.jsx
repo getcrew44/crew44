@@ -564,7 +564,7 @@ export default function NewTaskRoute({ projects, agents, skills = [], onNewTask,
             />
 
             <div style={{ flex: 1 }} />
-            <SendShortcutMenu mode={sendShortcutMode} onChange={setSendShortcutMode} />
+            <SendShortcutMenu mode={sendShortcutMode} onChange={setSendShortcutMode} direction="down" />
             <button
               data-testid="start-crew-button"
               onClick={startCrew}

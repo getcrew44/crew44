@@ -215,6 +215,8 @@ describe('TaskView', () => {
     expect(screen.getByTestId('send-shortcut-menu-button')).toHaveTextContent('⌘+Enter send');
     fireEvent.click(screen.getByTestId('send-shortcut-menu-button'));
     expect(screen.getByRole('menuitemradio', { name: '⌘+Enter' })).toBeInTheDocument();
+    expect(screen.getByTestId('send-shortcut-menu').style.bottom).toBe('calc(100% + 6px)');
+    expect(screen.getByTestId('send-shortcut-menu').style.top).toBe('');
 
     unmount();
     mockNavigatorPlatform('Win32');

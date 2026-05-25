@@ -3045,7 +3045,7 @@ function Composer({ onSend, isStreaming, onCancel, pendingSteers = [], onCancelS
             <AgentPicker value={targetAgentId} onChange={onChangeTargetAgent} agents={agents} />
           )}
           <div style={{ flex: 1 }} />
-          <SendShortcutMenu mode={sendShortcutMode} onChange={setSendShortcutMode} />
+          <SendShortcutMenu mode={sendShortcutMode} onChange={setSendShortcutMode} direction="up" />
           {isStreaming && (
             <button
               type="button"

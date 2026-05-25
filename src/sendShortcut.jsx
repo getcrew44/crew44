@@ -74,7 +74,6 @@ export function shortcutPlaceholderHint(mode) {
 const menuStyle = {
   position: 'absolute',
   right: 0,
-  bottom: 'calc(100% + 6px)',
   zIndex: 210,
   width: 248,
   background: '#FFFFFF',
@@ -122,11 +121,14 @@ function ShortcutOption({ option, selected, onSelect }) {
   );
 }
 
-export function SendShortcutMenu({ mode, onChange, align = 'right' }) {
+export function SendShortcutMenu({ mode, onChange, align = 'right', direction = 'up' }) {
   const [open, setOpen] = React.useState(false);
   const ref = React.useRef(null);
   const { options } = shortcutCopy(isAppleKeyboardPlatform());
   const selected = options.find(option => option.id === normalizeMode(mode)) || options[0];
+  const verticalPosition = direction === 'down'
+    ? { top: 'calc(100% + 6px)' }
+    : { bottom: 'calc(100% + 6px)' };
 
   React.useEffect(() => {
     if (!open) return undefined;
@@ -167,9 +169,11 @@ export function SendShortcutMenu({ mode, onChange, align = 'right' }) {
       {open && (
         <div
           role="menu"
+          data-testid="send-shortcut-menu"
           aria-label="Send shortcut"
           style={{
             ...menuStyle,
+            ...verticalPosition,
             ...(align === 'left' ? { left: 0, right: 'auto' } : { right: 0 }),
           }}
         >

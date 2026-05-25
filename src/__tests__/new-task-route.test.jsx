@@ -295,6 +295,23 @@ describe('NewTaskRoute', () => {
     expect(onNewTask).toHaveBeenCalledWith('chat-1');
   });
 
+  it('opens the new-task send shortcut menu downward', () => {
+    render(
+      <NewTaskRoute
+        projects={projects}
+        agents={agents}
+        onNewTask={() => {}}
+        initialProjectId="p1"
+      />
+    );
+
+    fireEvent.click(screen.getByTestId('send-shortcut-menu-button'));
+
+    const menu = screen.getByTestId('send-shortcut-menu');
+    expect(menu.style.top).toBe('calc(100% + 6px)');
+    expect(menu.style.bottom).toBe('');
+  });
+
   it('selects an attachment for a new task and sends attachment metadata', async () => {
     window.electronAPI.openFileDialog.mockResolvedValue({
       canceled: false,
