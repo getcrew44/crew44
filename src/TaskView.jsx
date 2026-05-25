@@ -563,7 +563,7 @@ const WAITING_GERUNDS = [
   'Murmuring', 'Untwisting', 'Rummaging', 'Cogitating',
 ];
 
-const WAITING_WORD_INTERVAL_MS = 8000;
+const WAITING_WORD_INTERVAL_MS = 15000;
 
 function pickRandomGerund(previous) {
   if (WAITING_GERUNDS.length <= 1) return WAITING_GERUNDS[0];
