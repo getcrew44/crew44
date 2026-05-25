@@ -4,9 +4,7 @@
 
 # Crew44
 
-### A local-first orchestrator for running specialist AI agents on your own machine..
-
-**Orchestrate teams of AI coding agents in one local-first workspace.**
+### A local-first orchestrator for running specialist AI agents on your own machine.
 
 [![CI](https://github.com/getcrew44/crew44/actions/workflows/ci.yml/badge.svg)](https://github.com/getcrew44/crew44/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-c4644a.svg)](LICENSE)
