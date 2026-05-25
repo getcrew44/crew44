@@ -68,8 +68,8 @@ func TestPrepareSkillEnvironmentClaudeInjectsBrowserMCP(t *testing.T) {
 	if server["command"] != "npx" {
 		t.Errorf("command = %v, want npx", server["command"])
 	}
-	if !argsContain(t, server, "@playwright/mcp@latest") {
-		t.Errorf("args missing @playwright/mcp@latest: %v", server["args"])
+	if !argsContain(t, server, playwrightMCPPackage) {
+		t.Errorf("args missing %s: %v", playwrightMCPPackage, server["args"])
 	}
 	if !argsContain(t, server, "--headless") {
 		t.Errorf("args missing --headless: %v", server["args"])
@@ -187,7 +187,7 @@ func TestPrepareSkillEnvironmentCodexInjectsBrowserMCP(t *testing.T) {
 	for _, want := range []string{
 		"[mcp_servers.playwright]",
 		`command = "npx"`,
-		"@playwright/mcp@latest",
+		playwrightMCPPackage,
 		"--headless",
 		"[mcp_servers.playwright.env]",
 		"/tmp/crew44-pw-cache",
@@ -343,5 +343,42 @@ func TestResolvePlaywrightBrowsersPathDefaultUsesHostCache(t *testing.T) {
 	}
 	if filepath.Base(got) != "ms-playwright" {
 		t.Fatalf("expected path ending in ms-playwright, got %q", got)
+	}
+}
+
+// The browser package is pinned to a specific tested version so agent behavior
+// stays reproducible and a new npm publish can't change tools underneath every
+// runtime. Guard against a regression back to a floating @latest tag.
+func TestPlaywrightMCPPackageIsPinned(t *testing.T) {
+	if strings.HasSuffix(playwrightMCPPackage, "@latest") {
+		t.Fatalf("playwrightMCPPackage must be pinned to a version, got %q", playwrightMCPPackage)
+	}
+	at := strings.LastIndexByte(playwrightMCPPackage, '@')
+	if at <= 0 || at == len(playwrightMCPPackage)-1 {
+		t.Fatalf("playwrightMCPPackage must carry an explicit version (name@x.y.z), got %q", playwrightMCPPackage)
+	}
+}
+
+func TestTomlStringEscapesControlChars(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"plain", "/tmp/pw", `"/tmp/pw"`},
+		{"backslash", `C:\pw`, `"C:\\pw"`},
+		{"double quote", `a"b`, `"a\"b"`},
+		{"newline", "a\nb", `"a\nb"`},
+		{"carriage return", "a\rb", `"a\rb"`},
+		{"tab", "a\tb", `"a\tb"`},
+		{"null byte", "a\x00b", `"a\u0000b"`},
+		{"DEL", "a\x7fb", `"a\u007Fb"`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tomlString(tc.in); got != tc.want {
+				t.Fatalf("tomlString(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
 	}
 }

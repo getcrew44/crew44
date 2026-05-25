@@ -19,7 +19,11 @@ import (
 // The browser runs headless (no visible window) since these agents are spawned
 // by a daemon, and --isolated keeps no profile on disk.
 const (
-	playwrightMCPPackage = "@playwright/mcp@latest"
+	// Pinned to a specific tested version rather than @latest: an isolated
+	// agent's browser behavior stays reproducible across runs, and a new npm
+	// publish can't silently change tool behavior (or ship a compromised
+	// build) underneath every runtime. Bump deliberately after testing.
+	playwrightMCPPackage = "@playwright/mcp@0.0.75"
 	browserMCPServerName = "playwright"
 )
 
@@ -204,10 +208,39 @@ func codexBrowserMCPBlock() string {
 	return b.String()
 }
 
-// tomlString renders s as a TOML basic string with the minimal escaping needed
-// for the values we emit (paths and npx args): backslashes and double quotes.
+// tomlString renders s as a TOML basic string. It escapes backslash and double
+// quote, the named control escapes TOML defines, and any other control
+// character (< 0x20, plus DEL) as \uXXXX. The values we emit are paths and npx
+// args that never contain control bytes in practice, but encoding them keeps
+// the output valid TOML rather than silently corrupting config.toml if one ever
+// does (e.g. an operator-set PLAYWRIGHT_BROWSERS_PATH with a stray newline).
 func tomlString(s string) string {
-	s = strings.ReplaceAll(s, `\`, `\\`)
-	s = strings.ReplaceAll(s, `"`, `\"`)
-	return `"` + s + `"`
+	var b strings.Builder
+	b.WriteByte('"')
+	for _, r := range s {
+		switch r {
+		case '\\':
+			b.WriteString(`\\`)
+		case '"':
+			b.WriteString(`\"`)
+		case '\b':
+			b.WriteString(`\b`)
+		case '\t':
+			b.WriteString(`\t`)
+		case '\n':
+			b.WriteString(`\n`)
+		case '\f':
+			b.WriteString(`\f`)
+		case '\r':
+			b.WriteString(`\r`)
+		default:
+			if r < 0x20 || r == 0x7f {
+				fmt.Fprintf(&b, `\u%04X`, r)
+			} else {
+				b.WriteRune(r)
+			}
+		}
+	}
+	b.WriteByte('"')
+	return b.String()
 }
