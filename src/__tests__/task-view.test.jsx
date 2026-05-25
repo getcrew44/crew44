@@ -450,8 +450,8 @@ describe('TaskView', () => {
 
     const copyButtons = await screen.findAllByRole('button', { name: 'Copy message' });
     expect(copyButtons[0]).toHaveStyle({ opacity: '0' });
-    expect(copyButtons[1]).toHaveStyle({ opacity: '1' });
-    expect(copyButtons[0].parentElement).toHaveStyle({ marginBottom: '-28px' });
+    expect(copyButtons[1]).toHaveStyle({ opacity: '0' });
+    expect(copyButtons[0].parentElement).toHaveStyle({ marginBottom: '-25px' });
     expect(copyButtons[1].parentElement).toHaveStyle({ marginBottom: '0' });
 
     fireEvent.mouseEnter(screen.getAllByTestId('message-event')[0]);
@@ -529,7 +529,7 @@ describe('TaskView', () => {
     expect(copyButtons).toHaveLength(1);
     expect(within(screen.getByTestId('error-event')).getByRole('button', { name: 'Copy message' })).toBe(copyButtons[0]);
     expect(screen.getByTestId('error-event').firstChild).toHaveTextContent('');
-    expect(copyButtons[0]).toHaveStyle({ opacity: '1' });
+    expect(copyButtons[0]).toHaveStyle({ opacity: '0' });
 
     fireEvent.click(copyButtons[0]);
 

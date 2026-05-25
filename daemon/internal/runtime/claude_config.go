@@ -47,6 +47,14 @@ func (e *envValue) UnmarshalJSON(data []byte) error {
 }
 
 func prepareClaudeConfig(configDir string) error {
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
+		return fmt.Errorf("create claude config dir: %w", err)
+	}
+	// Browser MCP is NOT written here. claude runs with --strict-mcp-config and
+	// ignores this user-scope .claude.json, so the headless browser rides in
+	// through the --mcp-config document instead (see claudeBrowserMCPConfig and
+	// prepareSkillEnvironment). Settings env still belongs in .claude.json.
+
 	settings, ok, err := readSharedClaudeSettings()
 	if err != nil {
 		return err
@@ -55,9 +63,6 @@ func prepareClaudeConfig(configDir string) error {
 		return nil
 	}
 
-	if err := os.MkdirAll(configDir, 0o755); err != nil {
-		return fmt.Errorf("create claude config dir: %w", err)
-	}
 	data, err := json.MarshalIndent(claudeSettings{Env: settings.Env}, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshal claude settings: %w", err)

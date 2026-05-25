@@ -144,7 +144,7 @@ function MessageEvent({
   const [hovered, setHovered] = React.useState(false);
   const agent = resolveAuthor(event.author, agentsMap) || HUMAN_USER;
   const isUser = agent.kind === 'human';
-  const copyVisible = Boolean(copyAction?.pinned || hovered);
+  const copyVisible = hovered;
 
   if (isUser) {
     const steeredAgent = event.steerAgentId ? agentsMap?.[event.steerAgentId] : null;
@@ -177,7 +177,7 @@ function MessageEvent({
             text={copyAction.text}
             align="right"
             visible={copyVisible}
-            compactSpace={!copyAction.pinned}
+            compactSpace={!copyAction.isLast}
           />
         )}
         {event.userSteer && (
@@ -239,7 +239,7 @@ function MessageEvent({
           <MessageCopyButton
             text={copyAction.text}
             visible={copyVisible}
-            compactSpace={!copyAction.pinned}
+            compactSpace={!copyAction.isLast}
           />
         )}
       </div>
@@ -671,7 +671,7 @@ const WAITING_GERUNDS = [
   'Murmuring', 'Untwisting', 'Rummaging', 'Cogitating',
 ];
 
-const WAITING_WORD_INTERVAL_MS = 8000;
+const WAITING_WORD_INTERVAL_MS = 15000;
 
 function pickRandomGerund(previous) {
   if (WAITING_GERUNDS.length <= 1) return WAITING_GERUNDS[0];
@@ -2047,7 +2047,7 @@ function ErrorEvent({ event, agentsMap, showHeader = true, copyAction = null }) 
   const [hovered, setHovered] = React.useState(false);
   const author = event.agent_id || event.author;
   const agent = author ? resolveAuthor(author, agentsMap) : null;
-  const copyVisible = Boolean(copyAction?.pinned || hovered);
+  const copyVisible = hovered;
   return (
     <div
       data-testid="error-event"
@@ -2112,7 +2112,7 @@ function ErrorEvent({ event, agentsMap, showHeader = true, copyAction = null }) 
           <MessageCopyButton
             text={copyAction.text}
             visible={copyVisible}
-            compactSpace={!copyAction.pinned}
+            compactSpace={!copyAction.isLast}
           />
         )}
       </div>
@@ -2223,7 +2223,9 @@ function buildCopyActionsByEvent(events) {
   const copyActionsByEvent = new Map();
   const lastRun = runs[runs.length - 1];
   for (const run of runs) {
-    copyActionsByEvent.set(run.key, { text: run.text, pinned: run === lastRun });
+    // `isLast` only controls layout: the final message reserves space for its
+    // (hover-revealed) copy button so it isn't cramped against the composer.
+    copyActionsByEvent.set(run.key, { text: run.text, isLast: run === lastRun });
   }
 
   return copyActionsByEvent;

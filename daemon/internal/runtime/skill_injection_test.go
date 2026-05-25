@@ -243,9 +243,10 @@ func TestPrepareSkillEnvironmentCodexUsesIsolatedHome(t *testing.T) {
 	workDir := t.TempDir()
 	envDir := filepath.Join(t.TempDir(), "runtime-env")
 	preparedEnv, err := prepareSkillEnvironment(RunRequest{
-		Runtime:       model.RuntimeRecord{Provider: "codex"},
-		WorkDir:       workDir,
-		RuntimeEnvDir: envDir,
+		Runtime:          model.RuntimeRecord{Provider: "codex"},
+		WorkDir:          workDir,
+		RuntimeEnvDir:    envDir,
+		EnableBrowserMCP: true,
 		AgentSkills: []SkillContext{{
 			ID:      "skill-1",
 			Name:    "Codex Skill",
@@ -269,8 +270,18 @@ func TestPrepareSkillEnvironmentCodexUsesIsolatedHome(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(codexHome, "skills", "shared-skill")); !os.IsNotExist(err) {
 		t.Fatalf("expected shared codex skill to be hidden, stat err=%v", err)
 	}
-	if _, err := os.Stat(filepath.Join(codexHome, "config.toml")); !os.IsNotExist(err) {
-		t.Fatalf("expected shared codex config to be hidden, stat err=%v", err)
+	// crew44 writes its own isolated config.toml (browser MCP injection), but
+	// the host's config must not leak into it.
+	isolatedConfig := filepath.Join(codexHome, "config.toml")
+	if _, err := os.Stat(isolatedConfig); err != nil {
+		t.Fatalf("expected isolated codex config.toml to exist, stat err=%v", err)
+	}
+	cfgData, err := os.ReadFile(isolatedConfig)
+	if err != nil {
+		t.Fatalf("read isolated config.toml: %v", err)
+	}
+	if strings.Contains(string(cfgData), "plugin-only") || strings.Contains(string(cfgData), "[profile]") {
+		t.Fatalf("expected host codex config to be hidden, got: %s", cfgData)
 	}
 	if _, err := os.Stat(filepath.Join(codexHome, "auth.json")); err != nil {
 		t.Fatalf("expected auth state to be available, stat err=%v", err)
@@ -290,9 +301,10 @@ func TestPrepareSkillEnvironmentCodexIsolatesEvenWithoutSkills(t *testing.T) {
 	workDir := t.TempDir()
 	envDir := filepath.Join(t.TempDir(), "runtime-env")
 	preparedEnv, err := prepareSkillEnvironment(RunRequest{
-		Runtime:       model.RuntimeRecord{Provider: "codex"},
-		WorkDir:       workDir,
-		RuntimeEnvDir: envDir,
+		Runtime:          model.RuntimeRecord{Provider: "codex"},
+		WorkDir:          workDir,
+		RuntimeEnvDir:    envDir,
+		EnableBrowserMCP: true,
 	})
 	if err != nil {
 		t.Fatalf("prepareSkillEnvironment failed: %v", err)
@@ -307,8 +319,14 @@ func TestPrepareSkillEnvironmentCodexIsolatesEvenWithoutSkills(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(codexHome, "auth.json")); err != nil {
 		t.Fatalf("expected auth state to be available, stat err=%v", err)
 	}
-	if _, err := os.Stat(filepath.Join(codexHome, "config.toml")); !os.IsNotExist(err) {
-		t.Fatalf("expected shared codex config to be hidden, stat err=%v", err)
+	// crew44 writes its own isolated config.toml (browser MCP injection); the
+	// host's `model = "from-user-config"` must not leak into it.
+	cfgData, err := os.ReadFile(filepath.Join(codexHome, "config.toml"))
+	if err != nil {
+		t.Fatalf("expected isolated codex config.toml to exist: %v", err)
+	}
+	if strings.Contains(string(cfgData), "from-user-config") {
+		t.Fatalf("expected host codex config to be hidden, got: %s", cfgData)
 	}
 }
 

@@ -2,6 +2,16 @@
 
 All notable changes to this project are documented here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.8] - 2026-05-25
+
+### Added
+- **The main interactive agent now has a headless browser.** Crew44 gives each runtime a Playwright MCP server, so an agent gains `browser_navigate`, `browser_take_screenshot`, `browser_snapshot`, and the rest of the `mcp__playwright__*` toolset the moment it asks. claude receives it through its `--mcp-config` document (claude runs with `--strict-mcp-config`, which ignores `.claude.json`); codex receives it through an `[mcp_servers.playwright]` table in its isolated `config.toml`. The browser runs headless and isolated, launched on demand via `npx` — no extra binary ships with Crew44. Agents reuse one shared Chromium download via the host `ms-playwright` cache, overridable with `PLAYWRIGHT_BROWSERS_PATH`. Browser access is opt-in per run, so background utility calls (like the chat-title summarizer, which runs on untrusted user content under bypass-permissions) get no browser surface.
+
+### Changed
+- **The "waiting" word in the task view rotates every 15 seconds instead of every 8.** The streaming indicator's gerund changes less often, so it reads as a calmer status line rather than a flickering ticker during long runs.
+- **The Playwright browser package is pinned to a tested version (`@playwright/mcp@0.0.75`) rather than `@latest`.** Agent browser behavior stays reproducible across runs, and a new npm publish can't change tool behavior underneath every runtime. Bump deliberately after testing.
+- **`package.json` author now carries a contact email** (`support@mindivelabs.com`) alongside the name.
+
 ## [0.5.7] - 2026-05-22
 
 ### Added

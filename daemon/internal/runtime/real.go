@@ -43,6 +43,7 @@ func (RealEngine) Run(ctx context.Context, request RunRequest, emit func(StreamE
 		SystemPrompt:    systemPrompt,
 		ResumeSessionID: request.ResumeSessionID,
 		ExtraArgs:       preparedEnv.ExtraArgs,
+		McpConfig:       preparedEnv.McpConfig,
 	})
 	if err != nil {
 		return RunResult{}, err
