@@ -8,6 +8,8 @@ body {
   font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
   color: #1C1A17;
   overflow: hidden;
+  -webkit-user-select: none;
+  user-select: none;
 }
 #root {
   width: 100%;
@@ -31,5 +33,18 @@ textarea { font-family: inherit; }
 button { font-family: inherit; }
 button, input, textarea, select {
   -webkit-app-region: no-drag;
+}
+input,
+textarea,
+select,
+[contenteditable="true"],
+.cw-selectable-text,
+.cw-selectable-text * {
+  -webkit-user-select: text;
+  user-select: text;
+}
+button {
+  -webkit-user-select: none;
+  user-select: none;
 }
 * { box-sizing: border-box; }

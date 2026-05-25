@@ -8,6 +8,7 @@ vi.mock('../api.js', () => ({
   listProjects: vi.fn(),
   listAgents: vi.fn(),
   listSkills: vi.fn(),
+  listPresets: vi.fn(),
   listRuntimes: vi.fn(),
   listProjectChats: vi.fn(),
   listChats: vi.fn(),
@@ -49,12 +50,14 @@ const runningChat = {
 };
 
 beforeEach(() => {
+  window.localStorage.clear();
   vi.clearAllMocks();
   api.listProjects.mockResolvedValue([project]);
   api.listAgents.mockResolvedValue([
     { id: 'agent-1', name: 'Aria', kind: 'agent', runtime_id: 'runtime-1' },
   ]);
   api.listSkills.mockResolvedValue([]);
+  api.listPresets.mockResolvedValue([]);
   api.listRuntimes.mockResolvedValue([{ id: 'runtime-1', name: 'Test Desk' }]);
   api.listProjectChats.mockResolvedValue([runningChat]);
   api.listRemoteDevices.mockResolvedValue([]);
@@ -68,6 +71,23 @@ beforeEach(() => {
 });
 
 describe('App streaming reconciliation', () => {
+  it('keeps one global New Task draft when navigating through chats', async () => {
+    render(<App />);
+
+    const globalInput = await screen.findByTestId('new-task-input');
+    fireEvent.change(globalInput, { target: { value: 'global new task draft' } });
+
+    fireEvent.click(await screen.findByTestId('chat-chat-running'));
+    await waitFor(() => expect(api.getChat).toHaveBeenCalled());
+
+    fireEvent.click(screen.getByTestId('nav-new-task'));
+    expect(await screen.findByTestId('new-task-input')).toHaveValue('global new task draft');
+    fireEvent.click(screen.getByTestId('nav-agents'));
+    fireEvent.click(screen.getByTestId('nav-new-task'));
+
+    expect(await screen.findByTestId('new-task-input')).toHaveValue('global new task draft');
+  });
+
   it('keeps the sidebar running indicator after navigating away, then clears it via background reconciliation', async () => {
     // Capture the 5s reconcile interval the App installs.
     const realSetInterval = global.setInterval;

@@ -8,8 +8,10 @@ import { attachmentsSupported, dedupeAttachments, droppedAttachments, pickAttach
 import { dataTransferHasFiles } from './dragDrop.js';
 import { primeAudioContext } from './audio.js';
 import { textareaCaretPoint } from './textareaCaret.js';
+import { SendShortcutMenu, shouldSendFromEnterKey, useSendShortcutMode } from './sendShortcut.jsx';
 import {
   clearComposerDraft,
+  newTaskDraftChatId,
   readComposerDraft,
   readLastNewChatProjectId,
   writeComposerDraft,
@@ -168,10 +170,25 @@ const SUGGESTIONS = [
 ];
 
 const MENTION_MENU_WIDTH = 260;
+const NEW_TASK_INPUT_MIN_HEIGHT = 100;
+const NEW_TASK_INPUT_TEXT_STYLE = {
+  fontFamily: UI_FONT,
+  fontSize: 15,
+  lineHeight: 1.55,
+  padding: 0,
+  margin: 0,
+  whiteSpace: 'pre-wrap',
+  overflowWrap: 'break-word',
+  minHeight: NEW_TASK_INPUT_MIN_HEIGHT,
+};
 
 export default function NewTaskRoute({ projects, agents, skills = [], onNewTask, onExistingFolder, initialProjectId }) {
-  const initialStoredProjectId = React.useMemo(() => initialProjectId || readLastNewChatProjectId(), [initialProjectId]);
-  const initialDraft = React.useMemo(() => readComposerDraft(initialStoredProjectId, ''), [initialStoredProjectId]);
+  const draftStorageChatId = React.useMemo(() => newTaskDraftChatId(), []);
+  const initialDraft = React.useMemo(() => readComposerDraft('', draftStorageChatId), [draftStorageChatId]);
+  const initialStoredProjectId = React.useMemo(
+    () => initialProjectId || readLastNewChatProjectId(),
+    [initialProjectId]
+  );
   const [val, setVal] = React.useState(initialDraft.text || '');
   const [attachments, setAttachments] = React.useState([]);
   const [cursor, setCursor] = React.useState(0);
@@ -183,10 +200,12 @@ export default function NewTaskRoute({ projects, agents, skills = [], onNewTask,
   const [error, setError] = React.useState(null);
   const [scrollTop, setScrollTop] = React.useState(0);
   const [fileMatches, setFileMatches] = React.useState([]);
+  const [sendShortcutMode, setSendShortcutMode] = useSendShortcutMode();
   const inputRef = React.useRef(null);
   const listboxRef = React.useRef(null);
   const selectedProjectExists = projects.some(project => project.id === selectedProjectId);
   const canAttach = attachmentsSupported();
+  const defaultAgentId = agents[0]?.id || '';
   const selectedProject = projects.find(project => project.id === selectedProjectId);
   const hasWorkdir = Boolean(selectedProject?.workdir);
   const selectedAgent = agents.find(agent => agent.id === selectedAgentId);
@@ -208,10 +227,7 @@ export default function NewTaskRoute({ projects, agents, skills = [], onNewTask,
   }, [projects.length, selectedProjectExists, selectedProjectId]);
 
   React.useEffect(() => {
-    const draft = readComposerDraft(selectedProjectId, '');
-    setVal(current => draft.text || current);
     setAttachments([]);
-    setSelectedAgentId(draft.targetAgentId || '');
     if (selectedProjectExists) writeLastNewChatProjectId(selectedProjectId);
     else if (!selectedProjectId) writeLastNewChatProjectId('');
   }, [selectedProjectExists, selectedProjectId]);
@@ -221,12 +237,11 @@ export default function NewTaskRoute({ projects, agents, skills = [], onNewTask,
   }, [agents, selectedAgentId]);
 
   React.useEffect(() => {
-    writeComposerDraft(selectedProjectId, '', {
+    writeComposerDraft('', draftStorageChatId, {
       text: val,
-      targetAgentId: selectedAgentId,
-      targetProjectId: selectedProjectId,
+      targetAgentId: selectedAgentId && selectedAgentId !== defaultAgentId ? selectedAgentId : '',
     });
-  }, [selectedProjectId, selectedAgentId, val]);
+  }, [defaultAgentId, draftStorageChatId, selectedAgentId, val]);
 
   const projectItems = projects.map(p => ({ id: p.id, label: p.name }));
   const agentItems = agents.map(a => ({ id: a.id, label: a.name }));
@@ -358,7 +373,7 @@ export default function NewTaskRoute({ projects, agents, skills = [], onNewTask,
       const titleSource = text || attachments[0]?.display_name || 'Attachments';
       const chat = await api.createChat(projectId, titleSource, agentId);
       await api.postMessage(chat.id, text, chat.main_agent_id, attachments);
-      clearComposerDraft(projectId, '');
+      clearComposerDraft('', draftStorageChatId);
       onNewTask(chat.id);
     } catch (err) {
       setError(err.message);
@@ -389,7 +404,10 @@ export default function NewTaskRoute({ projects, agents, skills = [], onNewTask,
         return;
       }
     }
-    if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); startCrew(); }
+    if (shouldSendFromEnterKey(e, sendShortcutMode)) {
+      e.preventDefault();
+      startCrew();
+    }
   };
 
   const canStart = (val.trim() || attachments.length > 0) && !submitting && selectedProjectExists && selectedAgentId;
@@ -467,16 +485,12 @@ export default function NewTaskRoute({ projects, agents, skills = [], onNewTask,
             {val && (
               <div
                 aria-hidden="true"
+                data-testid="new-task-input-overlay"
                 style={{
+                  ...NEW_TASK_INPUT_TEXT_STYLE,
                   position: 'absolute',
                   inset: 0,
                   pointerEvents: 'none',
-                  whiteSpace: 'pre-wrap',
-                  overflowWrap: 'break-word',
-                  fontFamily: UI_FONT,
-                  fontSize: 15,
-                  lineHeight: 1.55,
-                  minHeight: 100,
                   color: '#1C1A17',
                   transform: `translateY(${-scrollTop}px)`,
                 }}
@@ -504,11 +518,12 @@ export default function NewTaskRoute({ projects, agents, skills = [], onNewTask,
               placeholder="Describe a task. The lead agent will plan it and assign subtasks."
               rows={1}
               style={{
+                ...NEW_TASK_INPUT_TEXT_STYLE,
                 position: 'relative', zIndex: 1,
                 width: '100%', border: 'none', outline: 'none', resize: 'none',
-                background: 'transparent', fontFamily: UI_FONT, fontSize: 15,
+                background: 'transparent',
                 color: val ? 'transparent' : '#1C1A17', caretColor: '#1C1A17',
-                lineHeight: 1.55, minHeight: 100,
+                display: 'block',
               }}
             />
             </div>
@@ -559,6 +574,7 @@ export default function NewTaskRoute({ projects, agents, skills = [], onNewTask,
             />
 
             <div style={{ flex: 1 }} />
+            <SendShortcutMenu mode={sendShortcutMode} onChange={setSendShortcutMode} direction="down" />
             <button
               data-testid="start-crew-button"
               onClick={startCrew}

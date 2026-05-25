@@ -4,9 +4,11 @@ import { mapBackendEvent, mergeToolResults, relativeTime, formatTime, HUMAN_USER
 import * as api from './api.js';
 import { clearComposerDraft, readComposerDraft, writeComposerDraft } from './draftStore.js';
 import { AttachmentTray } from './AttachmentChips.jsx';
+import { MessageCopyButton } from './MessageCopyButton.jsx';
 import { attachmentsSupported, dedupeAttachments, droppedAttachments, pickAttachments } from './attachments.js';
 import { dataTransferHasFiles } from './dragDrop.js';
 import { primeAudioContext, playDoneSound } from './audio.js';
+import { SendShortcutMenu, shortcutPlaceholderHint, shouldSendFromEnterKey, useSendShortcutMode } from './sendShortcut.jsx';
 
 function isAgentActivityEvent(event) {
   if (!event) return false;
@@ -134,18 +136,26 @@ function MessageEvent({
   agentsMap,
   thought,
   showHeader = true,
+  copyAction = null,
   searchQuery = '',
   activeSearchMatchIndex = 0,
   getSearchMatchIndex,
 }) {
+  const [hovered, setHovered] = React.useState(false);
   const agent = resolveAuthor(event.author, agentsMap) || HUMAN_USER;
   const isUser = agent.kind === 'human';
+  const copyVisible = Boolean(copyAction?.pinned || hovered);
 
   if (isUser) {
     const steeredAgent = event.steerAgentId ? agentsMap?.[event.steerAgentId] : null;
     return (
-      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', padding: '14px 0' }}>
-        <div style={{
+      <div
+        data-testid="message-event"
+        style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', padding: '14px 0' }}
+        onMouseEnter={() => setHovered(true)}
+        onMouseLeave={() => setHovered(false)}
+      >
+        <div className="cw-selectable-text" style={{
           maxWidth: '72%',
           background: '#EFE9D8',
           color: '#1C1A17',
@@ -162,6 +172,14 @@ function MessageEvent({
           />
           <AttachmentTray attachments={event.attachments} />
         </div>
+        {copyAction && (
+          <MessageCopyButton
+            text={copyAction.text}
+            align="right"
+            visible={copyVisible}
+            compactSpace={!copyAction.pinned}
+          />
+        )}
         {event.userSteer && (
           <div style={{
             marginTop: 6,
@@ -187,7 +205,12 @@ function MessageEvent({
   }
 
   return (
-    <div style={{ display: 'flex', gap: 14, padding: showHeader ? '14px 0 2px' : '2px 0' }}>
+    <div
+      data-testid="message-event"
+      style={{ display: 'flex', gap: 14, padding: showHeader ? '14px 0 2px' : '2px 0' }}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+    >
       {showHeader
         ? <Avatar agent={agent} size={28} />
         : <div style={{ width: 28, flexShrink: 0 }} aria-hidden="true" />}
@@ -204,7 +227,7 @@ function MessageEvent({
             <ThoughtChip thought={thought} />
           </div>
         )}
-        <div style={{ fontSize: 14, color: '#1C1A17', lineHeight: 1.55 }}>
+        <div className="cw-selectable-text" style={{ fontSize: 14, color: '#1C1A17', lineHeight: 1.55 }}>
           <RichText
             text={event.body}
             searchQuery={searchQuery}
@@ -212,6 +235,13 @@ function MessageEvent({
             getSearchMatchIndex={getSearchMatchIndex}
           />
         </div>
+        {copyAction && (
+          <MessageCopyButton
+            text={copyAction.text}
+            visible={copyVisible}
+            compactSpace={!copyAction.pinned}
+          />
+        )}
       </div>
     </div>
   );
@@ -290,6 +320,69 @@ function toolOutputSections(rawOutput) {
   }
 }
 
+function toolOutputText(rawOutput) {
+  return toolOutputSections(rawOutput)
+    .map(section => section.text)
+    .join('\n\n');
+}
+
+function FloatingToolCopyButton({ text, visible }) {
+  const [copied, setCopied] = React.useState(false);
+  const timeoutRef = React.useRef(null);
+  const copyText = String(text || '');
+
+  React.useEffect(() => () => {
+    if (timeoutRef.current) window.clearTimeout(timeoutRef.current);
+  }, []);
+
+  const copy = React.useCallback((event) => {
+    event.stopPropagation();
+    const clipboard = window.navigator?.clipboard;
+    if (!copyText.trim() || !clipboard) return;
+    clipboard.writeText(copyText).then(() => {
+      setCopied(true);
+      if (timeoutRef.current) window.clearTimeout(timeoutRef.current);
+      timeoutRef.current = window.setTimeout(() => setCopied(false), 1500);
+    }).catch(() => {});
+  }, [copyText]);
+
+  if (!copyText.trim()) return null;
+
+  return (
+    <button
+      type="button"
+      data-testid="tool-result-copy-action"
+      aria-label="Copy tool result"
+      title={copied ? 'Copied' : 'Copy tool result'}
+      onClick={copy}
+      style={{
+        position: 'absolute',
+        top: 8,
+        right: 8,
+        zIndex: 2,
+        width: 22,
+        height: 22,
+        padding: 0,
+        borderRadius: 4,
+        border: '1px solid #ECE6D5',
+        background: '#FFFEF8',
+        color: copied ? '#47773B' : '#807972',
+        cursor: 'pointer',
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        fontFamily: UI_FONT,
+        opacity: visible || copied ? 1 : 0,
+        pointerEvents: visible || copied ? 'auto' : 'none',
+        boxShadow: '0 1px 4px rgba(28,26,23,0.08)',
+        transition: 'opacity .12s ease',
+      }}
+    >
+      <Icon name={copied ? 'check' : 'copy'} size={14} />
+    </button>
+  );
+}
+
 function ToolOutputPre({ output, result }) {
   const sections = toolOutputSections(output);
   if (sections.length === 0) return null;
@@ -308,7 +401,7 @@ function ToolOutputPre({ output, result }) {
               {section.label}
             </div>
           )}
-          <pre style={{
+          <pre className="cw-selectable-text" style={{
             margin: 0,
             fontFamily: MONO_FONT,
             fontSize: 12.5,
@@ -327,10 +420,12 @@ function ToolOutputPre({ output, result }) {
 // (inside ToolEvent) and as a child inside ToolGroupEvent's expanded list.
 function ToolEventCard({ event, defaultOpen = false }) {
   const [expanded, setExpanded] = React.useState(defaultOpen);
+  const [detailHovered, setDetailHovered] = React.useState(false);
   const fullOutput = event.output || event.detail || '';
   const hasOutput = Boolean(fullOutput);
   const pathOverflows = Boolean(event.path && event.path.length > 80);
   const canExpand = hasOutput || pathOverflows;
+  const detailCopyText = toolOutputText(fullOutput);
 
   return (
     <div style={{
@@ -367,9 +462,12 @@ function ToolEventCard({ event, defaultOpen = false }) {
           fontFamily: MONO_FONT, fontSize: 12, color: '#807972', fontWeight: 400,
         }}>{event.tool}</span>
         {event.path && (
-          <span style={{
+          <span className="cw-selectable-text" style={{
             fontFamily: MONO_FONT, fontSize: 12, color: '#A89F92',
-            whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+            whiteSpace: expanded ? 'normal' : 'nowrap',
+            overflow: expanded ? 'visible' : 'hidden',
+            textOverflow: expanded ? 'clip' : 'ellipsis',
+            wordBreak: expanded ? 'break-word' : 'normal',
             flex: 1, minWidth: 0,
           }}>{event.path}</span>
         )}
@@ -379,8 +477,12 @@ function ToolEventCard({ event, defaultOpen = false }) {
       </button>
       {expanded && (
         <div
+          className="cw-selectable-text"
           data-testid="tool-event-detail"
+          onMouseEnter={() => setDetailHovered(true)}
+          onMouseLeave={() => setDetailHovered(false)}
           style={{
+            position: 'relative',
             borderTop: '1px solid #ECE6D5', background: '#FFFEF8',
             padding: '10px 14px',
             fontFamily: MONO_FONT, fontSize: 12.5, color: '#1C1A17',
@@ -389,9 +491,7 @@ function ToolEventCard({ event, defaultOpen = false }) {
             animation: 'cw-expand-in .18s ease',
           }}
         >
-          {pathOverflows && (
-            <div style={{ marginBottom: hasOutput ? 8 : 0 }}>{event.path}</div>
-          )}
+          <FloatingToolCopyButton text={detailCopyText} visible={detailHovered} />
           {hasOutput && <ToolOutputPre output={fullOutput} result={event.result} />}
         </div>
       )}
@@ -533,17 +633,25 @@ function ToolGroupEvent({ events, agentsMap, showHeader = true }) {
 }
 
 function ToolResultEvent({ event, agentsMap }) {
+  const [hovered, setHovered] = React.useState(false);
   const agent = resolveAuthor(event.author, agentsMap);
   if (!agent || agent.kind !== 'agent') return null;
+  const outputText = toolOutputText(event.output);
   return (
-    <div style={{ display: 'flex', gap: 14, padding: '6px 0 6px 42px' }}>
+    <div data-testid="tool-result-event" style={{ display: 'flex', gap: 14, padding: '6px 0 6px 42px' }}>
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{
-          border: '1px solid #ECE6D5', borderRadius: 8, background: '#FCFAF1',
-          padding: '8px 12px', fontSize: 12.5, color: '#5C544B', fontFamily: MONO_FONT,
-          maxHeight: 120, overflow: 'auto',
-        }}>
-          {event.output || '(no output)'}
+        <div
+          className="cw-selectable-text"
+          onMouseEnter={() => setHovered(true)}
+          onMouseLeave={() => setHovered(false)}
+          style={{
+            position: 'relative',
+            border: '1px solid #ECE6D5', borderRadius: 8, background: '#FCFAF1',
+            padding: '8px 12px', fontSize: 12.5, color: '#5C544B', fontFamily: MONO_FONT,
+            maxHeight: 120, overflow: 'auto',
+          }}>
+          <FloatingToolCopyButton text={outputText} visible={hovered} />
+          {outputText || '(no output)'}
         </div>
       </div>
     </div>
@@ -624,6 +732,7 @@ function EventRouter({
   agentsMap,
   showHeader = true,
   thought,
+  copyAction,
   searchQuery = '',
   activeSearchMatchIndex = 0,
   getSearchMatchIndex,
@@ -634,6 +743,7 @@ function EventRouter({
       agentsMap={agentsMap}
       thought={thought}
       showHeader={showHeader}
+      copyAction={copyAction}
       searchQuery={searchQuery}
       activeSearchMatchIndex={activeSearchMatchIndex}
       getSearchMatchIndex={getSearchMatchIndex}
@@ -643,7 +753,7 @@ function EventRouter({
   if (event.kind === 'tool') return <ToolEvent event={event} agentsMap={agentsMap} showHeader={showHeader} />;
   if (event.kind === 'tool_group') return <ToolGroupEvent events={event.events} agentsMap={agentsMap} showHeader={showHeader} />;
   if (event.kind === 'tool_result') return <ToolResultEvent event={event} agentsMap={agentsMap} />;
-  if (event.kind === 'error') return <ErrorEvent event={event} agentsMap={agentsMap} />;
+  if (event.kind === 'error') return <ErrorEvent event={event} agentsMap={agentsMap} showHeader={showHeader} copyAction={copyAction} />;
   // runtime_session is intentionally swallowed; no UI for it.
   return null;
 }
@@ -1444,7 +1554,7 @@ function FileOperationsView({ file, agentsMap, onBack }) {
                   <span style={{ fontSize: 11, color: '#A89F92', fontFamily: UI_FONT }}>{op.time}</span>
                 </div>
                 {op.output && (
-                  <pre style={{
+                  <pre className="cw-selectable-text" style={{
                     margin: 0, padding: '8px 12px',
                     fontFamily: MONO_FONT, fontSize: 12, color: '#5C544B',
                     background: 'rgba(0,0,0,0.03)', lineHeight: 1.55,
@@ -1933,12 +2043,19 @@ function HandoverDivider({ from, to, note, subtype, agentsMap }) {
 
 // ─── Error event ──────────────────────────────────────────────────────────────
 
-function ErrorEvent({ event, agentsMap }) {
+function ErrorEvent({ event, agentsMap, showHeader = true, copyAction = null }) {
+  const [hovered, setHovered] = React.useState(false);
   const author = event.agent_id || event.author;
   const agent = author ? resolveAuthor(author, agentsMap) : null;
+  const copyVisible = Boolean(copyAction?.pinned || hovered);
   return (
-    <div data-testid="error-event" style={{ display: 'flex', gap: 14, padding: '8px 0' }}>
-      {agent && agent.kind === 'agent'
+    <div
+      data-testid="error-event"
+      style={{ display: 'flex', gap: 14, padding: '8px 0' }}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+    >
+      {showHeader && agent && agent.kind === 'agent'
         ? <Avatar agent={agent} size={28} />
         : <div style={{ width: 28, flexShrink: 0 }} aria-hidden="true" />}
       <div style={{ flex: 1, minWidth: 0 }}>
@@ -1991,6 +2108,13 @@ function ErrorEvent({ event, agentsMap }) {
             )}
           </div>
         </div>
+        {copyAction && (
+          <MessageCopyButton
+            text={copyAction.text}
+            visible={copyVisible}
+            compactSpace={!copyAction.pinned}
+          />
+        )}
       </div>
     </div>
   );
@@ -2038,6 +2162,73 @@ function groupConsecutiveTools(events) {
   return out.map(e => (e._toolRun && e.events.length === 1) ? e.events[0] : e);
 }
 
+function eventRenderKey(event, index) {
+  return event._seq ?? index;
+}
+
+function copyActorForEvent(event) {
+  if (event.kind === 'error') return event.agent_id || event.author;
+  return event.author;
+}
+
+function appendCopyPart(parts, text) {
+  const value = String(text || '').trim();
+  if (!value) return;
+  if (parts[parts.length - 1] === value) return;
+  parts.push(value);
+}
+
+function buildCopyActionsByEvent(events) {
+  const runs = [];
+  let currentAgentRun = null;
+
+  const flushAgentRun = () => {
+    if (currentAgentRun) {
+      const text = currentAgentRun.parts.join('\n\n');
+      if (text.trim()) {
+        runs.push({ key: currentAgentRun.key, text });
+      }
+    }
+    currentAgentRun = null;
+  };
+
+  events.forEach((event, index) => {
+    if (event.kind === 'handover') return;
+    const key = eventRenderKey(event, index);
+    const actor = copyActorForEvent(event);
+    if (event.kind === 'message' && actor === '__human__') {
+      flushAgentRun();
+      const text = String(event.body || '').trim();
+      if (text) runs.push({ key, text });
+      return;
+    }
+    if (!actor || actor === '__human__') {
+      flushAgentRun();
+      return;
+    }
+
+    if (!currentAgentRun || currentAgentRun.author !== actor) {
+      flushAgentRun();
+      currentAgentRun = { author: actor, key, parts: [] };
+    }
+    currentAgentRun.key = key;
+    if (event.kind === 'message') {
+      appendCopyPart(currentAgentRun.parts, event.body);
+    } else if (event.kind === 'error') {
+      appendCopyPart(currentAgentRun.parts, event.message);
+    }
+  });
+  flushAgentRun();
+
+  const copyActionsByEvent = new Map();
+  const lastRun = runs[runs.length - 1];
+  for (const run of runs) {
+    copyActionsByEvent.set(run.key, { text: run.text, pinned: run === lastRun });
+  }
+
+  return copyActionsByEvent;
+}
+
 function renderEventsWithHandovers({
   events,
   agentsMap,
@@ -2046,6 +2237,7 @@ function renderEventsWithHandovers({
   getSearchMatchIndex,
 }) {
   const prepared = groupConsecutiveTools(prepareEvents(events));
+  const copyActionsByEvent = buildCopyActionsByEvent(prepared);
   const out = [];
   // Track the last *agent* actor, not the last event author. A human turn
   // between two agents (e.g. "@Designer take it from here") should still let
@@ -2144,11 +2336,12 @@ function renderEventsWithHandovers({
     const showHeader = isHeaderless ? true : prevDisplayedActor !== actor;
     out.push(
       <EventRouter
-        key={e._seq ?? i}
+        key={eventRenderKey(e, i)}
         event={e}
         agentsMap={agentsMap}
         showHeader={showHeader}
         thought={e._thought}
+        copyAction={copyActionsByEvent.get(eventRenderKey(e, i))}
         searchQuery={searchQuery}
         activeSearchMatchIndex={activeSearchMatchIndex}
         getSearchMatchIndex={getSearchMatchIndex}
@@ -2661,12 +2854,17 @@ function QueuedSteerCard({ item, isLast, queueCount, onCancel, onEdit, onDeliver
 }
 
 function Composer({ onSend, isStreaming, onCancel, pendingSteers = [], onCancelSteer, onEditSteer, onDeliverSteers, agentsMap, skills = [], projects = [], chatId, projectId, defaultTargetAgentId, targetAgentId, onChangeTargetAgent }) {
+  const composerDraftKey = React.useMemo(() => (
+    chatId && projectId ? `${projectId}:${chatId}` : ''
+  ), [chatId, projectId]);
   const [val, setVal] = React.useState(() => readComposerDraft(projectId, chatId).text || '');
+  const [draftReadyKey, setDraftReadyKey] = React.useState(composerDraftKey);
   const [attachments, setAttachments] = React.useState([]);
   const [cursor, setCursor] = React.useState(0);
   const [activeSuggestion, setActiveSuggestion] = React.useState(0);
   const [fileMatches, setFileMatches] = React.useState([]);
   const [scrollTop, setScrollTop] = React.useState(0);
+  const [sendShortcutMode, setSendShortcutMode] = useSendShortcutMode();
   const ta = React.useRef(null);
   const listboxRef = React.useRef(null);
   const canAttach = attachmentsSupported();
@@ -2701,20 +2899,24 @@ function Composer({ onSend, isStreaming, onCancel, pendingSteers = [], onCancelS
   }, [val]);
 
   React.useEffect(() => {
-    if (!chatId || !projectId) return;
+    if (!composerDraftKey) {
+      setDraftReadyKey('');
+      return;
+    }
     const draft = readComposerDraft(projectId, chatId);
     setVal(draft.text || '');
     setAttachments([]);
     if (draft.targetAgentId) onChangeTargetAgent?.(draft.targetAgentId);
-  }, [chatId, projectId, onChangeTargetAgent]);
+    setDraftReadyKey(composerDraftKey);
+  }, [chatId, composerDraftKey, projectId, onChangeTargetAgent]);
 
   React.useEffect(() => {
-    if (!chatId || !projectId) return;
+    if (!composerDraftKey || draftReadyKey !== composerDraftKey) return;
     writeComposerDraft(projectId, chatId, {
       text: val,
       targetAgentId: targetAgentId && targetAgentId !== defaultTargetAgentId ? targetAgentId : '',
     });
-  }, [chatId, projectId, defaultTargetAgentId, targetAgentId, val]);
+  }, [chatId, composerDraftKey, defaultTargetAgentId, draftReadyKey, projectId, targetAgentId, val]);
 
   const activeToken = React.useMemo(() => suggestionBounds(val, cursor), [val, cursor]);
 
@@ -2851,6 +3053,12 @@ function Composer({ onSend, isStreaming, onCancel, pendingSteers = [], onCancelS
       }
     }
 
+    if (e.key === 'Escape' && isStreaming) {
+      e.preventDefault();
+      onCancel?.();
+      return;
+    }
+
     if (suggestionOptions.length > 0) {
       if (e.key === 'ArrowDown') {
         e.preventDefault();
@@ -2873,7 +3081,10 @@ function Composer({ onSend, isStreaming, onCancel, pendingSteers = [], onCancelS
         return;
       }
     }
-    if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); send(); }
+    if (shouldSendFromEnterKey(e, sendShortcutMode)) {
+      e.preventDefault();
+      send();
+    }
   };
 
   const canSend = Boolean(val.trim()) || attachments.length > 0;
@@ -2999,7 +3210,7 @@ function Composer({ onSend, isStreaming, onCancel, pendingSteers = [], onCancelS
               e.stopPropagation();
             }}
             onDrop={handleDrop}
-            placeholder={isStreaming ? 'Steer this run…' : 'Steer the crew — @agent to direct, ⌘↵ to send'}
+            placeholder={isStreaming ? 'Steer this run…' : `Steer the crew — @agent to direct, ${shortcutPlaceholderHint(sendShortcutMode)}`}
             rows={1}
             style={{
               position: 'relative', zIndex: 1,
@@ -3034,7 +3245,7 @@ function Composer({ onSend, isStreaming, onCancel, pendingSteers = [], onCancelS
             <AgentPicker value={targetAgentId} onChange={onChangeTargetAgent} agents={agents} />
           )}
           <div style={{ flex: 1 }} />
-          <span style={{ fontSize: 11.5, color: '#A89F92' }}>⌘↵ send</span>
+          <SendShortcutMenu mode={sendShortcutMode} onChange={setSendShortcutMode} direction="up" />
           {isStreaming && (
             <button
               type="button"
@@ -3511,6 +3722,7 @@ export default function TaskView({ chatId, agentsMap, skills = [], projects = []
 
   const drawerWidthExpr = `calc(${((1 - splitRatio) * 100).toFixed(3)}% - 3px)`;
   const drawerTransition = dragging ? 'none' : 'width 260ms cubic-bezier(0.22, 1, 0.36, 1), opacity 220ms ease';
+  const activeChat = chat?.id === chatId ? chat : null;
 
   return (
     <div
@@ -3589,8 +3801,8 @@ export default function TaskView({ chatId, agentsMap, skills = [], projects = []
           skills={skills}
           projects={projects}
           chatId={chatId}
-          projectId={chat?.project_id || ''}
-          defaultTargetAgentId={chat?.current_agent_id || chat?.main_agent_id || null}
+          projectId={activeChat?.project_id || ''}
+          defaultTargetAgentId={activeChat?.current_agent_id || activeChat?.main_agent_id || null}
           targetAgentId={targetAgentId}
           onChangeTargetAgent={setTargetAgentId}
         />

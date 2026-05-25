@@ -137,6 +137,62 @@ describe('RichText', () => {
     const { container } = render(<RichText text="before {{file:x}} after" />);
     expect(container.textContent).toBe('before x after');
   });
+
+  it('renders markdown pipe tables with inline cell formatting', () => {
+    const table = [
+      '| Name | Score |',
+      '| --- | ---: |',
+      '| Ada | **10** |',
+      '| Lin | `8` |',
+    ].join('\n');
+    const { container } = render(<RichText text={table} />);
+
+    expect(container.querySelector('table')).toBeInTheDocument();
+    expect(container.querySelectorAll('th')).toHaveLength(2);
+    expect(container.querySelectorAll('tbody tr')).toHaveLength(2);
+    expect(screen.getByText('Ada')).toBeInTheDocument();
+    expect(screen.getByText('10').tagName).toBe('STRONG');
+    expect(screen.getByText('8').tagName).toBe('CODE');
+    expect(container.querySelectorAll('td')[1].style.textAlign).toBe('right');
+  });
+
+  it('renders aligned pipe tables with short delimiter cells', () => {
+    const table = [
+      '| Item | Qty | Unit Price | Total |',
+      '| :--- | --: | :---: | ---: |',
+      '| Coffee | 2 | $3.50 | $7.00 |',
+      '| Bagel | 1 | $2.25 | $2.25 |',
+      '| Sum | | | **$21.25** |',
+    ].join('\n');
+    const { container } = render(<RichText text={table} />);
+    const cells = container.querySelectorAll('td');
+
+    expect(container.querySelector('table')).toBeInTheDocument();
+    expect(container.querySelectorAll('tbody tr')).toHaveLength(3);
+    expect(container.textContent).not.toContain('| :--- | --: | :---: | ---: |');
+    expect(cells[0].style.textAlign).toBe('left');
+    expect(cells[1].style.textAlign).toBe('right');
+    expect(cells[2].style.textAlign).toBe('center');
+    expect(cells[3].style.textAlign).toBe('right');
+    expect(screen.getByText('$21.25').tagName).toBe('STRONG');
+  });
+
+  it('renders inline math with KaTeX', () => {
+    const { container } = render(<RichText text="Use $x^2 + 1$ here." />);
+
+    expect(container.querySelector('.cw-math-inline')).toBeInTheDocument();
+    expect(container.querySelector('.katex')).toBeInTheDocument();
+    expect(container.querySelector('.cw-math-inline')).toHaveAttribute('aria-label', 'x^2 + 1');
+    expect(container.textContent).not.toContain('$x^2 + 1$');
+  });
+
+  it('renders display math with KaTeX', () => {
+    const { container } = render(<RichText text={'$$\n\\int_0^1 x^2 dx\n$$'} />);
+
+    expect(container.querySelector('.cw-math-block')).toBeInTheDocument();
+    expect(container.querySelector('.katex-display')).toBeInTheDocument();
+    expect(container.querySelector('.cw-math-block')).toHaveAttribute('aria-label', '\\int_0^1 x^2 dx');
+  });
 });
 
 // ─── Icon ──────────────────────────────────────────────────────────────────────

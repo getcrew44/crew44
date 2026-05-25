@@ -207,6 +207,51 @@ describe('TaskView', () => {
     ]);
   });
 
+  it('labels the modifier send shortcut for the current platform', async () => {
+    mockNavigatorPlatform('MacIntel');
+    const { unmount } = render(<TaskView chatId="chat-1" agentsMap={agentsMap} />);
+
+    await screen.findByTestId('composer-input');
+    expect(screen.getByTestId('send-shortcut-menu-button')).toHaveTextContent('⌘+Enter send');
+    fireEvent.click(screen.getByTestId('send-shortcut-menu-button'));
+    expect(screen.getByRole('menuitemradio', { name: '⌘+Enter' })).toBeInTheDocument();
+    expect(screen.getByTestId('send-shortcut-menu').style.bottom).toBe('calc(100% + 6px)');
+    expect(screen.getByTestId('send-shortcut-menu').style.top).toBe('');
+
+    unmount();
+    mockNavigatorPlatform('Win32');
+    render(<TaskView chatId="chat-1" agentsMap={agentsMap} />);
+
+    await screen.findByTestId('composer-input');
+    expect(screen.getByTestId('send-shortcut-menu-button')).toHaveTextContent('Ctrl+Enter send');
+    fireEvent.click(screen.getByTestId('send-shortcut-menu-button'));
+    expect(screen.getByRole('menuitemradio', { name: 'Ctrl+Enter' })).toBeInTheDocument();
+  });
+
+  it('sends from Cmd or Ctrl Enter by default and can switch Enter into the send key', async () => {
+    render(<TaskView chatId="chat-1" agentsMap={agentsMap} />);
+
+    const input = await screen.findByTestId('composer-input');
+    fireEvent.change(input, { target: { value: 'default shortcut' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    expect(api.postMessage).not.toHaveBeenCalled();
+
+    fireEvent.keyDown(input, { key: 'Enter', metaKey: true });
+    await waitFor(() => expect(api.postMessage).toHaveBeenCalledWith('chat-1', 'default shortcut', 'agent-1', []));
+
+    api.postMessage.mockClear();
+    fireEvent.change(input, { target: { value: 'enter shortcut' } });
+    fireEvent.click(screen.getByTestId('send-shortcut-menu-button'));
+    fireEvent.click(screen.getAllByRole('menuitemradio')[1]);
+
+    fireEvent.keyDown(input, { key: 'Enter', shiftKey: true });
+    fireEvent.keyDown(input, { key: 'Enter', altKey: true });
+    expect(api.postMessage).not.toHaveBeenCalled();
+
+    fireEvent.keyDown(input, { key: 'Enter' });
+    await waitFor(() => expect(api.postMessage).toHaveBeenCalledWith('chat-1', 'enter shortcut', 'agent-1', []));
+  });
+
   it('accepts dropped file attachments in the composer', async () => {
     render(<TaskView chatId="chat-1" agentsMap={agentsMap} />);
 
@@ -369,6 +414,173 @@ describe('TaskView', () => {
     await waitFor(() => expect(timeline.scrollTop).toBe(900));
   });
 
+  it('copies message text and mentions without attachments', async () => {
+    const writeText = vi.fn().mockResolvedValue();
+    Object.defineProperty(window.navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText },
+    });
+    api.streamChatEvents.mockImplementation(() => vi.fn());
+    render(<TaskView chatId="chat-1" agentsMap={agentsMap} />);
+
+    await screen.findByTestId('composer-input');
+    const stream = api.streamChatEvents.mock.calls[0];
+    await emitEvent(stream, {
+      seq: 3,
+      type: 'message',
+      ts: '2026-05-12T10:02:00Z',
+      actor_agent_id: 'agent-1',
+      message: {
+        role: 'assistant',
+        content: 'Hello {{ref:Default Agent}}',
+        attachments: [{ path: '/tmp/screen.png', display_name: 'screen.png', kind: 'image' }],
+      },
+    });
+    await emitEvent(stream, {
+      seq: 4,
+      type: 'message',
+      ts: '2026-05-12T10:03:00Z',
+      actor_agent_id: '',
+      message: {
+        role: 'user',
+        content: '@Aria please inspect this',
+        attachments: [{ path: '/tmp/notes.txt', display_name: 'notes.txt', kind: 'file' }],
+      },
+    });
+
+    const copyButtons = await screen.findAllByRole('button', { name: 'Copy message' });
+    expect(copyButtons[0]).toHaveStyle({ opacity: '0' });
+    expect(copyButtons[1]).toHaveStyle({ opacity: '1' });
+    expect(copyButtons[0].parentElement).toHaveStyle({ marginBottom: '-28px' });
+    expect(copyButtons[1].parentElement).toHaveStyle({ marginBottom: '0' });
+
+    fireEvent.mouseEnter(screen.getAllByTestId('message-event')[0]);
+    expect(copyButtons[0]).toHaveStyle({ opacity: '1' });
+    fireEvent.mouseLeave(screen.getAllByTestId('message-event')[0]);
+    expect(copyButtons[0]).toHaveStyle({ opacity: '0' });
+
+    fireEvent.click(copyButtons[0]);
+    fireEvent.click(copyButtons[1]);
+
+    await waitFor(() => {
+      expect(writeText).toHaveBeenNthCalledWith(1, 'Hello @Default Agent');
+      expect(writeText).toHaveBeenNthCalledWith(2, '@Aria please inspect this');
+    });
+  });
+
+  it('keeps rendered chat message bodies selectable', async () => {
+    api.streamChatEvents.mockImplementation(() => vi.fn());
+    render(<TaskView chatId="chat-1" agentsMap={agentsMap} />);
+
+    await screen.findByTestId('composer-input');
+    const stream = api.streamChatEvents.mock.calls[0];
+    await emitEvent(stream, {
+      seq: 3,
+      type: 'message',
+      ts: '2026-05-12T10:02:00Z',
+      actor_agent_id: 'agent-1',
+      message: { role: 'assistant', content: 'Selectable reply' },
+    });
+    await emitEvent(stream, {
+      seq: 4,
+      type: 'message',
+      ts: '2026-05-12T10:03:00Z',
+      actor_agent_id: '',
+      message: { role: 'user', content: 'Selectable request' },
+    });
+
+    expect(screen.getByText('Selectable reply').closest('.cw-selectable-text')).toBeTruthy();
+    expect(screen.getByText('Selectable request').closest('.cw-selectable-text')).toBeTruthy();
+  });
+
+  it('places the copy button under an assistant run that ends with an error', async () => {
+    const writeText = vi.fn().mockResolvedValue();
+    Object.defineProperty(window.navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText },
+    });
+    api.streamChatEvents.mockImplementation(() => vi.fn());
+    render(<TaskView chatId="chat-1" agentsMap={agentsMap} />);
+
+    await screen.findByTestId('composer-input');
+    const stream = api.streamChatEvents.mock.calls[0];
+    await emitEvent(stream, {
+      seq: 3,
+      type: 'message',
+      ts: '2026-05-12T10:02:00Z',
+      actor_agent_id: 'agent-1',
+      message: { role: 'assistant', content: 'Failed to authenticate.' },
+    });
+    await emitEvent(stream, {
+      seq: 4,
+      type: 'error',
+      ts: '2026-05-12T10:02:05Z',
+      actor_agent_id: 'agent-1',
+      error: {
+        subtype: 'runtime',
+        code: 'runtime_error',
+        message: 'Failed to authenticate.',
+        agent_id: 'agent-1',
+        agent_name: 'Aria',
+      },
+    });
+
+    const copyButtons = await screen.findAllByRole('button', { name: 'Copy message' });
+    expect(copyButtons).toHaveLength(1);
+    expect(within(screen.getByTestId('error-event')).getByRole('button', { name: 'Copy message' })).toBe(copyButtons[0]);
+    expect(screen.getByTestId('error-event').firstChild).toHaveTextContent('');
+    expect(copyButtons[0]).toHaveStyle({ opacity: '1' });
+
+    fireEvent.click(copyButtons[0]);
+
+    await waitFor(() => {
+      expect(writeText).toHaveBeenCalledWith('Failed to authenticate.');
+    });
+  });
+
+  it('shows one copy button for a multi-part assistant run', async () => {
+    const writeText = vi.fn().mockResolvedValue();
+    Object.defineProperty(window.navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText },
+    });
+    api.streamChatEvents.mockImplementation(() => vi.fn());
+    render(<TaskView chatId="chat-1" agentsMap={agentsMap} />);
+
+    await screen.findByTestId('composer-input');
+    const stream = api.streamChatEvents.mock.calls[0];
+    await emitEvent(stream, {
+      seq: 3,
+      type: 'message',
+      ts: '2026-05-12T10:02:00Z',
+      actor_agent_id: 'agent-1',
+      message: { role: 'assistant', content: 'First chunk' },
+    });
+    await emitEvent(stream, {
+      seq: 4,
+      type: 'tool_call',
+      ts: '2026-05-12T10:02:10Z',
+      actor_agent_id: 'agent-1',
+      tool_call: { call_id: 'call-1', name: 'Read', input: { path: 'README.md' } },
+    });
+    await emitEvent(stream, {
+      seq: 5,
+      type: 'message',
+      ts: '2026-05-12T10:02:20Z',
+      actor_agent_id: 'agent-1',
+      message: { role: 'assistant', content: 'Second chunk' },
+    });
+
+    const copyButtons = await screen.findAllByRole('button', { name: 'Copy message' });
+    expect(copyButtons).toHaveLength(1);
+
+    fireEvent.click(copyButtons[0]);
+
+    await waitFor(() => {
+      expect(writeText).toHaveBeenCalledWith('First chunk\n\nSecond chunk');
+    });
+  });
+
   it('opens conversation find with Cmd+F on macOS and ignores Ctrl+F', async () => {
     mockNavigatorPlatform('MacIntel');
     api.streamChatEvents.mockImplementation(() => vi.fn());
@@ -448,6 +660,18 @@ describe('TaskView', () => {
     expect(screen.queryByRole('button', { name: /cancel/i })).not.toBeInTheDocument();
 
     fireEvent.click(stop);
+
+    await waitFor(() => expect(api.cancelChat).toHaveBeenCalledWith('chat-1'));
+  });
+
+  it('treats Escape in the focused composer input like the stop button while streaming', async () => {
+    api.getChat.mockResolvedValue({ ...chat, stream: { status: 'streaming' } });
+    api.streamChatEvents.mockImplementation(() => vi.fn());
+
+    render(<TaskView chatId="chat-1" agentsMap={agentsMap} />);
+
+    const input = await screen.findByTestId('composer-input');
+    fireEvent.keyDown(input, { key: 'Escape' });
 
     await waitFor(() => expect(api.cancelChat).toHaveBeenCalledWith('chat-1'));
   });
@@ -727,6 +951,37 @@ describe('TaskView', () => {
     expect(screen.getByTestId('composer-agent-picker')).toHaveTextContent('Default Agent');
   });
 
+  it('does not write stale composer text to the next chat while switching chats', async () => {
+    api.getChat.mockImplementation(async (id) => (
+      {
+        ...chat,
+        id,
+        project_id: 'p1',
+        current_agent_id: 'agent-1',
+        main_agent_id: 'agent-1',
+      }
+    ));
+
+    const { rerender } = render(<TaskView chatId="chat-a" agentsMap={agentsMap} />);
+
+    await screen.findByText('chat-a');
+    const input = screen.getByTestId('composer-input');
+    fireEvent.change(input, { target: { value: 'draft for chat a' } });
+
+    await waitFor(() => {
+      expect(window.localStorage.getItem('crew44-composer-draft:v1:p1:chat-a')).toContain('draft for chat a');
+    });
+
+    rerender(<TaskView chatId="chat-b" agentsMap={agentsMap} />);
+    await waitFor(() => expect(api.getChat).toHaveBeenCalledWith('chat-b'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('composer-input')).toHaveValue('');
+    });
+    expect(window.localStorage.getItem('crew44-composer-draft:v1:p1:chat-a')).toContain('draft for chat a');
+    expect(window.localStorage.getItem('crew44-composer-draft:v1:p1:chat-b')).toBeNull();
+  });
+
   it('attributes a message from a deleted agent to that agent (not to the user)', async () => {
     // Seed the session cache so the deleted agent's original name is still known
     rememberAgents({
@@ -885,6 +1140,11 @@ describe('TaskView', () => {
   });
 
   it('renders tool calls collapsed by default and expands the output on click', async () => {
+    const writeText = vi.fn().mockResolvedValue();
+    Object.defineProperty(window.navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText },
+    });
     api.streamChatEvents.mockImplementation(() => vi.fn());
 
     render(<TaskView chatId="chat-1" agentsMap={agentsMap} />);
@@ -906,6 +1166,7 @@ describe('TaskView', () => {
     const row = await screen.findByTestId('tool-event-row');
     expect(row).toHaveAttribute('aria-expanded', 'false');
     expect(screen.queryByTestId('tool-event-detail')).not.toBeInTheDocument();
+    expect(screen.getByText("sed -n '1,180p' /tmp/x").closest('.cw-selectable-text')).toBeTruthy();
 
     // Clicking expands and reveals the full output.
     fireEvent.click(row);
@@ -913,11 +1174,64 @@ describe('TaskView', () => {
     const detail = screen.getByTestId('tool-event-detail');
     expect(detail).toHaveTextContent('first output line');
     expect(detail).toHaveTextContent('second output line');
+    expect(detail).toHaveClass('cw-selectable-text');
+    expect(detail.querySelector('pre')).toHaveClass('cw-selectable-text');
+    const copyButton = screen.getByRole('button', { name: 'Copy tool result' });
+    expect(copyButton).toHaveStyle({ position: 'absolute', opacity: '0' });
+
+    fireEvent.mouseEnter(detail);
+    expect(copyButton).toHaveStyle({ opacity: '1' });
+    fireEvent.click(copyButton);
+
+    await waitFor(() => {
+      expect(writeText).toHaveBeenCalledWith('first output line\nsecond output line');
+    });
 
     // Clicking again collapses it back.
     fireEvent.click(row);
     expect(row).toHaveAttribute('aria-expanded', 'false');
     expect(screen.queryByTestId('tool-event-detail')).not.toBeInTheDocument();
+  });
+
+  it('copies raw tool result text without escaped JSON or call params', async () => {
+    const writeText = vi.fn().mockResolvedValue();
+    Object.defineProperty(window.navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText },
+    });
+    api.streamChatEvents.mockImplementation(() => vi.fn());
+
+    render(<TaskView chatId="chat-1" agentsMap={agentsMap} />);
+    await screen.findByTestId('composer-input');
+
+    const longPath = '/Users/mindivelabs/.crew44/chats/chat-ed9154a5-5ac1-1e5f-e279-f518b7b97f8b/summary.md';
+    const rawOutput = '<system-reminder>Warning: the file exists but is shorter than the provided offset (1). The file has 1 lines.</system-reminder>';
+    const stream = api.streamChatEvents.mock.calls[0];
+    await emitEvent(stream, {
+      seq: 1, type: 'tool_call', ts: '2026-05-12T10:00:00Z',
+      actor_agent_id: 'agent-1',
+      tool_call: { call_id: 'call-1', name: 'Read', input: { file_path: longPath } },
+    });
+    await emitEvent(stream, {
+      seq: 2, type: 'tool_call_result', ts: '2026-05-12T10:00:01Z',
+      actor_agent_id: 'agent-1',
+      tool_call_result: { call_id: 'call-1', tool_call_seq: 1, name: 'Read', output: JSON.stringify(rawOutput) },
+    });
+
+    const row = await screen.findByTestId('tool-event-row');
+    const pathText = screen.getByText(longPath);
+    expect(pathText).toHaveStyle({ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' });
+
+    fireEvent.click(row);
+    expect(pathText).toHaveStyle({ whiteSpace: 'normal', overflow: 'visible', textOverflow: 'clip', wordBreak: 'break-word' });
+
+    const detail = screen.getByTestId('tool-event-detail');
+    fireEvent.mouseEnter(detail);
+    fireEvent.click(screen.getByRole('button', { name: 'Copy tool result' }));
+
+    await waitFor(() => {
+      expect(writeText).toHaveBeenCalledWith(rawOutput);
+    });
   });
 
   it('collapses consecutive tool calls from the same agent into a single group row', async () => {
