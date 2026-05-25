@@ -56,9 +56,10 @@ func TestPrepareSkillEnvironmentClaudeInjectsBrowserMCP(t *testing.T) {
 	workDir := t.TempDir()
 	envDir := filepath.Join(t.TempDir(), "runtime-env")
 	if _, err := prepareSkillEnvironment(RunRequest{
-		Runtime:       model.RuntimeRecord{Provider: "claude"},
-		WorkDir:       workDir,
-		RuntimeEnvDir: envDir,
+		Runtime:          model.RuntimeRecord{Provider: "claude"},
+		WorkDir:          workDir,
+		RuntimeEnvDir:    envDir,
+		EnableBrowserMCP: true,
 	}); err != nil {
 		t.Fatalf("prepareSkillEnvironment failed: %v", err)
 	}
@@ -108,9 +109,10 @@ func TestPrepareSkillEnvironmentClaudeBrowserMCPPreservesExistingConfig(t *testi
 	}
 
 	if _, err := prepareSkillEnvironment(RunRequest{
-		Runtime:       model.RuntimeRecord{Provider: "claude"},
-		WorkDir:       workDir,
-		RuntimeEnvDir: envDir,
+		Runtime:          model.RuntimeRecord{Provider: "claude"},
+		WorkDir:          workDir,
+		RuntimeEnvDir:    envDir,
+		EnableBrowserMCP: true,
 	}); err != nil {
 		t.Fatalf("prepareSkillEnvironment failed: %v", err)
 	}
@@ -139,9 +141,10 @@ func TestPrepareSkillEnvironmentClaudeBrowserMCPIsIdempotent(t *testing.T) {
 	workDir := t.TempDir()
 	envDir := filepath.Join(t.TempDir(), "runtime-env")
 	req := RunRequest{
-		Runtime:       model.RuntimeRecord{Provider: "claude"},
-		WorkDir:       workDir,
-		RuntimeEnvDir: envDir,
+		Runtime:          model.RuntimeRecord{Provider: "claude"},
+		WorkDir:          workDir,
+		RuntimeEnvDir:    envDir,
+		EnableBrowserMCP: true,
 	}
 	for i := 0; i < 2; i++ {
 		if _, err := prepareSkillEnvironment(req); err != nil {
@@ -171,9 +174,10 @@ func TestPrepareSkillEnvironmentCodexInjectsBrowserMCP(t *testing.T) {
 	workDir := t.TempDir()
 	envDir := filepath.Join(t.TempDir(), "runtime-env")
 	if _, err := prepareSkillEnvironment(RunRequest{
-		Runtime:       model.RuntimeRecord{Provider: "codex"},
-		WorkDir:       workDir,
-		RuntimeEnvDir: envDir,
+		Runtime:          model.RuntimeRecord{Provider: "codex"},
+		WorkDir:          workDir,
+		RuntimeEnvDir:    envDir,
+		EnableBrowserMCP: true,
 	}); err != nil {
 		t.Fatalf("prepareSkillEnvironment failed: %v", err)
 	}
@@ -215,9 +219,10 @@ func TestPrepareSkillEnvironmentCodexBrowserMCPPreservesExistingConfig(t *testin
 	}
 
 	if _, err := prepareSkillEnvironment(RunRequest{
-		Runtime:       model.RuntimeRecord{Provider: "codex"},
-		WorkDir:       workDir,
-		RuntimeEnvDir: envDir,
+		Runtime:          model.RuntimeRecord{Provider: "codex"},
+		WorkDir:          workDir,
+		RuntimeEnvDir:    envDir,
+		EnableBrowserMCP: true,
 	}); err != nil {
 		t.Fatalf("prepareSkillEnvironment failed: %v", err)
 	}
@@ -243,9 +248,10 @@ func TestPrepareSkillEnvironmentCodexBrowserMCPIsIdempotent(t *testing.T) {
 	workDir := t.TempDir()
 	envDir := filepath.Join(t.TempDir(), "runtime-env")
 	req := RunRequest{
-		Runtime:       model.RuntimeRecord{Provider: "codex"},
-		WorkDir:       workDir,
-		RuntimeEnvDir: envDir,
+		Runtime:          model.RuntimeRecord{Provider: "codex"},
+		WorkDir:          workDir,
+		RuntimeEnvDir:    envDir,
+		EnableBrowserMCP: true,
 	}
 	for i := 0; i < 2; i++ {
 		if _, err := prepareSkillEnvironment(req); err != nil {
@@ -307,9 +313,10 @@ func TestPrepareSkillEnvironmentCodexBrowserMCPIgnoresCommentedHeader(t *testing
 	}
 
 	if _, err := prepareSkillEnvironment(RunRequest{
-		Runtime:       model.RuntimeRecord{Provider: "codex"},
-		WorkDir:       workDir,
-		RuntimeEnvDir: envDir,
+		Runtime:          model.RuntimeRecord{Provider: "codex"},
+		WorkDir:          workDir,
+		RuntimeEnvDir:    envDir,
+		EnableBrowserMCP: true,
 	}); err != nil {
 		t.Fatalf("prepareSkillEnvironment failed: %v", err)
 	}
@@ -380,5 +387,63 @@ func TestTomlStringEscapesControlChars(t *testing.T) {
 				t.Fatalf("tomlString(%q) = %q, want %q", tc.in, got, tc.want)
 			}
 		})
+	}
+}
+
+// Browser injection is opt-in. A call that leaves EnableBrowserMCP unset — like
+// the chat-title summarizer, which runs on untrusted user content under
+// bypass-permissions — must NOT get a playwright server in its isolated config.
+func TestPrepareSkillEnvironmentClaudeOmitsBrowserMCPWhenNotEnabled(t *testing.T) {
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "dummy")
+	t.Setenv("PLAYWRIGHT_BROWSERS_PATH", "/tmp/crew44-pw-cache")
+
+	workDir := t.TempDir()
+	envDir := filepath.Join(t.TempDir(), "runtime-env")
+	if _, err := prepareSkillEnvironment(RunRequest{
+		Runtime:       model.RuntimeRecord{Provider: "claude"},
+		WorkDir:       workDir,
+		RuntimeEnvDir: envDir,
+		// EnableBrowserMCP intentionally omitted (false).
+	}); err != nil {
+		t.Fatalf("prepareSkillEnvironment failed: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(envDir, "claude-config", ".claude.json"))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return // no config written at all is a valid "no browser" outcome
+		}
+		t.Fatalf("read .claude.json: %v", err)
+	}
+	if strings.Contains(string(data), "playwright") {
+		t.Fatalf("expected no playwright server when EnableBrowserMCP is off, got: %s", data)
+	}
+}
+
+func TestPrepareSkillEnvironmentCodexOmitsBrowserMCPWhenNotEnabled(t *testing.T) {
+	sharedHome := t.TempDir()
+	t.Setenv("CODEX_HOME", sharedHome)
+	t.Setenv("PLAYWRIGHT_BROWSERS_PATH", "/tmp/crew44-pw-cache")
+
+	workDir := t.TempDir()
+	envDir := filepath.Join(t.TempDir(), "runtime-env")
+	if _, err := prepareSkillEnvironment(RunRequest{
+		Runtime:       model.RuntimeRecord{Provider: "codex"},
+		WorkDir:       workDir,
+		RuntimeEnvDir: envDir,
+		// EnableBrowserMCP intentionally omitted (false).
+	}); err != nil {
+		t.Fatalf("prepareSkillEnvironment failed: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(envDir, "codex-home", "config.toml"))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return
+		}
+		t.Fatalf("read config.toml: %v", err)
+	}
+	if strings.Contains(string(data), "mcp_servers.playwright") {
+		t.Fatalf("expected no playwright table when EnableBrowserMCP is off, got: %s", data)
 	}
 }

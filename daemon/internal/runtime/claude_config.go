@@ -46,15 +46,19 @@ func (e *envValue) UnmarshalJSON(data []byte) error {
 	}
 }
 
-func prepareClaudeConfig(configDir string) error {
+func prepareClaudeConfig(configDir string, enableBrowserMCP bool) error {
 	if err := os.MkdirAll(configDir, 0o755); err != nil {
 		return fmt.Errorf("create claude config dir: %w", err)
 	}
-	// Give the isolated claude a headless browser. Done unconditionally — and
-	// before the settings.json short-circuit below — so every agent gets it
-	// regardless of whether the host has a settings.json to copy env from.
-	if err := ensureClaudeBrowserMCP(configDir); err != nil {
-		return fmt.Errorf("inject claude browser mcp: %w", err)
+	// Give the isolated claude a headless browser when the caller opts in —
+	// before the settings.json short-circuit below so it lands regardless of
+	// whether the host has a settings.json to copy env from. Off by default so
+	// utility calls (e.g. the chat-title summarizer) that run on untrusted user
+	// content under bypass-permissions never gain an auto-invokable browser.
+	if enableBrowserMCP {
+		if err := ensureClaudeBrowserMCP(configDir); err != nil {
+			return fmt.Errorf("inject claude browser mcp: %w", err)
+		}
 	}
 
 	settings, ok, err := readSharedClaudeSettings()

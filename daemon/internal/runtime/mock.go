@@ -18,6 +18,12 @@ type RunRequest struct {
 	WorkDir         string
 	RuntimeEnvDir   string
 	ResumeSessionID string
+	// EnableBrowserMCP opts this runtime into the injected Playwright headless
+	// browser. Off by default: utility calls (e.g. the chat-title summarizer)
+	// run on untrusted user content under bypass-permissions, so they must not
+	// gain an auto-invokable browser. Only the main interactive chat run sets
+	// this true.
+	EnableBrowserMCP bool
 }
 
 type SkillContext struct {

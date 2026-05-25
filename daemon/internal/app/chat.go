@@ -321,6 +321,9 @@ func (a *App) runChat(ctx context.Context, controller *chatRunController, chatID
 			WorkDir:         project.Workdir,
 			RuntimeEnvDir:   a.store.RuntimeEnvDir(currentAgentID),
 			ResumeSessionID: resumeSessionID,
+			// Only the main interactive turn gets the headless browser. Utility
+			// calls like the title summarizer (chat_title.go) leave this off.
+			EnableBrowserMCP: true,
 		}, func(streamEvent runtime.StreamEvent) error {
 			event := model.Event{
 				Type:           streamEvent.Type,

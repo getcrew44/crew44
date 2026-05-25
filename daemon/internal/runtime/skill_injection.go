@@ -53,7 +53,7 @@ func prepareSkillEnvironment(request RunRequest) (preparedSkillEnvironment, erro
 		if err := os.MkdirAll(homeDir, 0o755); err != nil {
 			return preparedSkillEnvironment{}, fmt.Errorf("create claude home dir: %w", err)
 		}
-		if err := prepareClaudeConfig(claudeConfigDir); err != nil {
+		if err := prepareClaudeConfig(claudeConfigDir, request.EnableBrowserMCP); err != nil {
 			return preparedSkillEnvironment{}, fmt.Errorf("prepare claude config: %w", err)
 		}
 		if err := writeSkillFiles(filepath.Join(claudeConfigDir, "skills"), request.AgentSkills); err != nil {
@@ -93,7 +93,7 @@ func prepareSkillEnvironment(request RunRequest) (preparedSkillEnvironment, erro
 		if err := os.MkdirAll(homeDir, 0o755); err != nil {
 			return preparedSkillEnvironment{}, fmt.Errorf("create codex home dir: %w", err)
 		}
-		if err := prepareCodexHome(codexHome); err != nil {
+		if err := prepareCodexHome(codexHome, request.EnableBrowserMCP); err != nil {
 			return preparedSkillEnvironment{}, fmt.Errorf("prepare codex home: %w", err)
 		}
 		if err := clearSkillDirs(filepath.Join(codexHome, "skills"), request.AgentSkills); err != nil {

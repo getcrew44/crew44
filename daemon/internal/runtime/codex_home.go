@@ -15,7 +15,7 @@ var codexSymlinkedFiles = []string{
 	"auth.json",
 }
 
-func prepareCodexHome(codexHome string) error {
+func prepareCodexHome(codexHome string, enableBrowserMCP bool) error {
 	sharedHome := resolveSharedCodexHome()
 	if err := os.MkdirAll(codexHome, 0o755); err != nil {
 		return fmt.Errorf("create codex home: %w", err)
@@ -31,9 +31,14 @@ func prepareCodexHome(codexHome string) error {
 		dst := filepath.Join(codexHome, name)
 		_ = ensureSymlinkOrCopy(src, dst)
 	}
-	// Give the isolated codex a headless browser via a Playwright MCP server.
-	if err := ensureCodexBrowserMCP(codexHome); err != nil {
-		return fmt.Errorf("inject codex browser mcp: %w", err)
+	// Give the isolated codex a headless browser via a Playwright MCP server
+	// when the caller opts in. Off by default so utility calls (e.g. the
+	// chat-title summarizer) running on untrusted user content under --yolo
+	// never gain an auto-invokable browser.
+	if enableBrowserMCP {
+		if err := ensureCodexBrowserMCP(codexHome); err != nil {
+			return fmt.Errorf("inject codex browser mcp: %w", err)
+		}
 	}
 	return nil
 }

@@ -243,9 +243,10 @@ func TestPrepareSkillEnvironmentCodexUsesIsolatedHome(t *testing.T) {
 	workDir := t.TempDir()
 	envDir := filepath.Join(t.TempDir(), "runtime-env")
 	preparedEnv, err := prepareSkillEnvironment(RunRequest{
-		Runtime:       model.RuntimeRecord{Provider: "codex"},
-		WorkDir:       workDir,
-		RuntimeEnvDir: envDir,
+		Runtime:          model.RuntimeRecord{Provider: "codex"},
+		WorkDir:          workDir,
+		RuntimeEnvDir:    envDir,
+		EnableBrowserMCP: true,
 		AgentSkills: []SkillContext{{
 			ID:      "skill-1",
 			Name:    "Codex Skill",
@@ -300,9 +301,10 @@ func TestPrepareSkillEnvironmentCodexIsolatesEvenWithoutSkills(t *testing.T) {
 	workDir := t.TempDir()
 	envDir := filepath.Join(t.TempDir(), "runtime-env")
 	preparedEnv, err := prepareSkillEnvironment(RunRequest{
-		Runtime:       model.RuntimeRecord{Provider: "codex"},
-		WorkDir:       workDir,
-		RuntimeEnvDir: envDir,
+		Runtime:          model.RuntimeRecord{Provider: "codex"},
+		WorkDir:          workDir,
+		RuntimeEnvDir:    envDir,
+		EnableBrowserMCP: true,
 	})
 	if err != nil {
 		t.Fatalf("prepareSkillEnvironment failed: %v", err)
