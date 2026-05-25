@@ -212,9 +212,9 @@ describe('TaskView', () => {
     const { unmount } = render(<TaskView chatId="chat-1" agentsMap={agentsMap} />);
 
     await screen.findByTestId('composer-input');
-    expect(screen.getByTestId('send-shortcut-menu-button')).toHaveTextContent('Cmd+Enter send');
+    expect(screen.getByTestId('send-shortcut-menu-button')).toHaveTextContent('⌘+Enter send');
     fireEvent.click(screen.getByTestId('send-shortcut-menu-button'));
-    expect(screen.getByRole('menuitemradio', { name: 'Cmd+Enter Enter inserts a newline' })).toBeInTheDocument();
+    expect(screen.getByRole('menuitemradio', { name: '⌘+Enter Enter inserts a newline' })).toBeInTheDocument();
 
     unmount();
     mockNavigatorPlatform('Win32');

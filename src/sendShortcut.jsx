@@ -16,7 +16,7 @@ function isAppleKeyboardPlatform() {
 }
 
 function shortcutCopy(isMac) {
-  const modEnterLabel = isMac ? 'Cmd+Enter' : 'Ctrl+Enter';
+  const modEnterLabel = isMac ? '⌘+Enter' : 'Ctrl+Enter';
   return {
     placeholderHint: `${modEnterLabel} to send`,
     options: [{
