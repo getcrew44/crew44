@@ -3,7 +3,10 @@
   "productName": "Crew44",
   "version": "0.5.7",
   "description": "Crew44 — local-first AI crew runner",
-  "author": "Crew44",
+  "author": {
+    "name": "Crew44",
+    "email": "support@mindivelabs.com"
+  },
   "main": "electron/main.cjs",
   "type": "module",
   "workspaces": [
