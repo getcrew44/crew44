@@ -449,12 +449,67 @@ describe('TaskView', () => {
     });
 
     const copyButtons = await screen.findAllByRole('button', { name: 'Copy message' });
+    expect(copyButtons[0]).toHaveStyle({ opacity: '0' });
+    expect(copyButtons[1]).toHaveStyle({ opacity: '1' });
+    expect(copyButtons[0].parentElement).toHaveStyle({ marginBottom: '-28px' });
+    expect(copyButtons[1].parentElement).toHaveStyle({ marginBottom: '0' });
+
+    fireEvent.mouseEnter(screen.getAllByTestId('message-event')[0]);
+    expect(copyButtons[0]).toHaveStyle({ opacity: '1' });
+    fireEvent.mouseLeave(screen.getAllByTestId('message-event')[0]);
+    expect(copyButtons[0]).toHaveStyle({ opacity: '0' });
+
     fireEvent.click(copyButtons[0]);
     fireEvent.click(copyButtons[1]);
 
     await waitFor(() => {
       expect(writeText).toHaveBeenNthCalledWith(1, 'Hello @Default Agent');
       expect(writeText).toHaveBeenNthCalledWith(2, '@Aria please inspect this');
+    });
+  });
+
+  it('places the copy button under an assistant run that ends with an error', async () => {
+    const writeText = vi.fn().mockResolvedValue();
+    Object.defineProperty(window.navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText },
+    });
+    api.streamChatEvents.mockImplementation(() => vi.fn());
+    render(<TaskView chatId="chat-1" agentsMap={agentsMap} />);
+
+    await screen.findByTestId('composer-input');
+    const stream = api.streamChatEvents.mock.calls[0];
+    await emitEvent(stream, {
+      seq: 3,
+      type: 'message',
+      ts: '2026-05-12T10:02:00Z',
+      actor_agent_id: 'agent-1',
+      message: { role: 'assistant', content: 'Failed to authenticate.' },
+    });
+    await emitEvent(stream, {
+      seq: 4,
+      type: 'error',
+      ts: '2026-05-12T10:02:05Z',
+      actor_agent_id: 'agent-1',
+      error: {
+        subtype: 'runtime',
+        code: 'runtime_error',
+        message: 'Failed to authenticate.',
+        agent_id: 'agent-1',
+        agent_name: 'Aria',
+      },
+    });
+
+    const copyButtons = await screen.findAllByRole('button', { name: 'Copy message' });
+    expect(copyButtons).toHaveLength(1);
+    expect(within(screen.getByTestId('error-event')).getByRole('button', { name: 'Copy message' })).toBe(copyButtons[0]);
+    expect(screen.getByTestId('error-event').firstChild).toHaveTextContent('');
+    expect(copyButtons[0]).toHaveStyle({ opacity: '1' });
+
+    fireEvent.click(copyButtons[0]);
+
+    await waitFor(() => {
+      expect(writeText).toHaveBeenCalledWith('Failed to authenticate.');
     });
   });
 

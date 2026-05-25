@@ -136,18 +136,25 @@ function MessageEvent({
   agentsMap,
   thought,
   showHeader = true,
-  copyText = null,
+  copyAction = null,
   searchQuery = '',
   activeSearchMatchIndex = 0,
   getSearchMatchIndex,
 }) {
+  const [hovered, setHovered] = React.useState(false);
   const agent = resolveAuthor(event.author, agentsMap) || HUMAN_USER;
   const isUser = agent.kind === 'human';
+  const copyVisible = Boolean(copyAction?.pinned || hovered);
 
   if (isUser) {
     const steeredAgent = event.steerAgentId ? agentsMap?.[event.steerAgentId] : null;
     return (
-      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', padding: '14px 0' }}>
+      <div
+        data-testid="message-event"
+        style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', padding: '14px 0' }}
+        onMouseEnter={() => setHovered(true)}
+        onMouseLeave={() => setHovered(false)}
+      >
         <div style={{
           maxWidth: '72%',
           background: '#EFE9D8',
@@ -165,7 +172,14 @@ function MessageEvent({
           />
           <AttachmentTray attachments={event.attachments} />
         </div>
-        <MessageCopyButton text={event.body} align="right" />
+        {copyAction && (
+          <MessageCopyButton
+            text={copyAction.text}
+            align="right"
+            visible={copyVisible}
+            compactSpace={!copyAction.pinned}
+          />
+        )}
         {event.userSteer && (
           <div style={{
             marginTop: 6,
@@ -191,7 +205,12 @@ function MessageEvent({
   }
 
   return (
-    <div style={{ display: 'flex', gap: 14, padding: showHeader ? '14px 0 2px' : '2px 0' }}>
+    <div
+      data-testid="message-event"
+      style={{ display: 'flex', gap: 14, padding: showHeader ? '14px 0 2px' : '2px 0' }}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+    >
       {showHeader
         ? <Avatar agent={agent} size={28} />
         : <div style={{ width: 28, flexShrink: 0 }} aria-hidden="true" />}
@@ -216,7 +235,13 @@ function MessageEvent({
             getSearchMatchIndex={getSearchMatchIndex}
           />
         </div>
-        {copyText != null && <MessageCopyButton text={copyText} />}
+        {copyAction && (
+          <MessageCopyButton
+            text={copyAction.text}
+            visible={copyVisible}
+            compactSpace={!copyAction.pinned}
+          />
+        )}
       </div>
     </div>
   );
@@ -629,7 +654,7 @@ function EventRouter({
   agentsMap,
   showHeader = true,
   thought,
-  copyText,
+  copyAction,
   searchQuery = '',
   activeSearchMatchIndex = 0,
   getSearchMatchIndex,
@@ -640,7 +665,7 @@ function EventRouter({
       agentsMap={agentsMap}
       thought={thought}
       showHeader={showHeader}
-      copyText={copyText}
+      copyAction={copyAction}
       searchQuery={searchQuery}
       activeSearchMatchIndex={activeSearchMatchIndex}
       getSearchMatchIndex={getSearchMatchIndex}
@@ -650,7 +675,7 @@ function EventRouter({
   if (event.kind === 'tool') return <ToolEvent event={event} agentsMap={agentsMap} showHeader={showHeader} />;
   if (event.kind === 'tool_group') return <ToolGroupEvent events={event.events} agentsMap={agentsMap} showHeader={showHeader} />;
   if (event.kind === 'tool_result') return <ToolResultEvent event={event} agentsMap={agentsMap} />;
-  if (event.kind === 'error') return <ErrorEvent event={event} agentsMap={agentsMap} />;
+  if (event.kind === 'error') return <ErrorEvent event={event} agentsMap={agentsMap} showHeader={showHeader} copyAction={copyAction} />;
   // runtime_session is intentionally swallowed; no UI for it.
   return null;
 }
@@ -1940,12 +1965,19 @@ function HandoverDivider({ from, to, note, subtype, agentsMap }) {
 
 // ─── Error event ──────────────────────────────────────────────────────────────
 
-function ErrorEvent({ event, agentsMap }) {
+function ErrorEvent({ event, agentsMap, showHeader = true, copyAction = null }) {
+  const [hovered, setHovered] = React.useState(false);
   const author = event.agent_id || event.author;
   const agent = author ? resolveAuthor(author, agentsMap) : null;
+  const copyVisible = Boolean(copyAction?.pinned || hovered);
   return (
-    <div data-testid="error-event" style={{ display: 'flex', gap: 14, padding: '8px 0' }}>
-      {agent && agent.kind === 'agent'
+    <div
+      data-testid="error-event"
+      style={{ display: 'flex', gap: 14, padding: '8px 0' }}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+    >
+      {showHeader && agent && agent.kind === 'agent'
         ? <Avatar agent={agent} size={28} />
         : <div style={{ width: 28, flexShrink: 0 }} aria-hidden="true" />}
       <div style={{ flex: 1, minWidth: 0 }}>
@@ -1998,6 +2030,13 @@ function ErrorEvent({ event, agentsMap }) {
             )}
           </div>
         </div>
+        {copyAction && (
+          <MessageCopyButton
+            text={copyAction.text}
+            visible={copyVisible}
+            compactSpace={!copyAction.pinned}
+          />
+        )}
       </div>
     </div>
   );
@@ -2049,38 +2088,67 @@ function eventRenderKey(event, index) {
   return event._seq ?? index;
 }
 
-function buildAssistantCopyTextByEvent(events) {
-  const copyTextByEvent = new Map();
-  let currentAuthor = null;
-  let messages = [];
+function copyActorForEvent(event) {
+  if (event.kind === 'error') return event.agent_id || event.author;
+  return event.author;
+}
 
-  const flush = () => {
-    if (messages.length > 0) {
-      const text = messages.map(message => message.body).filter(Boolean).join('\n\n');
-      if (text.trim()) copyTextByEvent.set(messages[messages.length - 1].key, text);
+function appendCopyPart(parts, text) {
+  const value = String(text || '').trim();
+  if (!value) return;
+  if (parts[parts.length - 1] === value) return;
+  parts.push(value);
+}
+
+function buildCopyActionsByEvent(events) {
+  const runs = [];
+  let currentAgentRun = null;
+
+  const flushAgentRun = () => {
+    if (currentAgentRun) {
+      const text = currentAgentRun.parts.join('\n\n');
+      if (text.trim()) {
+        runs.push({ key: currentAgentRun.key, text });
+      }
     }
-    messages = [];
+    currentAgentRun = null;
   };
 
   events.forEach((event, index) => {
     if (event.kind === 'handover') return;
-    const actor = event.author;
-    if (!actor || actor === '__human__') {
-      flush();
-      currentAuthor = null;
+    const key = eventRenderKey(event, index);
+    const actor = copyActorForEvent(event);
+    if (event.kind === 'message' && actor === '__human__') {
+      flushAgentRun();
+      const text = String(event.body || '').trim();
+      if (text) runs.push({ key, text });
       return;
     }
-    if (actor !== currentAuthor) {
-      flush();
-      currentAuthor = actor;
+    if (!actor || actor === '__human__') {
+      flushAgentRun();
+      return;
     }
+
+    if (!currentAgentRun || currentAgentRun.author !== actor) {
+      flushAgentRun();
+      currentAgentRun = { author: actor, key, parts: [] };
+    }
+    currentAgentRun.key = key;
     if (event.kind === 'message') {
-      messages.push({ key: eventRenderKey(event, index), body: event.body || '' });
+      appendCopyPart(currentAgentRun.parts, event.body);
+    } else if (event.kind === 'error') {
+      appendCopyPart(currentAgentRun.parts, event.message);
     }
   });
-  flush();
+  flushAgentRun();
 
-  return copyTextByEvent;
+  const copyActionsByEvent = new Map();
+  const lastRun = runs[runs.length - 1];
+  for (const run of runs) {
+    copyActionsByEvent.set(run.key, { text: run.text, pinned: run === lastRun });
+  }
+
+  return copyActionsByEvent;
 }
 
 function renderEventsWithHandovers({
@@ -2091,7 +2159,7 @@ function renderEventsWithHandovers({
   getSearchMatchIndex,
 }) {
   const prepared = groupConsecutiveTools(prepareEvents(events));
-  const assistantCopyTextByEvent = buildAssistantCopyTextByEvent(prepared);
+  const copyActionsByEvent = buildCopyActionsByEvent(prepared);
   const out = [];
   // Track the last *agent* actor, not the last event author. A human turn
   // between two agents (e.g. "@Designer take it from here") should still let
@@ -2195,7 +2263,7 @@ function renderEventsWithHandovers({
         agentsMap={agentsMap}
         showHeader={showHeader}
         thought={e._thought}
-        copyText={assistantCopyTextByEvent.get(eventRenderKey(e, i))}
+        copyAction={copyActionsByEvent.get(eventRenderKey(e, i))}
         searchQuery={searchQuery}
         activeSearchMatchIndex={activeSearchMatchIndex}
         getSearchMatchIndex={getSearchMatchIndex}

@@ -7,7 +7,7 @@ export function messageCopyText(text) {
     .replace(/\{\{file:([^}]+)\}\}/g, '$1');
 }
 
-export function MessageCopyButton({ text, align = 'left' }) {
+export function MessageCopyButton({ text, align = 'left', visible = true, compactSpace = false }) {
   const [copied, setCopied] = React.useState(false);
   const timeoutRef = React.useRef(null);
   const copyText = messageCopyText(text);
@@ -34,6 +34,7 @@ export function MessageCopyButton({ text, align = 'left' }) {
         display: 'flex',
         justifyContent: align === 'right' ? 'flex-end' : 'flex-start',
         marginTop: 6,
+        marginBottom: compactSpace ? -28 : 0,
       }}
     >
       <button
@@ -55,6 +56,9 @@ export function MessageCopyButton({ text, align = 'left' }) {
           alignItems: 'center',
           justifyContent: 'center',
           fontFamily: UI_FONT,
+          opacity: visible || copied ? 1 : 0,
+          pointerEvents: visible || copied ? 'auto' : 'none',
+          transition: 'opacity .12s ease',
         }}
       >
         <Icon name={copied ? 'check' : 'copy'} size={14} />
