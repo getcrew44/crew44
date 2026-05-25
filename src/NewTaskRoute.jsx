@@ -8,6 +8,7 @@ import { attachmentsSupported, dedupeAttachments, droppedAttachments, pickAttach
 import { dataTransferHasFiles } from './dragDrop.js';
 import { primeAudioContext } from './audio.js';
 import { textareaCaretPoint } from './textareaCaret.js';
+import { SendShortcutMenu, shouldSendFromEnterKey, useSendShortcutMode } from './sendShortcut.jsx';
 import {
   clearComposerDraft,
   newTaskDraftChatId,
@@ -199,6 +200,7 @@ export default function NewTaskRoute({ projects, agents, skills = [], onNewTask,
   const [error, setError] = React.useState(null);
   const [scrollTop, setScrollTop] = React.useState(0);
   const [fileMatches, setFileMatches] = React.useState([]);
+  const [sendShortcutMode, setSendShortcutMode] = useSendShortcutMode();
   const inputRef = React.useRef(null);
   const listboxRef = React.useRef(null);
   const selectedProjectExists = projects.some(project => project.id === selectedProjectId);
@@ -402,7 +404,10 @@ export default function NewTaskRoute({ projects, agents, skills = [], onNewTask,
         return;
       }
     }
-    if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); startCrew(); }
+    if (shouldSendFromEnterKey(e, sendShortcutMode)) {
+      e.preventDefault();
+      startCrew();
+    }
   };
 
   const canStart = (val.trim() || attachments.length > 0) && !submitting && selectedProjectExists && selectedAgentId;
@@ -569,6 +574,7 @@ export default function NewTaskRoute({ projects, agents, skills = [], onNewTask,
             />
 
             <div style={{ flex: 1 }} />
+            <SendShortcutMenu mode={sendShortcutMode} onChange={setSendShortcutMode} direction="down" />
             <button
               data-testid="start-crew-button"
               onClick={startCrew}

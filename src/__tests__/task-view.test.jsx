@@ -207,6 +207,51 @@ describe('TaskView', () => {
     ]);
   });
 
+  it('labels the modifier send shortcut for the current platform', async () => {
+    mockNavigatorPlatform('MacIntel');
+    const { unmount } = render(<TaskView chatId="chat-1" agentsMap={agentsMap} />);
+
+    await screen.findByTestId('composer-input');
+    expect(screen.getByTestId('send-shortcut-menu-button')).toHaveTextContent('⌘+Enter send');
+    fireEvent.click(screen.getByTestId('send-shortcut-menu-button'));
+    expect(screen.getByRole('menuitemradio', { name: '⌘+Enter' })).toBeInTheDocument();
+    expect(screen.getByTestId('send-shortcut-menu').style.bottom).toBe('calc(100% + 6px)');
+    expect(screen.getByTestId('send-shortcut-menu').style.top).toBe('');
+
+    unmount();
+    mockNavigatorPlatform('Win32');
+    render(<TaskView chatId="chat-1" agentsMap={agentsMap} />);
+
+    await screen.findByTestId('composer-input');
+    expect(screen.getByTestId('send-shortcut-menu-button')).toHaveTextContent('Ctrl+Enter send');
+    fireEvent.click(screen.getByTestId('send-shortcut-menu-button'));
+    expect(screen.getByRole('menuitemradio', { name: 'Ctrl+Enter' })).toBeInTheDocument();
+  });
+
+  it('sends from Cmd or Ctrl Enter by default and can switch Enter into the send key', async () => {
+    render(<TaskView chatId="chat-1" agentsMap={agentsMap} />);
+
+    const input = await screen.findByTestId('composer-input');
+    fireEvent.change(input, { target: { value: 'default shortcut' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    expect(api.postMessage).not.toHaveBeenCalled();
+
+    fireEvent.keyDown(input, { key: 'Enter', metaKey: true });
+    await waitFor(() => expect(api.postMessage).toHaveBeenCalledWith('chat-1', 'default shortcut', 'agent-1', []));
+
+    api.postMessage.mockClear();
+    fireEvent.change(input, { target: { value: 'enter shortcut' } });
+    fireEvent.click(screen.getByTestId('send-shortcut-menu-button'));
+    fireEvent.click(screen.getAllByRole('menuitemradio')[1]);
+
+    fireEvent.keyDown(input, { key: 'Enter', shiftKey: true });
+    fireEvent.keyDown(input, { key: 'Enter', altKey: true });
+    expect(api.postMessage).not.toHaveBeenCalled();
+
+    fireEvent.keyDown(input, { key: 'Enter' });
+    await waitFor(() => expect(api.postMessage).toHaveBeenCalledWith('chat-1', 'enter shortcut', 'agent-1', []));
+  });
+
   it('accepts dropped file attachments in the composer', async () => {
     render(<TaskView chatId="chat-1" agentsMap={agentsMap} />);
 
@@ -448,6 +493,18 @@ describe('TaskView', () => {
     expect(screen.queryByRole('button', { name: /cancel/i })).not.toBeInTheDocument();
 
     fireEvent.click(stop);
+
+    await waitFor(() => expect(api.cancelChat).toHaveBeenCalledWith('chat-1'));
+  });
+
+  it('treats Escape in the focused composer input like the stop button while streaming', async () => {
+    api.getChat.mockResolvedValue({ ...chat, stream: { status: 'streaming' } });
+    api.streamChatEvents.mockImplementation(() => vi.fn());
+
+    render(<TaskView chatId="chat-1" agentsMap={agentsMap} />);
+
+    const input = await screen.findByTestId('composer-input');
+    fireEvent.keyDown(input, { key: 'Escape' });
 
     await waitFor(() => expect(api.cancelChat).toHaveBeenCalledWith('chat-1'));
   });

@@ -352,6 +352,50 @@ describe('NewTaskRoute', () => {
     expect(onNewTask).toHaveBeenCalledWith('chat-1');
   });
 
+  it('can switch the new-task composer to Enter-send while Shift or Option Enter stays as newline', async () => {
+    const onNewTask = vi.fn();
+    render(
+      <NewTaskRoute
+        projects={projects}
+        agents={agents}
+        onNewTask={onNewTask}
+        initialProjectId="p1"
+      />
+    );
+
+    const input = screen.getByTestId('new-task-input');
+    fireEvent.change(input, { target: { value: 'start from keyboard' } });
+    fireEvent.click(screen.getByTestId('send-shortcut-menu-button'));
+    fireEvent.click(screen.getAllByRole('menuitemradio')[1]);
+
+    fireEvent.keyDown(input, { key: 'Enter', shiftKey: true });
+    fireEvent.keyDown(input, { key: 'Enter', altKey: true });
+    expect(api.createChat).not.toHaveBeenCalled();
+
+    fireEvent.keyDown(input, { key: 'Enter' });
+
+    await waitFor(() => expect(api.createChat).toHaveBeenCalledWith('p1', 'start from keyboard', 'a1'));
+    expect(api.postMessage).toHaveBeenCalledWith('chat-1', 'start from keyboard', 'a1', []);
+    expect(onNewTask).toHaveBeenCalledWith('chat-1');
+  });
+
+  it('opens the new-task send shortcut menu downward', () => {
+    render(
+      <NewTaskRoute
+        projects={projects}
+        agents={agents}
+        onNewTask={() => {}}
+        initialProjectId="p1"
+      />
+    );
+
+    fireEvent.click(screen.getByTestId('send-shortcut-menu-button'));
+
+    const menu = screen.getByTestId('send-shortcut-menu');
+    expect(menu.style.top).toBe('calc(100% + 6px)');
+    expect(menu.style.bottom).toBe('');
+  });
+
   it('selects an attachment for a new task and sends attachment metadata', async () => {
     window.electronAPI.openFileDialog.mockResolvedValue({
       canceled: false,
