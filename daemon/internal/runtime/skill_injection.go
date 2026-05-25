@@ -17,6 +17,11 @@ var nonAlphaNum = regexp.MustCompile(`[^a-z0-9]+`)
 type preparedSkillEnvironment struct {
 	Env       map[string]string
 	ExtraArgs []string
+	// McpConfig, when non-nil, is the JSON the backend passes to claude via
+	// --mcp-config. claude runs with --strict-mcp-config and ignores the
+	// user-scope .claude.json, so the injected headless browser must travel
+	// through here. Empty for codex (which loads its config.toml natively).
+	McpConfig json.RawMessage
 }
 
 func prepareSkillEnvironment(request RunRequest) (preparedSkillEnvironment, error) {
@@ -53,7 +58,7 @@ func prepareSkillEnvironment(request RunRequest) (preparedSkillEnvironment, erro
 		if err := os.MkdirAll(homeDir, 0o755); err != nil {
 			return preparedSkillEnvironment{}, fmt.Errorf("create claude home dir: %w", err)
 		}
-		if err := prepareClaudeConfig(claudeConfigDir, request.EnableBrowserMCP); err != nil {
+		if err := prepareClaudeConfig(claudeConfigDir); err != nil {
 			return preparedSkillEnvironment{}, fmt.Errorf("prepare claude config: %w", err)
 		}
 		if err := writeSkillFiles(filepath.Join(claudeConfigDir, "skills"), request.AgentSkills); err != nil {
@@ -79,10 +84,20 @@ func prepareSkillEnvironment(request RunRequest) (preparedSkillEnvironment, erro
 			env["CLAUDE_CODE_OAUTH_REFRESH_TOKEN"] = cred.RefreshToken
 			env["CLAUDE_CODE_OAUTH_SCOPES"] = cred.Scopes
 		}
-		return preparedSkillEnvironment{
+		prepared := preparedSkillEnvironment{
 			Env:       env,
 			ExtraArgs: []string{"--setting-sources", "user"},
-		}, nil
+		}
+		// claude ignores .claude.json mcpServers under --strict-mcp-config, so
+		// the opt-in browser rides in through the --mcp-config document.
+		if request.EnableBrowserMCP {
+			mcpCfg, err := claudeBrowserMCPConfig()
+			if err != nil {
+				return preparedSkillEnvironment{}, err
+			}
+			prepared.McpConfig = mcpCfg
+		}
+		return prepared, nil
 	case "codex":
 		runtimeEnvDir := strings.TrimSpace(request.RuntimeEnvDir)
 		if runtimeEnvDir == "" {

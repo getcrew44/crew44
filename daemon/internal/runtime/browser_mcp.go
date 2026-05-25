@@ -73,34 +73,10 @@ func browserMCPEnv() map[string]string {
 	return nil
 }
 
-// ensureClaudeBrowserMCP merges the Playwright MCP server into the isolated
-// .claude.json at user scope (top-level mcpServers), preserving every other
-// key. claude reads back via the same file, so re-running is safe: the
-// playwright entry is set to its canonical value each time while any other
-// servers and settings are left untouched.
-//
-// The file is decoded with UseNumber so large integer fields (e.g. ms
-// timestamps) round-trip exactly rather than through float64.
-func ensureClaudeBrowserMCP(configDir string) error {
-	path := filepath.Join(configDir, ".claude.json")
-
-	top := map[string]any{}
-	data, err := os.ReadFile(path)
-	if err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("read claude config: %w", err)
-	}
-	if len(bytes.TrimSpace(data)) > 0 {
-		dec := json.NewDecoder(bytes.NewReader(data))
-		dec.UseNumber()
-		if err := dec.Decode(&top); err != nil {
-			return fmt.Errorf("parse claude config: %w", err)
-		}
-	}
-
-	servers, _ := top["mcpServers"].(map[string]any)
-	if servers == nil {
-		servers = map[string]any{}
-	}
+// browserMCPServerSpec is the canonical Playwright MCP stdio server definition,
+// shared by the claude --mcp-config document and the codex config.toml block so
+// both runtimes launch the same browser the same way.
+func browserMCPServerSpec() map[string]any {
 	server := map[string]any{
 		"type":    "stdio",
 		"command": "npx",
@@ -109,18 +85,25 @@ func ensureClaudeBrowserMCP(configDir string) error {
 	if env := browserMCPEnv(); env != nil {
 		server["env"] = env
 	}
-	servers[browserMCPServerName] = server
-	top["mcpServers"] = servers
+	return server
+}
 
-	out, err := json.MarshalIndent(top, "", "  ")
+// claudeBrowserMCPConfig returns the JSON for claude's --mcp-config file that
+// gives an isolated claude the headless browser. claude is spawned with
+// --strict-mcp-config, so it loads ONLY the servers named in --mcp-config and
+// ignores the user-scope .claude.json entirely — the browser has to ride in
+// through this document, not through .claude.json.
+func claudeBrowserMCPConfig() (json.RawMessage, error) {
+	doc := map[string]any{
+		"mcpServers": map[string]any{
+			browserMCPServerName: browserMCPServerSpec(),
+		},
+	}
+	out, err := json.Marshal(doc)
 	if err != nil {
-		return fmt.Errorf("marshal claude config: %w", err)
+		return nil, fmt.Errorf("marshal claude browser mcp config: %w", err)
 	}
-	out = append(out, '\n')
-	if err := os.MkdirAll(configDir, 0o755); err != nil {
-		return fmt.Errorf("create claude config dir: %w", err)
-	}
-	return os.WriteFile(path, out, 0o600)
+	return out, nil
 }
 
 // ensureCodexBrowserMCP appends a [mcp_servers.playwright] table to the

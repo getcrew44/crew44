@@ -10,26 +10,23 @@ import (
 	"github.com/getcrew44/crew44/daemon/internal/model"
 )
 
-// claudeMCPServer pulls the named server out of an isolated .claude.json and
-// returns it as a generic map for assertions. Fails the test if the file is
-// missing, unparseable, or the server is absent.
-func claudeMCPServer(t *testing.T, configDir, name string) map[string]any {
+// playwrightFromMcpConfig parses claude's --mcp-config document
+// ({"mcpServers":{"playwright":{...}}}) and returns the playwright server map.
+// Fails the test if the doc is empty, unparseable, or the server is absent.
+func playwrightFromMcpConfig(t *testing.T, raw json.RawMessage) map[string]any {
 	t.Helper()
-	data, err := os.ReadFile(filepath.Join(configDir, ".claude.json"))
-	if err != nil {
-		t.Fatalf("read isolated .claude.json: %v", err)
+	if len(raw) == 0 {
+		t.Fatalf("expected a non-empty McpConfig document")
 	}
-	var top map[string]any
-	if err := json.Unmarshal(data, &top); err != nil {
-		t.Fatalf("parse .claude.json: %v\ncontent=%s", err, data)
+	var doc struct {
+		MCPServers map[string]map[string]any `json:"mcpServers"`
 	}
-	servers, ok := top["mcpServers"].(map[string]any)
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatalf("parse McpConfig: %v\ncontent=%s", err, raw)
+	}
+	server, ok := doc.MCPServers["playwright"]
 	if !ok {
-		t.Fatalf("expected mcpServers object, got %T (%v)", top["mcpServers"], top["mcpServers"])
-	}
-	server, ok := servers[name].(map[string]any)
-	if !ok {
-		t.Fatalf("expected mcpServers.%s object, got %T (servers=%v)", name, servers[name], servers)
+		t.Fatalf("expected mcpServers.playwright, got servers=%v", doc.MCPServers)
 	}
 	return server
 }
@@ -48,24 +45,27 @@ func argsContain(t *testing.T, server map[string]any, want string) bool {
 	return false
 }
 
-func TestPrepareSkillEnvironmentClaudeInjectsBrowserMCP(t *testing.T) {
+// claude runs with --strict-mcp-config and ignores .claude.json, so the browser
+// must ride in through the --mcp-config document returned as McpConfig. Verify
+// the opt-in run produces that document with the pinned, headless server.
+func TestPrepareSkillEnvironmentClaudeInjectsBrowserMCPViaMcpConfig(t *testing.T) {
 	// Short-circuit OAuth so the test never reaches the macOS keychain.
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "dummy")
 	t.Setenv("PLAYWRIGHT_BROWSERS_PATH", "/tmp/crew44-pw-cache")
 
 	workDir := t.TempDir()
 	envDir := filepath.Join(t.TempDir(), "runtime-env")
-	if _, err := prepareSkillEnvironment(RunRequest{
+	prepared, err := prepareSkillEnvironment(RunRequest{
 		Runtime:          model.RuntimeRecord{Provider: "claude"},
 		WorkDir:          workDir,
 		RuntimeEnvDir:    envDir,
 		EnableBrowserMCP: true,
-	}); err != nil {
+	})
+	if err != nil {
 		t.Fatalf("prepareSkillEnvironment failed: %v", err)
 	}
 
-	configDir := filepath.Join(envDir, "claude-config")
-	server := claudeMCPServer(t, configDir, "playwright")
+	server := playwrightFromMcpConfig(t, prepared.McpConfig)
 	if server["command"] != "npx" {
 		t.Errorf("command = %v, want npx", server["command"])
 	}
@@ -82,87 +82,13 @@ func TestPrepareSkillEnvironmentClaudeInjectsBrowserMCP(t *testing.T) {
 	if env["PLAYWRIGHT_BROWSERS_PATH"] != "/tmp/crew44-pw-cache" {
 		t.Errorf("PLAYWRIGHT_BROWSERS_PATH = %v, want /tmp/crew44-pw-cache", env["PLAYWRIGHT_BROWSERS_PATH"])
 	}
-}
 
-func TestPrepareSkillEnvironmentClaudeBrowserMCPPreservesExistingConfig(t *testing.T) {
-	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "dummy")
-	t.Setenv("PLAYWRIGHT_BROWSERS_PATH", "/tmp/crew44-pw-cache")
-
-	workDir := t.TempDir()
-	envDir := filepath.Join(t.TempDir(), "runtime-env")
-	configDir := filepath.Join(envDir, "claude-config")
-	if err := os.MkdirAll(configDir, 0o755); err != nil {
-		t.Fatalf("mkdir config: %v", err)
-	}
-	// A realistic pre-existing .claude.json: large int timestamps (which must
-	// not lose precision), an unrelated top-level key, and a user-added MCP
-	// server that must survive the merge.
-	const existing = `{
-  "firstStartTime": 1779419133799,
-  "userID": "abc123",
-  "mcpServers": {
-    "other": { "command": "node", "args": ["server.js"] }
-  }
-}`
-	if err := os.WriteFile(filepath.Join(configDir, ".claude.json"), []byte(existing), 0o600); err != nil {
-		t.Fatalf("seed .claude.json: %v", err)
-	}
-
-	if _, err := prepareSkillEnvironment(RunRequest{
-		Runtime:          model.RuntimeRecord{Provider: "claude"},
-		WorkDir:          workDir,
-		RuntimeEnvDir:    envDir,
-		EnableBrowserMCP: true,
-	}); err != nil {
-		t.Fatalf("prepareSkillEnvironment failed: %v", err)
-	}
-
-	// Both servers present.
-	claudeMCPServer(t, configDir, "playwright")
-	if other := claudeMCPServer(t, configDir, "other"); other["command"] != "node" {
-		t.Errorf("existing 'other' server clobbered: %v", other)
-	}
-
-	// Unrelated keys and the big timestamp preserved exactly (no float
-	// rounding to 1.7794191e+12).
-	data, _ := os.ReadFile(filepath.Join(configDir, ".claude.json"))
-	if !strings.Contains(string(data), "1779419133799") {
-		t.Errorf("timestamp lost precision or dropped: %s", data)
-	}
-	if !strings.Contains(string(data), "abc123") {
-		t.Errorf("unrelated userID key dropped: %s", data)
-	}
-}
-
-func TestPrepareSkillEnvironmentClaudeBrowserMCPIsIdempotent(t *testing.T) {
-	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "dummy")
-	t.Setenv("PLAYWRIGHT_BROWSERS_PATH", "/tmp/crew44-pw-cache")
-
-	workDir := t.TempDir()
-	envDir := filepath.Join(t.TempDir(), "runtime-env")
-	req := RunRequest{
-		Runtime:          model.RuntimeRecord{Provider: "claude"},
-		WorkDir:          workDir,
-		RuntimeEnvDir:    envDir,
-		EnableBrowserMCP: true,
-	}
-	for i := 0; i < 2; i++ {
-		if _, err := prepareSkillEnvironment(req); err != nil {
-			t.Fatalf("prepare #%d failed: %v", i, err)
+	// The browser must NOT land in .claude.json — claude ignores it under
+	// --strict-mcp-config, so writing it there would be dead config.
+	if data, err := os.ReadFile(filepath.Join(envDir, "claude-config", ".claude.json")); err == nil {
+		if strings.Contains(string(data), "playwright") {
+			t.Errorf("playwright leaked into .claude.json (ignored under strict mode): %s", data)
 		}
-	}
-	configDir := filepath.Join(envDir, "claude-config")
-	data, err := os.ReadFile(filepath.Join(configDir, ".claude.json"))
-	if err != nil {
-		t.Fatalf("read .claude.json: %v", err)
-	}
-	var top map[string]any
-	if err := json.Unmarshal(data, &top); err != nil {
-		t.Fatalf("second run produced invalid JSON: %v\n%s", err, data)
-	}
-	servers := top["mcpServers"].(map[string]any)
-	if _, ok := servers["playwright"]; !ok {
-		t.Fatalf("playwright server missing after second run: %v", servers)
 	}
 }
 
@@ -399,24 +325,23 @@ func TestPrepareSkillEnvironmentClaudeOmitsBrowserMCPWhenNotEnabled(t *testing.T
 
 	workDir := t.TempDir()
 	envDir := filepath.Join(t.TempDir(), "runtime-env")
-	if _, err := prepareSkillEnvironment(RunRequest{
+	prepared, err := prepareSkillEnvironment(RunRequest{
 		Runtime:       model.RuntimeRecord{Provider: "claude"},
 		WorkDir:       workDir,
 		RuntimeEnvDir: envDir,
 		// EnableBrowserMCP intentionally omitted (false).
-	}); err != nil {
+	})
+	if err != nil {
 		t.Fatalf("prepareSkillEnvironment failed: %v", err)
 	}
-
-	data, err := os.ReadFile(filepath.Join(envDir, "claude-config", ".claude.json"))
-	if err != nil {
-		if os.IsNotExist(err) {
-			return // no config written at all is a valid "no browser" outcome
-		}
-		t.Fatalf("read .claude.json: %v", err)
+	if len(prepared.McpConfig) != 0 {
+		t.Fatalf("expected no --mcp-config when EnableBrowserMCP is off, got: %s", prepared.McpConfig)
 	}
-	if strings.Contains(string(data), "playwright") {
-		t.Fatalf("expected no playwright server when EnableBrowserMCP is off, got: %s", data)
+	// And it must never leak into .claude.json either.
+	if data, err := os.ReadFile(filepath.Join(envDir, "claude-config", ".claude.json")); err == nil {
+		if strings.Contains(string(data), "playwright") {
+			t.Fatalf("unexpected playwright in .claude.json: %s", data)
+		}
 	}
 }
 
