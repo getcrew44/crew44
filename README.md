@@ -103,11 +103,12 @@ Powered by `electron-builder` for packaging, with a custom signing/DMG step (`el
 - **Skill injection without lock-in.** Skills are standard directories on disk, copied into each runtime's working tree per turn. Move them between agents, providers, or projects — they keep working.
 - **Memory with a size cap.** When `USER.md` or per-project `MEMORY.md` hits its cap, new entries park in a `.pending` sibling for compaction instead of silently dropping the write.
 - **Optimizer trust boundary.** The auto-optimizer's scan working directory lives outside the `projects/` tree so a prompt-injected Partner scan can't land file operations next to real-project memory files.
+- **Every isolated agent gets a headless browser.** Crew44 injects a pinned Playwright MCP server into each runtime's isolated config, so an agent gains `browser_navigate` / `browser_take_screenshot` / `browser_snapshot` on demand. It launches headless via `npx` — no extra binary ships — and reuses one shared Chromium download across agents.
 
 ## Privacy
 
 - All UI, state, and orchestration happens on `127.0.0.1`. Crew44 itself does not call out to any remote service.
-- The only outbound traffic is whatever the underlying coding-agent CLI you chose (`claude`, `codex`, …) makes on its own.
+- The only outbound traffic is whatever the underlying coding-agent CLI you chose (`claude`, `codex`, …) makes on its own — including the on-demand headless browser, which fetches its Playwright package and Chromium via npm and visits the URLs the agent navigates to.
 - Mobile pairing uses a relay for NAT traversal but the payload is end-to-end encrypted with Noise — the relay sees ciphertext only. Self-host the relay if you'd rather; the URL is configurable.
 - No analytics, no error reporting, no phone-home.
 
