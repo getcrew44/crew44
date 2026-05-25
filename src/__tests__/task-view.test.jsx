@@ -214,7 +214,7 @@ describe('TaskView', () => {
     await screen.findByTestId('composer-input');
     expect(screen.getByTestId('send-shortcut-menu-button')).toHaveTextContent('⌘+Enter send');
     fireEvent.click(screen.getByTestId('send-shortcut-menu-button'));
-    expect(screen.getByRole('menuitemradio', { name: '⌘+Enter Enter inserts a newline' })).toBeInTheDocument();
+    expect(screen.getByRole('menuitemradio', { name: '⌘+Enter' })).toBeInTheDocument();
 
     unmount();
     mockNavigatorPlatform('Win32');
@@ -223,7 +223,7 @@ describe('TaskView', () => {
     await screen.findByTestId('composer-input');
     expect(screen.getByTestId('send-shortcut-menu-button')).toHaveTextContent('Ctrl+Enter send');
     fireEvent.click(screen.getByTestId('send-shortcut-menu-button'));
-    expect(screen.getByRole('menuitemradio', { name: 'Ctrl+Enter Enter inserts a newline' })).toBeInTheDocument();
+    expect(screen.getByRole('menuitemradio', { name: 'Ctrl+Enter' })).toBeInTheDocument();
   });
 
   it('sends from Cmd or Ctrl Enter by default and can switch Enter into the send key', async () => {

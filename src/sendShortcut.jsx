@@ -22,12 +22,10 @@ function shortcutCopy(isMac) {
     options: [{
       id: SEND_SHORTCUT_MODES.MOD_ENTER,
       label: modEnterLabel,
-      hint: 'Enter inserts a newline',
       indicator: `${modEnterLabel} send`,
     }, {
       id: SEND_SHORTCUT_MODES.ENTER,
       label: 'Enter',
-      hint: 'Shift or Option Enter inserts a newline',
       indicator: 'Enter send',
     }],
   };
@@ -119,7 +117,6 @@ function ShortcutOption({ option, selected, onSelect }) {
       }}>{selected ? '✓' : ''}</span>
       <span style={{ flex: 1, minWidth: 0 }}>
         <span style={{ display: 'block', fontSize: 12.5, fontWeight: 500 }}>{option.label}</span>
-        <span style={{ display: 'block', marginTop: 2, fontSize: 11.5, color: '#807972' }}>{option.hint}</span>
       </span>
     </button>
   );
