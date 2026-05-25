@@ -468,6 +468,31 @@ describe('TaskView', () => {
     });
   });
 
+  it('keeps rendered chat message bodies selectable', async () => {
+    api.streamChatEvents.mockImplementation(() => vi.fn());
+    render(<TaskView chatId="chat-1" agentsMap={agentsMap} />);
+
+    await screen.findByTestId('composer-input');
+    const stream = api.streamChatEvents.mock.calls[0];
+    await emitEvent(stream, {
+      seq: 3,
+      type: 'message',
+      ts: '2026-05-12T10:02:00Z',
+      actor_agent_id: 'agent-1',
+      message: { role: 'assistant', content: 'Selectable reply' },
+    });
+    await emitEvent(stream, {
+      seq: 4,
+      type: 'message',
+      ts: '2026-05-12T10:03:00Z',
+      actor_agent_id: '',
+      message: { role: 'user', content: 'Selectable request' },
+    });
+
+    expect(screen.getByText('Selectable reply').closest('.cw-selectable-text')).toBeTruthy();
+    expect(screen.getByText('Selectable request').closest('.cw-selectable-text')).toBeTruthy();
+  });
+
   it('places the copy button under an assistant run that ends with an error', async () => {
     const writeText = vi.fn().mockResolvedValue();
     Object.defineProperty(window.navigator, 'clipboard', {
@@ -1115,6 +1140,11 @@ describe('TaskView', () => {
   });
 
   it('renders tool calls collapsed by default and expands the output on click', async () => {
+    const writeText = vi.fn().mockResolvedValue();
+    Object.defineProperty(window.navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText },
+    });
     api.streamChatEvents.mockImplementation(() => vi.fn());
 
     render(<TaskView chatId="chat-1" agentsMap={agentsMap} />);
@@ -1136,6 +1166,7 @@ describe('TaskView', () => {
     const row = await screen.findByTestId('tool-event-row');
     expect(row).toHaveAttribute('aria-expanded', 'false');
     expect(screen.queryByTestId('tool-event-detail')).not.toBeInTheDocument();
+    expect(screen.getByText("sed -n '1,180p' /tmp/x").closest('.cw-selectable-text')).toBeTruthy();
 
     // Clicking expands and reveals the full output.
     fireEvent.click(row);
@@ -1143,11 +1174,64 @@ describe('TaskView', () => {
     const detail = screen.getByTestId('tool-event-detail');
     expect(detail).toHaveTextContent('first output line');
     expect(detail).toHaveTextContent('second output line');
+    expect(detail).toHaveClass('cw-selectable-text');
+    expect(detail.querySelector('pre')).toHaveClass('cw-selectable-text');
+    const copyButton = screen.getByRole('button', { name: 'Copy tool result' });
+    expect(copyButton).toHaveStyle({ position: 'absolute', opacity: '0' });
+
+    fireEvent.mouseEnter(detail);
+    expect(copyButton).toHaveStyle({ opacity: '1' });
+    fireEvent.click(copyButton);
+
+    await waitFor(() => {
+      expect(writeText).toHaveBeenCalledWith('first output line\nsecond output line');
+    });
 
     // Clicking again collapses it back.
     fireEvent.click(row);
     expect(row).toHaveAttribute('aria-expanded', 'false');
     expect(screen.queryByTestId('tool-event-detail')).not.toBeInTheDocument();
+  });
+
+  it('copies raw tool result text without escaped JSON or call params', async () => {
+    const writeText = vi.fn().mockResolvedValue();
+    Object.defineProperty(window.navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText },
+    });
+    api.streamChatEvents.mockImplementation(() => vi.fn());
+
+    render(<TaskView chatId="chat-1" agentsMap={agentsMap} />);
+    await screen.findByTestId('composer-input');
+
+    const longPath = '/Users/mindivelabs/.crew44/chats/chat-ed9154a5-5ac1-1e5f-e279-f518b7b97f8b/summary.md';
+    const rawOutput = '<system-reminder>Warning: the file exists but is shorter than the provided offset (1). The file has 1 lines.</system-reminder>';
+    const stream = api.streamChatEvents.mock.calls[0];
+    await emitEvent(stream, {
+      seq: 1, type: 'tool_call', ts: '2026-05-12T10:00:00Z',
+      actor_agent_id: 'agent-1',
+      tool_call: { call_id: 'call-1', name: 'Read', input: { file_path: longPath } },
+    });
+    await emitEvent(stream, {
+      seq: 2, type: 'tool_call_result', ts: '2026-05-12T10:00:01Z',
+      actor_agent_id: 'agent-1',
+      tool_call_result: { call_id: 'call-1', tool_call_seq: 1, name: 'Read', output: JSON.stringify(rawOutput) },
+    });
+
+    const row = await screen.findByTestId('tool-event-row');
+    const pathText = screen.getByText(longPath);
+    expect(pathText).toHaveStyle({ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' });
+
+    fireEvent.click(row);
+    expect(pathText).toHaveStyle({ whiteSpace: 'normal', overflow: 'visible', textOverflow: 'clip', wordBreak: 'break-word' });
+
+    const detail = screen.getByTestId('tool-event-detail');
+    fireEvent.mouseEnter(detail);
+    fireEvent.click(screen.getByRole('button', { name: 'Copy tool result' }));
+
+    await waitFor(() => {
+      expect(writeText).toHaveBeenCalledWith(rawOutput);
+    });
   });
 
   it('collapses consecutive tool calls from the same agent into a single group row', async () => {

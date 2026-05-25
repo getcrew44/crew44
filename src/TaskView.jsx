@@ -155,7 +155,7 @@ function MessageEvent({
         onMouseEnter={() => setHovered(true)}
         onMouseLeave={() => setHovered(false)}
       >
-        <div style={{
+        <div className="cw-selectable-text" style={{
           maxWidth: '72%',
           background: '#EFE9D8',
           color: '#1C1A17',
@@ -227,7 +227,7 @@ function MessageEvent({
             <ThoughtChip thought={thought} />
           </div>
         )}
-        <div style={{ fontSize: 14, color: '#1C1A17', lineHeight: 1.55 }}>
+        <div className="cw-selectable-text" style={{ fontSize: 14, color: '#1C1A17', lineHeight: 1.55 }}>
           <RichText
             text={event.body}
             searchQuery={searchQuery}
@@ -320,6 +320,69 @@ function toolOutputSections(rawOutput) {
   }
 }
 
+function toolOutputText(rawOutput) {
+  return toolOutputSections(rawOutput)
+    .map(section => section.text)
+    .join('\n\n');
+}
+
+function FloatingToolCopyButton({ text, visible }) {
+  const [copied, setCopied] = React.useState(false);
+  const timeoutRef = React.useRef(null);
+  const copyText = String(text || '');
+
+  React.useEffect(() => () => {
+    if (timeoutRef.current) window.clearTimeout(timeoutRef.current);
+  }, []);
+
+  const copy = React.useCallback((event) => {
+    event.stopPropagation();
+    const clipboard = window.navigator?.clipboard;
+    if (!copyText.trim() || !clipboard) return;
+    clipboard.writeText(copyText).then(() => {
+      setCopied(true);
+      if (timeoutRef.current) window.clearTimeout(timeoutRef.current);
+      timeoutRef.current = window.setTimeout(() => setCopied(false), 1500);
+    }).catch(() => {});
+  }, [copyText]);
+
+  if (!copyText.trim()) return null;
+
+  return (
+    <button
+      type="button"
+      data-testid="tool-result-copy-action"
+      aria-label="Copy tool result"
+      title={copied ? 'Copied' : 'Copy tool result'}
+      onClick={copy}
+      style={{
+        position: 'absolute',
+        top: 8,
+        right: 8,
+        zIndex: 2,
+        width: 22,
+        height: 22,
+        padding: 0,
+        borderRadius: 4,
+        border: '1px solid #ECE6D5',
+        background: '#FFFEF8',
+        color: copied ? '#47773B' : '#807972',
+        cursor: 'pointer',
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        fontFamily: UI_FONT,
+        opacity: visible || copied ? 1 : 0,
+        pointerEvents: visible || copied ? 'auto' : 'none',
+        boxShadow: '0 1px 4px rgba(28,26,23,0.08)',
+        transition: 'opacity .12s ease',
+      }}
+    >
+      <Icon name={copied ? 'check' : 'copy'} size={14} />
+    </button>
+  );
+}
+
 function ToolOutputPre({ output, result }) {
   const sections = toolOutputSections(output);
   if (sections.length === 0) return null;
@@ -338,7 +401,7 @@ function ToolOutputPre({ output, result }) {
               {section.label}
             </div>
           )}
-          <pre style={{
+          <pre className="cw-selectable-text" style={{
             margin: 0,
             fontFamily: MONO_FONT,
             fontSize: 12.5,
@@ -357,10 +420,12 @@ function ToolOutputPre({ output, result }) {
 // (inside ToolEvent) and as a child inside ToolGroupEvent's expanded list.
 function ToolEventCard({ event, defaultOpen = false }) {
   const [expanded, setExpanded] = React.useState(defaultOpen);
+  const [detailHovered, setDetailHovered] = React.useState(false);
   const fullOutput = event.output || event.detail || '';
   const hasOutput = Boolean(fullOutput);
   const pathOverflows = Boolean(event.path && event.path.length > 80);
   const canExpand = hasOutput || pathOverflows;
+  const detailCopyText = toolOutputText(fullOutput);
 
   return (
     <div style={{
@@ -397,9 +462,12 @@ function ToolEventCard({ event, defaultOpen = false }) {
           fontFamily: MONO_FONT, fontSize: 12, color: '#807972', fontWeight: 400,
         }}>{event.tool}</span>
         {event.path && (
-          <span style={{
+          <span className="cw-selectable-text" style={{
             fontFamily: MONO_FONT, fontSize: 12, color: '#A89F92',
-            whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+            whiteSpace: expanded ? 'normal' : 'nowrap',
+            overflow: expanded ? 'visible' : 'hidden',
+            textOverflow: expanded ? 'clip' : 'ellipsis',
+            wordBreak: expanded ? 'break-word' : 'normal',
             flex: 1, minWidth: 0,
           }}>{event.path}</span>
         )}
@@ -409,8 +477,12 @@ function ToolEventCard({ event, defaultOpen = false }) {
       </button>
       {expanded && (
         <div
+          className="cw-selectable-text"
           data-testid="tool-event-detail"
+          onMouseEnter={() => setDetailHovered(true)}
+          onMouseLeave={() => setDetailHovered(false)}
           style={{
+            position: 'relative',
             borderTop: '1px solid #ECE6D5', background: '#FFFEF8',
             padding: '10px 14px',
             fontFamily: MONO_FONT, fontSize: 12.5, color: '#1C1A17',
@@ -419,9 +491,7 @@ function ToolEventCard({ event, defaultOpen = false }) {
             animation: 'cw-expand-in .18s ease',
           }}
         >
-          {pathOverflows && (
-            <div style={{ marginBottom: hasOutput ? 8 : 0 }}>{event.path}</div>
-          )}
+          <FloatingToolCopyButton text={detailCopyText} visible={detailHovered} />
           {hasOutput && <ToolOutputPre output={fullOutput} result={event.result} />}
         </div>
       )}
@@ -563,17 +633,25 @@ function ToolGroupEvent({ events, agentsMap, showHeader = true }) {
 }
 
 function ToolResultEvent({ event, agentsMap }) {
+  const [hovered, setHovered] = React.useState(false);
   const agent = resolveAuthor(event.author, agentsMap);
   if (!agent || agent.kind !== 'agent') return null;
+  const outputText = toolOutputText(event.output);
   return (
-    <div style={{ display: 'flex', gap: 14, padding: '6px 0 6px 42px' }}>
+    <div data-testid="tool-result-event" style={{ display: 'flex', gap: 14, padding: '6px 0 6px 42px' }}>
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{
-          border: '1px solid #ECE6D5', borderRadius: 8, background: '#FCFAF1',
-          padding: '8px 12px', fontSize: 12.5, color: '#5C544B', fontFamily: MONO_FONT,
-          maxHeight: 120, overflow: 'auto',
-        }}>
-          {event.output || '(no output)'}
+        <div
+          className="cw-selectable-text"
+          onMouseEnter={() => setHovered(true)}
+          onMouseLeave={() => setHovered(false)}
+          style={{
+            position: 'relative',
+            border: '1px solid #ECE6D5', borderRadius: 8, background: '#FCFAF1',
+            padding: '8px 12px', fontSize: 12.5, color: '#5C544B', fontFamily: MONO_FONT,
+            maxHeight: 120, overflow: 'auto',
+          }}>
+          <FloatingToolCopyButton text={outputText} visible={hovered} />
+          {outputText || '(no output)'}
         </div>
       </div>
     </div>
@@ -1476,7 +1554,7 @@ function FileOperationsView({ file, agentsMap, onBack }) {
                   <span style={{ fontSize: 11, color: '#A89F92', fontFamily: UI_FONT }}>{op.time}</span>
                 </div>
                 {op.output && (
-                  <pre style={{
+                  <pre className="cw-selectable-text" style={{
                     margin: 0, padding: '8px 12px',
                     fontFamily: MONO_FONT, fontSize: 12, color: '#5C544B',
                     background: 'rgba(0,0,0,0.03)', lineHeight: 1.55,
