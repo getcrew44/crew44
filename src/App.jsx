@@ -406,6 +406,14 @@ export default function App() {
   }, [loadData]);
 
   const agentsList = Object.values(agentsMap).filter(a => a.kind === 'agent');
+
+  const handleSidebarRoute = React.useCallback((nextRoute) => {
+    if (nextRoute === 'new' && route !== 'new') {
+      setNewTaskProjectId(null);
+    }
+    setRoute(nextRoute);
+  }, [route]);
+
   const handleNewChat = React.useCallback((projectId) => {
     setNewTaskProjectId(projectId);
     setRoute('new');
@@ -809,7 +817,7 @@ export default function App() {
         projects={sidebarProjects}
         currentChatId={currentChatId}
         route={route}
-        setRoute={setRoute}
+        setRoute={handleSidebarRoute}
         onPick={handlePickChat}
         deskName={deskName}
         backendOnline={backendOnline}

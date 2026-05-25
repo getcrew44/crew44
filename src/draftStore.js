@@ -1,5 +1,6 @@
 const DRAFT_PREFIX = 'crew44-composer-draft:v1';
 const NEW_CHAT_PROJECT_KEY = `${DRAFT_PREFIX}:new-chat-project`;
+const GLOBAL_NEW_TASK_DRAFT_ID = '__global_new_task';
 
 function storage() {
   try {
@@ -11,6 +12,10 @@ function storage() {
 
 export function draftKey(projectId = '', chatId = '') {
   return `${DRAFT_PREFIX}:${projectId || ''}:${chatId || ''}`;
+}
+
+export function newTaskDraftChatId() {
+  return GLOBAL_NEW_TASK_DRAFT_ID;
 }
 
 export function readComposerDraft(projectId = '', chatId = '') {
@@ -31,10 +36,9 @@ export function writeComposerDraft(projectId = '', chatId = '', draft = {}) {
   const next = {
     text: draft.text || '',
     targetAgentId: draft.targetAgentId || '',
-    targetProjectId: draft.targetProjectId || '',
   };
 
-  if (!next.text && !next.targetAgentId && !next.targetProjectId) {
+  if (!next.text && !next.targetAgentId) {
     store.removeItem(draftKey(projectId, chatId));
     return;
   }

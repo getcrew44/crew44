@@ -90,6 +90,65 @@ describe('NewTaskRoute', () => {
     expect(screen.getByTestId('new-task-input')).toHaveValue('draft this launch plan');
   });
 
+  it('stores new-task drafts under the single global new-task key', () => {
+    const { unmount } = render(
+      <NewTaskRoute
+        projects={projects}
+        agents={agents}
+        onNewTask={() => {}}
+        initialProjectId="p1"
+      />
+    );
+
+    fireEvent.change(screen.getByTestId('new-task-input'), {
+      target: { value: 'global new task draft' },
+    });
+
+    const stored = window.localStorage.getItem('crew44-composer-draft:v1::__global_new_task');
+    expect(stored).toContain('global new task draft');
+    expect(stored).not.toContain('targetProjectId');
+    expect(window.localStorage.getItem('crew44-composer-draft:v1:p1:chat-a')).toBeNull();
+    unmount();
+
+    render(
+      <NewTaskRoute
+        projects={projects}
+        agents={agents}
+        onNewTask={() => {}}
+        initialProjectId="p1"
+      />
+    );
+
+    expect(screen.getByTestId('new-task-input')).toHaveValue('global new task draft');
+  });
+
+  it('does not persist the default lead as a new-task draft', async () => {
+    render(
+      <NewTaskRoute
+        projects={projects}
+        agents={agents}
+        onNewTask={() => {}}
+        initialProjectId="p1"
+      />
+    );
+
+    await waitFor(() => {
+      expect(window.localStorage.getItem('crew44-composer-draft:v1::__global_new_task')).toBeNull();
+    });
+
+    fireEvent.click(screen.getByText('Aria'));
+    fireEvent.click(await screen.findByText('Bryn'));
+    await waitFor(() => {
+      expect(window.localStorage.getItem('crew44-composer-draft:v1::__global_new_task')).toContain('"targetAgentId":"a2"');
+    });
+
+    fireEvent.click(screen.getByText('Bryn'));
+    fireEvent.click(await screen.findByText('Aria'));
+    await waitFor(() => {
+      expect(window.localStorage.getItem('crew44-composer-draft:v1::__global_new_task')).toBeNull();
+    });
+  });
+
   it('suggests and highlights agents after @ in the new task input', async () => {
     render(
       <NewTaskRoute
@@ -188,6 +247,31 @@ describe('NewTaskRoute', () => {
     expect(listbox.style.width).toBe('260px');
   });
 
+  it('keeps the native textarea and visible overlay on identical text metrics', () => {
+    render(
+      <NewTaskRoute
+        projects={projects}
+        agents={agents}
+        onNewTask={() => {}}
+        initialProjectId="p1"
+      />
+    );
+
+    const input = screen.getByTestId('new-task-input');
+    fireEvent.change(input, {
+      target: {
+        value: 'Now the new task input box has a cursor positioning problem\n\nUse a worktree for this fix',
+        selectionStart: 89,
+        selectionEnd: 89,
+      },
+    });
+
+    const overlay = screen.getByTestId('new-task-input-overlay');
+    for (const prop of ['fontFamily', 'fontSize', 'lineHeight', 'padding', 'margin', 'whiteSpace', 'overflowWrap', 'minHeight']) {
+      expect(input.style[prop]).toBe(overlay.style[prop]);
+    }
+  });
+
   it('requires an explicit project selection before starting', async () => {
     render(
       <NewTaskRoute
@@ -241,7 +325,7 @@ describe('NewTaskRoute', () => {
     );
 
     expect(screen.getByText('Pick a project')).toBeInTheDocument();
-    expect(window.localStorage.getItem('crewai-composer-draft:v1:new-chat-project')).toBeNull();
+    expect(window.localStorage.getItem('crew44-composer-draft:v1:new-chat-project')).toBeNull();
   });
 
   it('starts in the selected project after the user picks one', async () => {
@@ -266,6 +350,50 @@ describe('NewTaskRoute', () => {
     expect(api.createChat).toHaveBeenCalledWith('p2', 'ship this task', 'a1');
     expect(api.postMessage).toHaveBeenCalledWith('chat-1', 'ship this task', 'a1', []);
     expect(onNewTask).toHaveBeenCalledWith('chat-1');
+  });
+
+  it('can switch the new-task composer to Enter-send while Shift or Option Enter stays as newline', async () => {
+    const onNewTask = vi.fn();
+    render(
+      <NewTaskRoute
+        projects={projects}
+        agents={agents}
+        onNewTask={onNewTask}
+        initialProjectId="p1"
+      />
+    );
+
+    const input = screen.getByTestId('new-task-input');
+    fireEvent.change(input, { target: { value: 'start from keyboard' } });
+    fireEvent.click(screen.getByTestId('send-shortcut-menu-button'));
+    fireEvent.click(screen.getAllByRole('menuitemradio')[1]);
+
+    fireEvent.keyDown(input, { key: 'Enter', shiftKey: true });
+    fireEvent.keyDown(input, { key: 'Enter', altKey: true });
+    expect(api.createChat).not.toHaveBeenCalled();
+
+    fireEvent.keyDown(input, { key: 'Enter' });
+
+    await waitFor(() => expect(api.createChat).toHaveBeenCalledWith('p1', 'start from keyboard', 'a1'));
+    expect(api.postMessage).toHaveBeenCalledWith('chat-1', 'start from keyboard', 'a1', []);
+    expect(onNewTask).toHaveBeenCalledWith('chat-1');
+  });
+
+  it('opens the new-task send shortcut menu downward', () => {
+    render(
+      <NewTaskRoute
+        projects={projects}
+        agents={agents}
+        onNewTask={() => {}}
+        initialProjectId="p1"
+      />
+    );
+
+    fireEvent.click(screen.getByTestId('send-shortcut-menu-button'));
+
+    const menu = screen.getByTestId('send-shortcut-menu');
+    expect(menu.style.top).toBe('calc(100% + 6px)');
+    expect(menu.style.bottom).toBe('');
   });
 
   it('selects an attachment for a new task and sends attachment metadata', async () => {
