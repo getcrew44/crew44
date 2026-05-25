@@ -31,6 +31,10 @@ func prepareCodexHome(codexHome string) error {
 		dst := filepath.Join(codexHome, name)
 		_ = ensureSymlinkOrCopy(src, dst)
 	}
+	// Give the isolated codex a headless browser via a Playwright MCP server.
+	if err := ensureCodexBrowserMCP(codexHome); err != nil {
+		return fmt.Errorf("inject codex browser mcp: %w", err)
+	}
 	return nil
 }
 
