@@ -6,6 +6,7 @@
 node_modules/
 /packages/*/.expo/
 /packages/*/dist/
+/marketing
 
 # Expo prebuild output (CNG — source of truth is app.json; run `expo prebuild` to regenerate)
 /packages/mobile/ios/
