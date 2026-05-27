@@ -831,6 +831,26 @@ describe('TaskView', () => {
     expect(screen.queryByText('running')).not.toBeInTheDocument();
   });
 
+  it('places the worktree badge immediately after the short chat id', async () => {
+    api.getChat.mockResolvedValue({
+      ...chat,
+      worktree: {
+        branch: 'crew/hello-i-m-doing',
+        base_ref: 'feat/0526',
+        workdir: '/Users/me/project/.worktrees/crew/hello-i-m-doing',
+      },
+    });
+
+    render(<TaskView chatId="chat-1" agentsMap={agentsMap} />);
+
+    const shortId = await screen.findByText('chat-1');
+    const badge = screen.getByTestId('worktree-badge');
+    const opened = screen.getByText(/opened /);
+
+    expect(shortId.compareDocumentPosition(badge) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(badge.compareDocumentPosition(opened) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
   it('does not render a Share button in the header', async () => {
     render(<TaskView chatId="chat-1" agentsMap={agentsMap} />);
     await screen.findByRole('heading', { level: 1 });

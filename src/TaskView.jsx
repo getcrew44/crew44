@@ -965,6 +965,12 @@ function TaskHeader({ chat, events, fileCount, drawerOpen, onToggleDrawer, onCha
           }}>
             <span style={{ fontFamily: MONO_FONT, color: '#5C544B' }}>{chat.id?.slice(0, 8)}</span>
             <span style={{ color: '#D6CDB6' }}>·</span>
+            {chat.worktree && (
+              <>
+                <WorktreeBadge worktree={chat.worktree} />
+                <span style={{ color: '#D6CDB6' }}>·</span>
+              </>
+            )}
             <span>opened {age}</span>
             {metaItems.map((m, i) => (
               <React.Fragment key={i}>
@@ -972,7 +978,6 @@ function TaskHeader({ chat, events, fileCount, drawerOpen, onToggleDrawer, onCha
                 <span>{m}</span>
               </React.Fragment>
             ))}
-            {chat.worktree && <WorktreeBadge worktree={chat.worktree} />}
           </div>
         </div>
         {!drawerOpen && onToggleDrawer && (
