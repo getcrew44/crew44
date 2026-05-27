@@ -384,10 +384,43 @@ describe('NewTaskRoute', () => {
     fireEvent.click(screen.getByTestId('start-crew-button'));
 
     await waitFor(() => expect(api.createChat).toHaveBeenCalledWith(
-      'p1', 'fix the bug', 'a1', { useWorktree: true, baseRef: 'main' },
+      'p1', 'fix the bug', 'a1',
+      { useWorktree: true, baseRef: 'main', id: expect.any(String) },
     ));
     // Toggling persists the project default.
     expect(api.updateProject).toHaveBeenCalledWith('p1', { use_worktree_default: true });
+  });
+
+  it('carries the worktree choice across project switches', async () => {
+    api.getGitInfo.mockResolvedValue({
+      is_git_repo: true,
+      current_branch: 'main',
+      branches: ['main'],
+    });
+    render(
+      <NewTaskRoute
+        projects={projects}
+        agents={agents}
+        onNewTask={vi.fn()}
+        initialProjectId="p1"
+      />
+    );
+
+    // Enable the worktree while on the first project.
+    fireEvent.click(await screen.findByTestId('worktree-toggle'));
+
+    // Switch to the second git project — the toggle must persist, not reset.
+    fireEvent.click(screen.getByLabelText('Project First Project'));
+    fireEvent.click(await screen.findByText('Second Project'));
+    await screen.findByTestId('worktree-toggle');
+
+    fireEvent.change(screen.getByTestId('new-task-input'), { target: { value: 'carry over' } });
+    fireEvent.click(screen.getByTestId('start-crew-button'));
+
+    await waitFor(() => expect(api.createChat).toHaveBeenCalledWith(
+      'p2', 'carry over', 'a1',
+      { useWorktree: true, baseRef: 'main', id: expect.any(String) },
+    ));
   });
 
   it('hides worktree controls for a non-git project', async () => {

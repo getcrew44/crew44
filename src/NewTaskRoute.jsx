@@ -34,13 +34,21 @@ const ghostChip = {
 
 const MONO_FONT = 'ui-monospace, SFMono-Regular, Menlo, monospace';
 
-// deriveBranchSlug mirrors the daemon's branchSlug: first line, lowercased,
-// alphanumerics only, up to four words joined by hyphens. Used to preview the
-// branch the crew will eventually rename its worktree to.
-function deriveBranchSlug(text) {
-  const line = (text || '').trim().split('\n')[0].toLowerCase();
-  const words = line.replace(/[^a-z0-9]+/g, ' ').trim().split(/\s+/).filter(Boolean);
-  return words.slice(0, 4).join('-');
+// newChatId mints a UUID the client pre-allocates for a worktree chat, so the
+// new-task screen can preview the exact branch the daemon will check out
+// (crew/<id8>). crypto.randomUUID is universal in browsers; the fallback keeps
+// jsdom-based tests working.
+function newChatId() {
+  if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID();
+  return 'xxxxxxxxxxxx'.replace(/x/g, () => ((Math.random() * 16) | 0).toString(16));
+}
+
+// branchPreview shows the placeholder branch the daemon creates the worktree
+// on: crew/<first 8 chars of the chat ID>. It is renamed to a slug of the
+// task's title once the chat earns one — the ID just guarantees a unique,
+// git-safe starting point that never depends on what the user typed.
+function branchPreview(chatId) {
+  return 'crew/' + String(chatId || '').slice(0, 8);
 }
 
 function BranchGlyph() {
@@ -91,9 +99,9 @@ function WorktreeChip({ enabled, onToggle }) {
   );
 }
 
-// WorktreeDetail surfaces the intended branch name and the base-branch picker.
-// The branch is a preview — the daemon starts at crew/<chatID8> and renames to
-// this slug once the task earns a title.
+// WorktreeDetail surfaces the branch the worktree will be created on and the
+// base-branch picker. branchName is the crew/<chatID8> placeholder the daemon
+// checks out; it is renamed to a slug of the task's title once one is earned.
 function WorktreeDetail({ branchName, base, branches, onChangeBase }) {
   return (
     <div style={{
@@ -278,6 +286,9 @@ const NEW_TASK_INPUT_TEXT_STYLE = {
 
 export default function NewTaskRoute({ projects, agents, skills = [], onNewTask, onExistingFolder, initialProjectId }) {
   const draftStorageChatId = React.useMemo(() => newTaskDraftChatId(), []);
+  // Pre-allocated chat ID so the worktree branch preview matches what the
+  // daemon actually checks out. Stable for the life of this compose session.
+  const [draftChatId] = React.useState(newChatId);
   const initialDraft = React.useMemo(() => readComposerDraft('', draftStorageChatId), [draftStorageChatId]);
   const initialStoredProjectId = React.useMemo(
     () => initialProjectId || readLastNewChatProjectId(),
@@ -299,6 +310,10 @@ export default function NewTaskRoute({ projects, agents, skills = [], onNewTask,
   const [gitInfo, setGitInfo] = React.useState(null);
   const [useWorktree, setUseWorktree] = React.useState(false);
   const [baseRef, setBaseRef] = React.useState('');
+  // The user's standing worktree choice, carried across project switches.
+  // null until seeded from the first project's saved default; after that it
+  // follows explicit toggles rather than resetting to each project's default.
+  const worktreePref = React.useRef(null);
   const [sendShortcutMode, setSendShortcutMode] = useSendShortcutMode();
   const inputRef = React.useRef(null);
   const listboxRef = React.useRef(null);
@@ -336,7 +351,9 @@ export default function NewTaskRoute({ projects, agents, skills = [], onNewTask,
   }, [agents, selectedAgentId]);
 
   // Probe the selected project's git state to drive the worktree controls.
-  // Default the toggle from the project's saved preference, but only for repos.
+  // The toggle reflects the user's standing choice (seeded once from the first
+  // project's saved default) and carries across switches — git probing only
+  // forces it off when the new project turns out not to be a repo.
   React.useEffect(() => {
     let cancelled = false;
     setGitInfo(null);
@@ -344,21 +361,27 @@ export default function NewTaskRoute({ projects, agents, skills = [], onNewTask,
       setUseWorktree(false);
       return;
     }
-    const wantDefault = Boolean(selectedProject?.use_worktree_default);
+    if (worktreePref.current === null) {
+      worktreePref.current = Boolean(selectedProject?.use_worktree_default);
+    }
+    // Reflect the standing choice immediately so a send issued while the git
+    // probe is still in flight never falls back to a stale or default value.
+    setUseWorktree(worktreePref.current);
     api.getGitInfo(selectedProjectId)
       .then((info) => {
         if (cancelled) return;
         setGitInfo(info);
         setBaseRef(info.current_branch || '');
-        setUseWorktree(Boolean(info.is_git_repo) && wantDefault);
+        if (!info.is_git_repo) setUseWorktree(false);
       })
-      .catch(() => { if (!cancelled) setGitInfo({ is_git_repo: false }); });
+      .catch(() => { if (!cancelled) { setGitInfo({ is_git_repo: false }); setUseWorktree(false); } });
     return () => { cancelled = true; };
   }, [selectedProjectId, selectedProjectExists]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const onToggleWorktree = () => {
     const next = !useWorktree;
     setUseWorktree(next);
+    worktreePref.current = next;
     // Persist the choice as the project default so it sticks next time.
     if (selectedProjectExists) {
       api.updateProject(selectedProjectId, { use_worktree_default: next }).catch(() => {});
@@ -500,7 +523,20 @@ export default function NewTaskRoute({ projects, agents, skills = [], onNewTask,
 
     try {
       const titleSource = text || attachments[0]?.display_name || 'Attachments';
-      const worktreeOpts = gitInfo?.is_git_repo ? { useWorktree, baseRef } : {};
+      // The git probe may still be in flight if the project was just switched.
+      // Resolve it now so the worktree decision is never dropped to a default
+      // just because gitInfo hasn't loaded yet.
+      let info = gitInfo;
+      let base = baseRef;
+      if (info === null) {
+        info = await api.getGitInfo(projectId).catch(() => ({ is_git_repo: false }));
+        base = info?.current_branch || '';
+      }
+      const wantsWorktree = Boolean(info?.is_git_repo) && useWorktree;
+      const worktreeOpts = info?.is_git_repo ? { useWorktree, baseRef: base } : {};
+      // Hand the daemon the pre-allocated ID so the created worktree lands on
+      // the exact crew/<id8> branch we previewed above.
+      if (wantsWorktree) worktreeOpts.id = draftChatId;
       const chat = await api.createChat(projectId, titleSource, agentId, worktreeOpts);
       await api.postMessage(chat.id, text, chat.main_agent_id, attachments);
       clearComposerDraft('', draftStorageChatId);
@@ -730,7 +766,7 @@ export default function NewTaskRoute({ projects, agents, skills = [], onNewTask,
           </div>
           {gitInfo?.is_git_repo && useWorktree && (
             <WorktreeDetail
-              branchName={'crew/' + (deriveBranchSlug(val) || 'task')}
+              branchName={branchPreview(draftChatId)}
               base={baseRef}
               branches={gitInfo.branches}
               onChangeBase={setBaseRef}

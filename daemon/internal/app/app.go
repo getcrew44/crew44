@@ -998,7 +998,12 @@ func (a *App) resolveWorkdir(projectID, chatID string) (string, error) {
 // falls back to the project default, otherwise it's an explicit request. When
 // a worktree is wanted but the workdir isn't a git repo, an explicit request
 // is rejected while a default-derived one silently falls back to no worktree.
-func (a *App) CreateChat(projectID, title, mainAgentID string, useWorktree *bool, baseRef string) (model.ChatRecord, error) {
+//
+// chatIDOverride lets a caller pre-allocate the chat's ID — the new-task UI
+// supplies one so it can preview the exact worktree branch (crew/<id8>) before
+// the chat exists. Ignored unless it is a single, syntactically safe value;
+// otherwise a fresh ID is minted.
+func (a *App) CreateChat(projectID, title, mainAgentID string, useWorktree *bool, baseRef string, chatIDOverride ...string) (model.ChatRecord, error) {
 	project, err := a.store.GetProject(projectID)
 	if err != nil {
 		return model.ChatRecord{}, a.mapError(err)
@@ -1016,6 +1021,9 @@ func (a *App) CreateChat(projectID, title, mainAgentID string, useWorktree *bool
 		want = *useWorktree
 	}
 	chatID := id.New()
+	if len(chatIDOverride) > 0 && safeChatID(chatIDOverride[0]) {
+		chatID = chatIDOverride[0]
+	}
 	var binding *model.WorktreeBinding
 	if want {
 		if !isGitRepo(strings.TrimSpace(project.Workdir)) {
@@ -1062,6 +1070,24 @@ func shortID(s string) string {
 		return s[:8]
 	}
 	return s
+}
+
+// safeChatID reports whether s is acceptable as a client-supplied chat ID. The
+// ID becomes a filesystem path component (chat-<id>) and a git branch suffix,
+// so we restrict it to the shape of a minted UUID: hex digits and hyphens, no
+// separators or traversal sequences.
+func safeChatID(s string) bool {
+	if len(s) < 8 || len(s) > 64 {
+		return false
+	}
+	for _, r := range s {
+		switch {
+		case r >= '0' && r <= '9', r >= 'a' && r <= 'f', r == '-':
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // provisionWorktree creates an isolated git worktree for a chat, forked from

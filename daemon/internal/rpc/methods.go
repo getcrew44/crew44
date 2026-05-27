@@ -533,13 +533,16 @@ func (s *Server) chatsCreate(_ context.Context, _ Peer, params json.RawMessage) 
 		Title       string `json:"title"`
 		MainAgentID string `json:"main_agent_id"`
 		// Pointer so an absent flag falls back to the project default.
-		UseWorktree *bool  `json:"use_worktree"`
+		UseWorktree *bool `json:"use_worktree"`
 		BaseRef     string `json:"base_ref"`
+		// Optional client-allocated ID so the new-task UI can preview the
+		// exact worktree branch; validated server-side before use.
+		ID string `json:"id"`
 	}
 	if err := decodeParams(params, &body); err != nil {
 		return nil, err
 	}
-	return s.app.CreateChat(body.ProjectID, body.Title, body.MainAgentID, body.UseWorktree, body.BaseRef)
+	return s.app.CreateChat(body.ProjectID, body.Title, body.MainAgentID, body.UseWorktree, body.BaseRef, body.ID)
 }
 
 func (s *Server) chatsList(_ context.Context, _ Peer, params json.RawMessage) (any, error) {

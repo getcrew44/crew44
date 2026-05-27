@@ -64,6 +64,41 @@ func TestCreateChatProvisionsWorktree(t *testing.T) {
 	}
 }
 
+func TestCreateChatHonorsSafeClientID(t *testing.T) {
+	a := newOptimizerTestApp(t)
+	agentID := firstAgentID(t, a)
+	repo := t.TempDir()
+	project := gitProject(t, a, agentID, repo, repo)
+
+	const clientID = "0123abcd-4567-89ef-0123-456789abcdef"
+	chat, err := a.CreateChat(project.ID, "first message", agentID, boolPtr(true), "", clientID)
+	if err != nil {
+		t.Fatalf("CreateChat: %v", err)
+	}
+	if chat.ID != clientID {
+		t.Fatalf("chat ID: want %q got %q", clientID, chat.ID)
+	}
+	if want := "crew/" + shortID(clientID); chat.Worktree.Branch != want {
+		t.Fatalf("branch: want %q got %q", want, chat.Worktree.Branch)
+	}
+}
+
+func TestCreateChatRejectsUnsafeClientID(t *testing.T) {
+	a := newOptimizerTestApp(t)
+	agentID := firstAgentID(t, a)
+	repo := t.TempDir()
+	project := gitProject(t, a, agentID, repo, repo)
+
+	// A traversal-laden ID must be ignored in favor of a freshly minted one.
+	chat, err := a.CreateChat(project.ID, "first message", agentID, boolPtr(true), "", "../../etc/passwd")
+	if err != nil {
+		t.Fatalf("CreateChat: %v", err)
+	}
+	if chat.ID == "../../etc/passwd" {
+		t.Fatal("unsafe client ID was accepted")
+	}
+}
+
 func TestCreateChatExplicitWorktreeNonGitRejected(t *testing.T) {
 	a := newOptimizerTestApp(t)
 	agentID := firstAgentID(t, a)

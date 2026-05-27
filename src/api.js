@@ -170,10 +170,11 @@ export async function listChats(projectId = '') {
   return data.items || [];
 }
 
-export async function createChat(projectId, title, mainAgentId, { useWorktree, baseRef } = {}) {
+export async function createChat(projectId, title, mainAgentId, { useWorktree, baseRef, id } = {}) {
   const params = { project_id: projectId, title, main_agent_id: mainAgentId };
   if (useWorktree !== undefined) params.use_worktree = useWorktree;
   if (baseRef) params.base_ref = baseRef;
+  if (id) params.id = id;
   return rpc.call('chats.create', params);
 }
 
