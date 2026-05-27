@@ -314,6 +314,11 @@ export default function NewTaskRoute({ projects, agents, skills = [], onNewTask,
   // null until seeded from the first project's saved default; after that it
   // follows explicit toggles rather than resetting to each project's default.
   const worktreePref = React.useRef(null);
+  // Holds the chat once createChat succeeds, so a retry after a failed
+  // postMessage re-posts to the existing chat instead of calling createChat
+  // again — a second create reuses draftChatId and collides on the already
+  // provisioned crew/<id8> worktree branch, wedging the task permanently.
+  const createdChatRef = React.useRef(null);
   const [sendShortcutMode, setSendShortcutMode] = useSendShortcutMode();
   const inputRef = React.useRef(null);
   const listboxRef = React.useRef(null);
@@ -532,13 +537,21 @@ export default function NewTaskRoute({ projects, agents, skills = [], onNewTask,
         info = await api.getGitInfo(projectId).catch(() => ({ is_git_repo: false }));
         base = info?.current_branch || '';
       }
-      const wantsWorktree = Boolean(info?.is_git_repo) && useWorktree;
-      const worktreeOpts = info?.is_git_repo ? { useWorktree, baseRef: base } : {};
-      // Hand the daemon the pre-allocated ID so the created worktree lands on
-      // the exact crew/<id8> branch we previewed above.
-      if (wantsWorktree) worktreeOpts.id = draftChatId;
-      const chat = await api.createChat(projectId, titleSource, agentId, worktreeOpts);
+      // Reuse the chat from a prior attempt whose postMessage failed — a fresh
+      // createChat would reuse draftChatId and collide on the worktree branch
+      // it already provisioned, leaving the task unstartable.
+      let chat = createdChatRef.current;
+      if (!chat) {
+        const wantsWorktree = Boolean(info?.is_git_repo) && useWorktree;
+        const worktreeOpts = info?.is_git_repo ? { useWorktree, baseRef: base } : {};
+        // Hand the daemon the pre-allocated ID so the created worktree lands on
+        // the exact crew/<id8> branch we previewed above.
+        if (wantsWorktree) worktreeOpts.id = draftChatId;
+        chat = await api.createChat(projectId, titleSource, agentId, worktreeOpts);
+        createdChatRef.current = chat;
+      }
       await api.postMessage(chat.id, text, chat.main_agent_id, attachments);
+      createdChatRef.current = null;
       clearComposerDraft('', draftStorageChatId);
       onNewTask(chat.id);
     } catch (err) {

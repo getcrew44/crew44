@@ -830,7 +830,10 @@ func (a *App) removeProjectWorktrees(project model.ProjectRecord) {
 	if err != nil {
 		return
 	}
-	chats, err := a.store.ListChats(project.ID)
+	// ListProjectChats (not ListChats) so archived chats are included —
+	// otherwise their worktrees keep stale admin refs in the source repo
+	// after the project state dir is gone.
+	chats, err := a.store.ListProjectChats(project.ID)
 	if err != nil {
 		return
 	}
@@ -1265,6 +1268,16 @@ func branchSlug(title string) string {
 }
 
 func (a *App) DeleteChat(id string) error {
+	// Detach the chat's worktree before dropping its record, otherwise the
+	// source repo keeps a stale linked checkout and branch with nothing left
+	// in Crew44 to clean them up. Best-effort: don't block the delete on it.
+	if chat, err := a.store.GetChat(id); err == nil && chat.Worktree != nil {
+		if project, perr := a.store.GetProject(chat.ProjectID); perr == nil {
+			if top, terr := gitToplevel(strings.TrimSpace(project.Workdir)); terr == nil {
+				_ = gitWorktreeRemove(top, chat.Worktree.Path)
+			}
+		}
+	}
 	return a.mapError(a.store.DeleteChat(id))
 }
 

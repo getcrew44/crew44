@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/getcrew44/crew44/daemon/internal/model"
 )
@@ -224,6 +225,55 @@ func TestDeleteProjectRemovesWorktrees(t *testing.T) {
 	}
 	if strings.Contains(string(out), chat.Worktree.Path) {
 		t.Fatalf("worktree still registered after project delete:\n%s", out)
+	}
+}
+
+func TestDeleteChatRemovesWorktree(t *testing.T) {
+	a := newOptimizerTestApp(t)
+	agentID := firstAgentID(t, a)
+	repo := t.TempDir()
+	project := gitProject(t, a, agentID, repo, repo)
+
+	chat, err := a.CreateChat(project.ID, "x", agentID, boolPtr(true), "")
+	if err != nil {
+		t.Fatalf("CreateChat: %v", err)
+	}
+	if err := a.DeleteChat(chat.ID); err != nil {
+		t.Fatalf("DeleteChat: %v", err)
+	}
+	out, err := runGit(repo, "worktree", "list", "--porcelain")
+	if err != nil {
+		t.Fatalf("git worktree list: %v", err)
+	}
+	if strings.Contains(string(out), chat.Worktree.Path) {
+		t.Fatalf("worktree still registered after chat delete:\n%s", out)
+	}
+}
+
+func TestDeleteProjectRemovesArchivedChatWorktrees(t *testing.T) {
+	a := newOptimizerTestApp(t)
+	agentID := firstAgentID(t, a)
+	repo := t.TempDir()
+	project := gitProject(t, a, agentID, repo, repo)
+
+	chat, err := a.CreateChat(project.ID, "x", agentID, boolPtr(true), "")
+	if err != nil {
+		t.Fatalf("CreateChat: %v", err)
+	}
+	// Archive the chat so store.ListChats hides it; removeProjectWorktrees must
+	// still detach its worktree (it lists archived chats via ListProjectChats).
+	if _, err := a.UpdateChat(model.ChatRecord{ID: chat.ID, ArchivedAt: time.Now().UTC()}); err != nil {
+		t.Fatalf("archive chat: %v", err)
+	}
+	if err := a.DeleteProject(project.ID); err != nil {
+		t.Fatalf("DeleteProject: %v", err)
+	}
+	out, err := runGit(repo, "worktree", "list", "--porcelain")
+	if err != nil {
+		t.Fatalf("git worktree list: %v", err)
+	}
+	if strings.Contains(string(out), chat.Worktree.Path) {
+		t.Fatalf("archived chat worktree still registered after project delete:\n%s", out)
 	}
 }
 

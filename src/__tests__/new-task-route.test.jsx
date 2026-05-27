@@ -423,6 +423,42 @@ describe('NewTaskRoute', () => {
     ));
   });
 
+  it('reuses the created chat when retrying after a failed postMessage', async () => {
+    api.getGitInfo.mockResolvedValue({
+      is_git_repo: true,
+      current_branch: 'main',
+      branches: ['main'],
+    });
+    api.postMessage
+      .mockRejectedValueOnce(new Error('network blip'))
+      .mockResolvedValueOnce({});
+    const onNewTask = vi.fn();
+    render(
+      <NewTaskRoute
+        projects={projects}
+        agents={agents}
+        onNewTask={onNewTask}
+        initialProjectId="p1"
+      />
+    );
+
+    fireEvent.click(await screen.findByTestId('worktree-toggle'));
+    fireEvent.change(screen.getByTestId('new-task-input'), { target: { value: 'retry me' } });
+
+    // First attempt: createChat succeeds, postMessage fails.
+    fireEvent.click(screen.getByTestId('start-crew-button'));
+    await waitFor(() => expect(api.createChat).toHaveBeenCalledOnce());
+    await screen.findByText('network blip');
+
+    // Retry must NOT create a second chat — a fresh createChat reuses the same
+    // pre-allocated id and collides on the already-provisioned worktree branch.
+    fireEvent.click(screen.getByTestId('start-crew-button'));
+    await waitFor(() => expect(api.postMessage).toHaveBeenCalledTimes(2));
+    expect(api.createChat).toHaveBeenCalledOnce();
+    expect(api.postMessage).toHaveBeenLastCalledWith('chat-1', 'retry me', 'a1', []);
+    expect(onNewTask).toHaveBeenCalledWith('chat-1');
+  });
+
   it('hides worktree controls for a non-git project', async () => {
     render(
       <NewTaskRoute
