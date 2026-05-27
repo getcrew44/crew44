@@ -170,4 +170,39 @@ describe('App streaming reconciliation', () => {
       intervalSpy.mockRestore();
     }
   });
+
+  it('refreshes sidebar worktree metadata from chat updated events', async () => {
+    let onChatUpdated;
+    api.streamChatEvents.mockImplementation((_chatId, _after, _onEvent, _onDone, _onError, onUpdated) => {
+      onChatUpdated = onUpdated;
+      return vi.fn();
+    });
+    api.listProjectChats.mockResolvedValue([{
+      ...runningChat,
+      stream: { status: 'idle' },
+      worktree: { branch: 'crew/chat-runn', base_ref: 'main', workdir: '/tmp/wt', path: '/tmp/wt' },
+    }]);
+    api.getChat.mockResolvedValue({
+      ...runningChat,
+      stream: { status: 'idle' },
+      worktree: { branch: 'crew/chat-runn', base_ref: 'main', workdir: '/tmp/wt', path: '/tmp/wt' },
+    });
+
+    render(<App />);
+
+    fireEvent.click(await screen.findByTestId('chat-chat-running'));
+    await waitFor(() => expect(onChatUpdated).toBeDefined());
+
+    act(() => {
+      onChatUpdated({
+        ...runningChat,
+        stream: { status: 'idle' },
+        worktree: { branch: 'crew/refactored-login', base_ref: 'main', workdir: '/tmp/wt', path: '/tmp/wt' },
+      });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTitle('Worktree · crew/refactored-login')).toBeInTheDocument();
+    });
+  });
 });
