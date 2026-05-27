@@ -13,6 +13,7 @@
 
 [**Download**](https://crew44.io/download) · [Website](https://crew44.io) · [What's new](CHANGELOG.md)
 
+
 </div>
 
 ---
@@ -20,6 +21,8 @@
 Crew44 turns the AI agents you already run — Claude Code, Codex, Gemini, Cursor, and more — into a coordinated team. Instead of one generalist agent re-explaining context to itself all day, you assemble specialists, bind each to the model that wins at its job, and let them hand work off to each other inside one shared workspace.
 
 Everything runs on your machine. State is plain files under `~/.crew44/`. No cloud account, no subscription, no telemetry — the only network traffic is whatever your underlying coding agent already makes.
+
+https://github.com/user-attachments/assets/ce6e5293-6c58-4c37-8e00-74d654d2277c
 
 ## Download
 
@@ -44,7 +47,8 @@ Prefer to build it yourself? See [Getting started](#getting-started).
 | One generalist plans, builds, and reviews — no deep expertise in any role. | **Specialists in parallel.** Planner drafts while builder codes while reviewer checks. Handovers ship the baton, not the whole context. |
 | Locked to a single model: pays Opus rates for a rename, runs a fast model on a hard call. | **The right model per role.** Opus plans, GPT-5.5 codes, a local model reviews — swap per task, not per app. |
 
-And a **Partner** agent quietly mines your run history on a schedule, then proposes new memory, skills, and routing tweaks **with evidence** — queued for explicit Accept / Edit / Snooze / Dismiss. Nothing lands on disk without your click.
+
+
 
 ## Supported runtimes
 
