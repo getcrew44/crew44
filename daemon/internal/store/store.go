@@ -58,6 +58,13 @@ func (s *Store) ChatSessionDir(chatID string) string {
 	return filepath.Join(s.root, "chats", "chat-"+chatID)
 }
 
+// ChatWorktreePath is the checkout root for a chat's isolated git worktree,
+// keyed by chat ID so branch renames never move the directory. Lives under the
+// owning project so deleting the project cleans it up.
+func (s *Store) ChatWorktreePath(projectID, chatID string) string {
+	return filepath.Join(s.root, "projects", "proj-"+projectID, "worktrees", "chat-"+chatID, "repo")
+}
+
 // UserMemoryPath is the legacy global per-user memory file (single bulleted
 // markdown). Kept so existing files keep being read by the prompt builder
 // when the new per-entry directory has not yet been created.

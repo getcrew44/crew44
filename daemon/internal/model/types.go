@@ -74,9 +74,26 @@ type ProjectRecord struct {
 	Workdir      string    `json:"workdir"`
 	MainAgentID  string    `json:"main_agent_id"`
 	SystemHidden bool      `json:"system_hidden,omitempty"`
-	CreatedAt    time.Time `json:"created_at"`
-	UpdatedAt    time.Time `json:"updated_at"`
-	ArchivedAt   time.Time `json:"archived_at,omitempty"`
+	// UseWorktreeDefault is the default state of the New Task worktree toggle
+	// for chats created under this project. Ignored for non-git workdirs.
+	UseWorktreeDefault bool      `json:"use_worktree_default,omitempty"`
+	CreatedAt          time.Time `json:"created_at"`
+	UpdatedAt          time.Time `json:"updated_at"`
+	ArchivedAt         time.Time `json:"archived_at,omitempty"`
+}
+
+// WorktreeBinding records the git worktree a chat is pinned to. Path is the
+// worktree checkout root (the repo toplevel inside the worktree); Workdir is
+// the actual cwd, which equals Path plus the project workdir's repo-relative
+// subdirectory. Branch starts as crew/<chatID8> and is renamed to a
+// title-derived slug once the chat earns a meaningful title.
+type WorktreeBinding struct {
+	Path      string    `json:"path"`
+	Workdir   string    `json:"workdir"`
+	Branch    string    `json:"branch"`
+	BaseRef   string    `json:"base_ref"`
+	BaseSHA   string    `json:"base_sha"`
+	CreatedAt time.Time `json:"created_at"`
 }
 
 type LastRuntimeSession struct {
@@ -117,6 +134,9 @@ type ChatRecord struct {
 	ActiveTurnID           string             `json:"active_turn_id,omitempty"`
 	LastRuntimeSession     LastRuntimeSession `json:"last_runtime_session"`
 	Stream                 ChatStreamState    `json:"stream"`
+	// Worktree is set when the chat runs in an isolated git worktree. Nil
+	// chats (legacy or worktree-disabled) fall back to ProjectRecord.Workdir.
+	Worktree               *WorktreeBinding   `json:"worktree,omitempty"`
 	CreatedAt              time.Time          `json:"created_at"`
 	UpdatedAt              time.Time          `json:"updated_at"`
 	ArchivedAt             time.Time          `json:"archived_at,omitempty"`
