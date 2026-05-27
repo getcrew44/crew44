@@ -24,6 +24,87 @@ const chip = {
   cursor: 'pointer', fontFamily: UI_FONT,
 };
 
+const MONO_FONT = 'ui-monospace, SFMono-Regular, Menlo, monospace';
+
+// deriveBranchSlug mirrors the daemon's branchSlug: first line, lowercased,
+// alphanumerics only, up to four words joined by hyphens. Used to preview the
+// branch the crew will eventually rename its worktree to.
+function deriveBranchSlug(text) {
+  const line = (text || '').trim().split('\n')[0].toLowerCase();
+  const words = line.replace(/[^a-z0-9]+/g, ' ').trim().split(/\s+/).filter(Boolean);
+  return words.slice(0, 4).join('-');
+}
+
+function BranchGlyph() {
+  return (
+    <svg width="11" height="11" viewBox="0 0 16 16" aria-hidden="true" style={{ color: '#C2B89F', flexShrink: 0 }}>
+      <circle cx="4" cy="3.5" r="1.4" fill="none" stroke="currentColor" strokeWidth="1.3"/>
+      <circle cx="4" cy="12.5" r="1.4" fill="none" stroke="currentColor" strokeWidth="1.3"/>
+      <circle cx="11.5" cy="7" r="1.4" fill="none" stroke="currentColor" strokeWidth="1.3"/>
+      <path d="M4 5v6" stroke="currentColor" strokeWidth="1.3" fill="none" strokeLinecap="round"/>
+      <path d="M4 8.5c0-2.5 7.5-1 7.5-3.5" stroke="currentColor" strokeWidth="1.3" fill="none" strokeLinecap="round"/>
+    </svg>
+  );
+}
+
+function WorktreeChip({ enabled, onToggle }) {
+  return (
+    <button
+      type="button"
+      data-testid="worktree-toggle"
+      onClick={onToggle}
+      title={enabled
+        ? 'Disable worktree — the crew will edit your working tree directly'
+        : "Run this task in an isolated git worktree so the crew can't dirty your working tree"}
+      style={{
+        ...chip, display: 'inline-flex', alignItems: 'center', gap: 7,
+        padding: '4px 9px 4px 7px',
+        color: enabled ? '#1C1A17' : '#5C544B', fontWeight: enabled ? 500 : 400,
+      }}
+    >
+      <span aria-hidden="true" style={{
+        position: 'relative', display: 'inline-block', width: 22, height: 13,
+        borderRadius: 999, background: enabled ? '#7A6420' : '#D6CDB6',
+        transition: 'background 120ms ease', flexShrink: 0,
+      }}>
+        <span style={{
+          position: 'absolute', top: 1.5, left: enabled ? 10.5 : 1.5, width: 10, height: 10,
+          borderRadius: '50%', background: '#FCFBF7', boxShadow: '0 1px 2px rgba(0,0,0,0.18)',
+          transition: 'left 120ms ease',
+        }} />
+      </span>
+      {enabled ? 'Worktree' : 'Git worktree'}
+    </button>
+  );
+}
+
+// WorktreeDetail surfaces the intended branch name and the base-branch picker.
+// The branch is a preview — the daemon starts at crew/<chatID8> and renames to
+// this slug once the task earns a title.
+function WorktreeDetail({ branchName, base, branches, onChangeBase }) {
+  return (
+    <div style={{
+      marginTop: 8, paddingLeft: 2, display: 'flex', alignItems: 'center',
+      gap: 10, flexWrap: 'wrap', fontFamily: UI_FONT, fontSize: 11.5, color: '#A89F92',
+    }}>
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+        <BranchGlyph />
+        <span data-testid="worktree-branch" style={{ fontFamily: MONO_FONT, color: '#807972' }}>{branchName}</span>
+      </span>
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+        <span>from</span>
+        <CustomPicker
+          icon={<BranchGlyph />}
+          placeholder="base branch"
+          value={base}
+          items={(branches || []).map(b => ({ id: b, label: b }))}
+          onChange={onChangeBase}
+        />
+      </span>
+    </div>
+  );
+}
+
 function FolderIcon({ size = 14 }) {
   return (
     <svg width={size} height={size} viewBox="0 0 14 14" fill="none" style={{ flexShrink: 0 }}>
@@ -200,6 +281,11 @@ export default function NewTaskRoute({ projects, agents, skills = [], onNewTask,
   const [error, setError] = React.useState(null);
   const [scrollTop, setScrollTop] = React.useState(0);
   const [fileMatches, setFileMatches] = React.useState([]);
+  // gitInfo is null while unknown/loading; the worktree controls only appear
+  // once we know the selected project's workdir is a git repo.
+  const [gitInfo, setGitInfo] = React.useState(null);
+  const [useWorktree, setUseWorktree] = React.useState(false);
+  const [baseRef, setBaseRef] = React.useState('');
   const [sendShortcutMode, setSendShortcutMode] = useSendShortcutMode();
   const inputRef = React.useRef(null);
   const listboxRef = React.useRef(null);
@@ -235,6 +321,36 @@ export default function NewTaskRoute({ projects, agents, skills = [], onNewTask,
   React.useEffect(() => {
     if (agents.length > 0 && !selectedAgentId) setSelectedAgentId(agents[0].id);
   }, [agents, selectedAgentId]);
+
+  // Probe the selected project's git state to drive the worktree controls.
+  // Default the toggle from the project's saved preference, but only for repos.
+  React.useEffect(() => {
+    let cancelled = false;
+    setGitInfo(null);
+    if (!selectedProjectExists) {
+      setUseWorktree(false);
+      return;
+    }
+    const wantDefault = Boolean(selectedProject?.use_worktree_default);
+    api.getGitInfo(selectedProjectId)
+      .then((info) => {
+        if (cancelled) return;
+        setGitInfo(info);
+        setBaseRef(info.current_branch || '');
+        setUseWorktree(Boolean(info.is_git_repo) && wantDefault);
+      })
+      .catch(() => { if (!cancelled) setGitInfo({ is_git_repo: false }); });
+    return () => { cancelled = true; };
+  }, [selectedProjectId, selectedProjectExists]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const onToggleWorktree = () => {
+    const next = !useWorktree;
+    setUseWorktree(next);
+    // Persist the choice as the project default so it sticks next time.
+    if (selectedProjectExists) {
+      api.updateProject(selectedProjectId, { use_worktree_default: next }).catch(() => {});
+    }
+  };
 
   React.useEffect(() => {
     writeComposerDraft('', draftStorageChatId, {
@@ -371,7 +487,8 @@ export default function NewTaskRoute({ projects, agents, skills = [], onNewTask,
 
     try {
       const titleSource = text || attachments[0]?.display_name || 'Attachments';
-      const chat = await api.createChat(projectId, titleSource, agentId);
+      const worktreeOpts = gitInfo?.is_git_repo ? { useWorktree, baseRef } : {};
+      const chat = await api.createChat(projectId, titleSource, agentId, worktreeOpts);
       await api.postMessage(chat.id, text, chat.main_agent_id, attachments);
       clearComposerDraft('', draftStorageChatId);
       onNewTask(chat.id);
@@ -573,6 +690,10 @@ export default function NewTaskRoute({ projects, agents, skills = [], onNewTask,
               onChange={setSelectedAgentId}
             />
 
+            {gitInfo?.is_git_repo && (
+              <WorktreeChip enabled={useWorktree} onToggle={onToggleWorktree} />
+            )}
+
             <div style={{ flex: 1 }} />
             <SendShortcutMenu mode={sendShortcutMode} onChange={setSendShortcutMode} direction="down" />
             <button
@@ -590,6 +711,14 @@ export default function NewTaskRoute({ projects, agents, skills = [], onNewTask,
               {submitting ? 'Starting…' : 'Start →'}
             </button>
           </div>
+          {gitInfo?.is_git_repo && useWorktree && (
+            <WorktreeDetail
+              branchName={'crew/' + (deriveBranchSlug(val) || 'task')}
+              base={baseRef}
+              branches={gitInfo.branches}
+              onChangeBase={setBaseRef}
+            />
+          )}
         </div>
 
         <div style={{ marginTop: 28, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>

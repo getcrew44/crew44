@@ -679,6 +679,7 @@ export default function App() {
         title: c.title || 'Untitled',
         status: chatStatusOverrides[c.id] || c.status || 'active',
         age: relativeTime(c.updated_at),
+        worktree: c.worktree || null,
       })),
     })),
     [projects, projectChats, chatStatusOverrides, nowTick]

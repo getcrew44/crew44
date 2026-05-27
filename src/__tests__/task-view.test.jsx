@@ -1872,7 +1872,7 @@ describe('TaskView', () => {
       fireEvent.click(await screen.findByTestId('files-drawer-toggle'));
       fireEvent.click(await screen.findByText('foo.js'));
 
-      await waitFor(() => expect(api.readProjectFile).toHaveBeenCalledWith('proj-1', 'src/foo.js'));
+      await waitFor(() => expect(api.readProjectFile).toHaveBeenCalledWith('proj-1', 'src/foo.js', 'chat-1'));
       expect(await screen.findByText('const x = 1;')).toBeInTheDocument();
       expect(screen.getByText('const y = 2;')).toBeInTheDocument();
     });

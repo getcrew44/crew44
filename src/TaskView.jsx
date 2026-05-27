@@ -38,6 +38,39 @@ function DeletedTag() {
   );
 }
 
+function BranchGlyph({ size = 11 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" aria-hidden="true" style={{ flexShrink: 0 }}>
+      <circle cx="4" cy="3.5" r="1.4" fill="none" stroke="currentColor" strokeWidth="1.3"/>
+      <circle cx="4" cy="12.5" r="1.4" fill="none" stroke="currentColor" strokeWidth="1.3"/>
+      <circle cx="11.5" cy="7" r="1.4" fill="none" stroke="currentColor" strokeWidth="1.3"/>
+      <path d="M4 5v6" stroke="currentColor" strokeWidth="1.3" fill="none" strokeLinecap="round"/>
+      <path d="M4 8.5c0-2.5 7.5-1 7.5-3.5" stroke="currentColor" strokeWidth="1.3" fill="none" strokeLinecap="round"/>
+    </svg>
+  );
+}
+
+// WorktreeBadge surfaces a chat's isolated git worktree branch and its base
+// ref in the task header. Hidden for chats without a worktree binding.
+function WorktreeBadge({ worktree }) {
+  return (
+    <span
+      data-testid="worktree-badge"
+      title={`Isolated git worktree branched from ${worktree.base_ref || 'HEAD'}`}
+      style={{
+        display: 'inline-flex', alignItems: 'center', gap: 5,
+        padding: '1px 7px', borderRadius: 5,
+        border: '1px solid #E6D6A4', background: '#F8EFC9', color: '#7A6420',
+        fontFamily: MONO_FONT, fontSize: 11.5,
+      }}
+    >
+      <BranchGlyph />
+      {worktree.branch}
+      {worktree.base_ref && <span style={{ color: '#A8945A' }}>· from {worktree.base_ref}</span>}
+    </span>
+  );
+}
+
 function SteerTrendIcon({ size = 11 }) {
   return (
     <svg
@@ -939,6 +972,7 @@ function TaskHeader({ chat, events, fileCount, drawerOpen, onToggleDrawer, onCha
                 <span>{m}</span>
               </React.Fragment>
             ))}
+            {chat.worktree && <WorktreeBadge worktree={chat.worktree} />}
           </div>
         </div>
         {!drawerOpen && onToggleDrawer && (
@@ -1366,7 +1400,7 @@ function DiffLines({ lines, compact }) {
 // files that show up in `gitDiff`, offers a File/Diff toggle so the user can
 // flip between the full content and just the working-tree changes. Falls back
 // to a human-readable message when the file is binary, missing, or unreadable.
-function FileContentView({ projectId, path, diff, onBack }) {
+function FileContentView({ projectId, chatId, path, diff, onBack }) {
   const [content, setContent] = React.useState(null);
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState(null);
@@ -1379,7 +1413,7 @@ function FileContentView({ projectId, path, diff, onBack }) {
     setLoading(true);
     setError(null);
     setContent(null);
-    api.readProjectFile(projectId, path).then(res => {
+    api.readProjectFile(projectId, path, chatId).then(res => {
       if (cancelled) return;
       setContent(res);
       setLoading(false);
@@ -1389,7 +1423,7 @@ function FileContentView({ projectId, path, diff, onBack }) {
       setLoading(false);
     });
     return () => { cancelled = true; };
-  }, [projectId, path]);
+  }, [projectId, path, chatId]);
 
   const codeLines = React.useMemo(() => {
     if (!content?.content) return [];
@@ -1698,7 +1732,7 @@ function FilesDrawer({ chatId, events, agentsMap, project, onClose }) {
     let cancelled = false;
     setGitLoading(true);
     setGitError(null);
-    api.getProjectGitDiff(projectId)
+    api.getProjectGitDiff(projectId, chatId)
       .then(items => {
         if (cancelled) return;
         setGitDiff(items || []);
@@ -1711,7 +1745,7 @@ function FilesDrawer({ chatId, events, agentsMap, project, onClose }) {
       })
       .finally(() => { if (!cancelled) setGitLoading(false); });
     return () => { cancelled = true; };
-  }, [projectId, hasWorkdir]);
+  }, [projectId, hasWorkdir, chatId]);
 
   React.useEffect(() => {
     if (mode !== 'diff') return undefined;
@@ -1726,7 +1760,7 @@ function FilesDrawer({ chatId, events, agentsMap, project, onClose }) {
     let cancelled = false;
     setProjectFilesLoading(true);
     setProjectFilesError(null);
-    api.listProjectFiles(projectId, '', 10000)
+    api.listProjectFiles(projectId, '', 10000, chatId)
       .then(items => {
         if (cancelled) return;
         setProjectFiles(items || []);
@@ -1859,6 +1893,7 @@ function FilesDrawer({ chatId, events, agentsMap, project, onClose }) {
       {selectedPath ? (
         <FileContentView
           projectId={projectId}
+          chatId={chatId}
           path={selectedPath}
           diff={selectedDiff?.diff || null}
           onBack={() => setSelectedPath(null)}
