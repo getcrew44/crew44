@@ -1687,9 +1687,9 @@ function CloseDrawerButton({ onClick }) {
   );
 }
 
-function FilesDrawer({ chatId, events, agentsMap, project, onClose }) {
-  const workdir = project?.workdir || '';
-  const files = React.useMemo(() => collectFiles(events, workdir), [events, workdir]);
+function FilesDrawer({ chatId, chat, events, agentsMap, project, onClose }) {
+  const effectiveWorkdir = chat?.worktree?.workdir || project?.workdir || '';
+  const files = React.useMemo(() => collectFiles(events, effectiveWorkdir), [events, effectiveWorkdir]);
   const filesByPath = React.useMemo(() => {
     const m = new Map();
     for (const f of files) m.set(f.path, f);
@@ -1697,7 +1697,7 @@ function FilesDrawer({ chatId, events, agentsMap, project, onClose }) {
   }, [files]);
   const totalEdits = files.reduce((s, f) => s + f.edits, 0);
   const projectId = project?.id || '';
-  const hasWorkdir = Boolean(project?.workdir);
+  const hasWorkdir = Boolean(effectiveWorkdir);
 
   const [mode, setMode] = React.useState(hasWorkdir ? 'diff' : 'tree');
   const [selectedPath, setSelectedPath] = React.useState(null);
@@ -1975,7 +1975,7 @@ function FilesDrawer({ chatId, events, agentsMap, project, onClose }) {
                 onPick={setSelectedPath}
                 selectedPath={selectedPath}
                 filesByPath={filesByPath}
-                workdir={workdir}
+                workdir={effectiveWorkdir}
                 defaultOpenDepth={fromWorkdir ? 1 : Infinity}
               />
             );
@@ -2965,12 +2965,12 @@ function Composer({ onSend, isStreaming, onCancel, pendingSteers = [], onCancelS
     }
     let cancelled = false;
     const timer = setTimeout(() => {
-      api.listProjectFiles(projectId, activeToken.query, 12)
+      api.listProjectFiles(projectId, activeToken.query, 12, chatId)
         .then(items => { if (!cancelled) setFileMatches(items || []); })
         .catch(() => { if (!cancelled) setFileMatches([]); });
     }, 120);
     return () => { cancelled = true; clearTimeout(timer); };
-  }, [activeToken?.kind, activeToken?.query, projectId, hasWorkdir]);
+  }, [activeToken?.kind, activeToken?.query, projectId, hasWorkdir, chatId]);
 
   const suggestionOptions = React.useMemo(() => {
     if (!activeToken) return [];
@@ -3382,9 +3382,10 @@ export default function TaskView({ chatId, agentsMap, skills = [], projects = []
     if (!pid) return null;
     return (projects || []).find(p => p.id === pid) || null;
   }, [chat?.project_id, projects]);
+  const headerWorkdir = chat?.worktree?.workdir || currentProject?.workdir || '';
   const editedEventFileCount = React.useMemo(
-    () => collectFiles(events, currentProject?.workdir || '').filter(f => f.edits > 0).length,
-    [events, currentProject?.workdir],
+    () => collectFiles(events, headerWorkdir).filter(f => f.edits > 0).length,
+    [events, headerWorkdir],
   );
   const headerToolEventCount = React.useMemo(() => events.filter(e => e.kind === 'tool').length, [events]);
   const [debouncedHeaderToolEventCount, setDebouncedHeaderToolEventCount] = React.useState(headerToolEventCount);
@@ -3392,28 +3393,29 @@ export default function TaskView({ chatId, agentsMap, skills = [], projects = []
     const t = setTimeout(() => setDebouncedHeaderToolEventCount(headerToolEventCount), 600);
     return () => clearTimeout(t);
   }, [headerToolEventCount]);
-  const [workingTreeFileCount, setWorkingTreeFileCount] = React.useState({ projectId: '', count: null });
+  const [workingTreeFileCount, setWorkingTreeFileCount] = React.useState({ projectId: '', chatId: '', count: null });
   const currentProjectId = currentProject?.id || '';
   const hasCurrentWorkdir = Boolean(currentProject?.workdir);
 
   React.useEffect(() => {
     if (!currentProjectId || !hasCurrentWorkdir) {
-      setWorkingTreeFileCount({ projectId: '', count: null });
+      setWorkingTreeFileCount({ projectId: '', chatId: '', count: null });
       return undefined;
     }
     let cancelled = false;
-    api.getProjectGitDiff(currentProjectId)
+    api.getProjectGitDiff(currentProjectId, chatId)
       .then(items => {
-        if (!cancelled) setWorkingTreeFileCount({ projectId: currentProjectId, count: (items || []).length });
+        if (!cancelled) setWorkingTreeFileCount({ projectId: currentProjectId, chatId, count: (items || []).length });
       })
       .catch(() => {
-        if (!cancelled) setWorkingTreeFileCount({ projectId: currentProjectId, count: null });
+        if (!cancelled) setWorkingTreeFileCount({ projectId: currentProjectId, chatId, count: null });
       });
     return () => { cancelled = true; };
-  }, [currentProjectId, hasCurrentWorkdir, debouncedHeaderToolEventCount]);
+  }, [currentProjectId, hasCurrentWorkdir, debouncedHeaderToolEventCount, chatId]);
 
   const fileCount = hasCurrentWorkdir &&
     workingTreeFileCount.projectId === currentProjectId &&
+    workingTreeFileCount.chatId === chatId &&
     workingTreeFileCount.count !== null
     ? workingTreeFileCount.count
     : editedEventFileCount;
@@ -3889,6 +3891,7 @@ export default function TaskView({ chatId, agentsMap, skills = [], projects = []
           }}>
             <FilesDrawer
               chatId={chatId}
+              chat={chat}
               events={events}
               agentsMap={agentsMap}
               project={currentProject}
