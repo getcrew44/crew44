@@ -228,6 +228,42 @@ func TestDeleteProjectRemovesWorktrees(t *testing.T) {
 	}
 }
 
+func TestCreateChatCollidingClientIDDoesNotOverwrite(t *testing.T) {
+	a := newOptimizerTestApp(t)
+	agentID := firstAgentID(t, a)
+	project, err := a.CreateProject("Plain", t.TempDir(), agentID)
+	if err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+
+	const clientID = "0123abcd-4567-89ef-0123-456789abcdef"
+	first, err := a.CreateChat(project.ID, "original title", agentID, boolPtr(false), "", clientID)
+	if err != nil {
+		t.Fatalf("CreateChat first: %v", err)
+	}
+	if first.ID != clientID {
+		t.Fatalf("first chat ID: want %q got %q", clientID, first.ID)
+	}
+
+	// A second create reusing the same client ID must not clobber the first
+	// chat's record (store.SaveChat is an upsert) — it gets a fresh ID instead.
+	second, err := a.CreateChat(project.ID, "overwrite attempt", agentID, boolPtr(false), "", clientID)
+	if err != nil {
+		t.Fatalf("CreateChat second: %v", err)
+	}
+	if second.ID == clientID {
+		t.Fatal("colliding client ID was reused, overwriting the existing chat")
+	}
+
+	preserved, err := a.store.GetChat(clientID)
+	if err != nil {
+		t.Fatalf("original chat missing after collision: %v", err)
+	}
+	if preserved.Title != "original title" {
+		t.Fatalf("original chat title clobbered: got %q", preserved.Title)
+	}
+}
+
 func TestDeleteChatRemovesWorktree(t *testing.T) {
 	a := newOptimizerTestApp(t)
 	agentID := firstAgentID(t, a)

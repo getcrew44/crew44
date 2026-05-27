@@ -1025,7 +1025,14 @@ func (a *App) CreateChat(projectID, title, mainAgentID string, useWorktree *bool
 	}
 	chatID := id.New()
 	if len(chatIDOverride) > 0 && safeChatID(chatIDOverride[0]) {
-		chatID = chatIDOverride[0]
+		// store.SaveChat upserts by ID (and would even move the chat across
+		// projects), so honoring an ID that already belongs to a chat would
+		// silently overwrite that record and orphan any worktree it held.
+		// Only take the client-supplied ID when it's actually free; on a
+		// collision keep the freshly minted one rather than clobber.
+		if _, err := a.store.GetChat(chatIDOverride[0]); err != nil {
+			chatID = chatIDOverride[0]
+		}
 	}
 	var binding *model.WorktreeBinding
 	if want {
