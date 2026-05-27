@@ -8,6 +8,8 @@ vi.mock('../api.js', () => ({
   createChat: vi.fn(),
   postMessage: vi.fn(),
   listProjectFiles: vi.fn(),
+  getGitInfo: vi.fn(),
+  updateProject: vi.fn(),
 }));
 
 const projects = [
@@ -36,6 +38,9 @@ beforeEach(() => {
   api.createChat.mockResolvedValue({ id: 'chat-1', main_agent_id: 'a1' });
   api.postMessage.mockResolvedValue({});
   api.listProjectFiles.mockResolvedValue([]);
+  // Default: workdirs aren't git repos, so worktree controls stay hidden.
+  api.getGitInfo.mockResolvedValue({ is_git_repo: false });
+  api.updateProject.mockResolvedValue({});
 });
 
 describe('NewTaskRoute', () => {
@@ -61,6 +66,29 @@ describe('NewTaskRoute', () => {
     );
 
     expect(screen.getByText('Second Project')).toBeInTheDocument();
+  });
+
+  it('renders project and lead controls as ghost chips', () => {
+    render(
+      <NewTaskRoute
+        projects={projects}
+        agents={agents}
+        onNewTask={() => {}}
+        initialProjectId="p1"
+      />
+    );
+
+    const projectButton = screen.getByRole('button', { name: /Project First Project/i });
+    const leadButton = screen.getByRole('button', { name: /Lead Aria/i });
+
+    expect(projectButton).toHaveStyle({
+      background: 'transparent',
+    });
+    expect(leadButton).toHaveStyle({
+      background: 'transparent',
+    });
+    expect(projectButton.style.border).toBe('1px solid transparent');
+    expect(leadButton.style.border).toBe('1px solid transparent');
   });
 
   it('restores the new-chat text draft for the selected project', () => {
@@ -328,6 +356,122 @@ describe('NewTaskRoute', () => {
     expect(window.localStorage.getItem('crew44-composer-draft:v1:new-chat-project')).toBeNull();
   });
 
+  it('shows worktree controls for a git project and creates with worktree + base ref', async () => {
+    api.getGitInfo.mockResolvedValue({
+      is_git_repo: true,
+      current_branch: 'main',
+      branches: ['main', 'develop'],
+    });
+    render(
+      <NewTaskRoute
+        projects={projects}
+        agents={agents}
+        onNewTask={vi.fn()}
+        initialProjectId="p1"
+      />
+    );
+
+    // Default-off toggle becomes visible once git info resolves.
+    const toggle = await screen.findByTestId('worktree-toggle');
+    expect(toggle).toHaveStyle({
+      background: 'transparent',
+    });
+    expect(toggle.style.border).toBe('1px solid transparent');
+    fireEvent.click(toggle);
+    expect(await screen.findByTestId('worktree-branch')).toBeInTheDocument();
+
+    fireEvent.change(screen.getByTestId('new-task-input'), { target: { value: 'fix the bug' } });
+    fireEvent.click(screen.getByTestId('start-crew-button'));
+
+    await waitFor(() => expect(api.createChat).toHaveBeenCalledWith(
+      'p1', 'fix the bug', 'a1',
+      { useWorktree: true, baseRef: 'main', id: expect.any(String) },
+    ));
+    // Toggling persists the project default.
+    expect(api.updateProject).toHaveBeenCalledWith('p1', { use_worktree_default: true });
+  });
+
+  it('carries the worktree choice across project switches', async () => {
+    api.getGitInfo.mockResolvedValue({
+      is_git_repo: true,
+      current_branch: 'main',
+      branches: ['main'],
+    });
+    render(
+      <NewTaskRoute
+        projects={projects}
+        agents={agents}
+        onNewTask={vi.fn()}
+        initialProjectId="p1"
+      />
+    );
+
+    // Enable the worktree while on the first project.
+    fireEvent.click(await screen.findByTestId('worktree-toggle'));
+
+    // Switch to the second git project — the toggle must persist, not reset.
+    fireEvent.click(screen.getByLabelText('Project First Project'));
+    fireEvent.click(await screen.findByText('Second Project'));
+    await screen.findByTestId('worktree-toggle');
+
+    fireEvent.change(screen.getByTestId('new-task-input'), { target: { value: 'carry over' } });
+    fireEvent.click(screen.getByTestId('start-crew-button'));
+
+    await waitFor(() => expect(api.createChat).toHaveBeenCalledWith(
+      'p2', 'carry over', 'a1',
+      { useWorktree: true, baseRef: 'main', id: expect.any(String) },
+    ));
+  });
+
+  it('reuses the created chat when retrying after a failed postMessage', async () => {
+    api.getGitInfo.mockResolvedValue({
+      is_git_repo: true,
+      current_branch: 'main',
+      branches: ['main'],
+    });
+    api.postMessage
+      .mockRejectedValueOnce(new Error('network blip'))
+      .mockResolvedValueOnce({});
+    const onNewTask = vi.fn();
+    render(
+      <NewTaskRoute
+        projects={projects}
+        agents={agents}
+        onNewTask={onNewTask}
+        initialProjectId="p1"
+      />
+    );
+
+    fireEvent.click(await screen.findByTestId('worktree-toggle'));
+    fireEvent.change(screen.getByTestId('new-task-input'), { target: { value: 'retry me' } });
+
+    // First attempt: createChat succeeds, postMessage fails.
+    fireEvent.click(screen.getByTestId('start-crew-button'));
+    await waitFor(() => expect(api.createChat).toHaveBeenCalledOnce());
+    await screen.findByText('network blip');
+
+    // Retry must NOT create a second chat — a fresh createChat reuses the same
+    // pre-allocated id and collides on the already-provisioned worktree branch.
+    fireEvent.click(screen.getByTestId('start-crew-button'));
+    await waitFor(() => expect(api.postMessage).toHaveBeenCalledTimes(2));
+    expect(api.createChat).toHaveBeenCalledOnce();
+    expect(api.postMessage).toHaveBeenLastCalledWith('chat-1', 'retry me', 'a1', []);
+    expect(onNewTask).toHaveBeenCalledWith('chat-1');
+  });
+
+  it('hides worktree controls for a non-git project', async () => {
+    render(
+      <NewTaskRoute
+        projects={projects}
+        agents={agents}
+        onNewTask={vi.fn()}
+        initialProjectId="p1"
+      />
+    );
+    await waitFor(() => expect(api.getGitInfo).toHaveBeenCalledWith('p1'));
+    expect(screen.queryByTestId('worktree-toggle')).not.toBeInTheDocument();
+  });
+
   it('starts in the selected project after the user picks one', async () => {
     const onNewTask = vi.fn();
     render(
@@ -347,7 +491,7 @@ describe('NewTaskRoute', () => {
     fireEvent.click(screen.getByTestId('start-crew-button'));
 
     await waitFor(() => expect(api.createChat).toHaveBeenCalledOnce());
-    expect(api.createChat).toHaveBeenCalledWith('p2', 'ship this task', 'a1');
+    expect(api.createChat).toHaveBeenCalledWith('p2', 'ship this task', 'a1', {});
     expect(api.postMessage).toHaveBeenCalledWith('chat-1', 'ship this task', 'a1', []);
     expect(onNewTask).toHaveBeenCalledWith('chat-1');
   });
@@ -374,7 +518,7 @@ describe('NewTaskRoute', () => {
 
     fireEvent.keyDown(input, { key: 'Enter' });
 
-    await waitFor(() => expect(api.createChat).toHaveBeenCalledWith('p1', 'start from keyboard', 'a1'));
+    await waitFor(() => expect(api.createChat).toHaveBeenCalledWith('p1', 'start from keyboard', 'a1', {}));
     expect(api.postMessage).toHaveBeenCalledWith('chat-1', 'start from keyboard', 'a1', []);
     expect(onNewTask).toHaveBeenCalledWith('chat-1');
   });
@@ -419,7 +563,7 @@ describe('NewTaskRoute', () => {
     fireEvent.click(screen.getByTestId('start-crew-button'));
 
     await waitFor(() => expect(api.createChat).toHaveBeenCalledOnce());
-    expect(api.createChat).toHaveBeenCalledWith('p1', 'inspect this', 'a1');
+    expect(api.createChat).toHaveBeenCalledWith('p1', 'inspect this', 'a1', {});
     expect(api.postMessage).toHaveBeenCalledWith('chat-1', 'inspect this', 'a1', [
       { display_name: 'proxy.txt', path: '/Users/me/proxy.txt', kind: 'file' },
     ]);
@@ -512,7 +656,7 @@ describe('NewTaskRoute', () => {
     fireEvent.click(screen.getByTestId('start-crew-button'));
 
     await waitFor(() => expect(api.createChat).toHaveBeenCalledOnce());
-    expect(api.createChat).toHaveBeenCalledWith('p1', 'proxy.txt', 'a1');
+    expect(api.createChat).toHaveBeenCalledWith('p1', 'proxy.txt', 'a1', {});
     expect(api.postMessage).toHaveBeenCalledWith('chat-1', '', 'a1', [
       { display_name: 'proxy.txt', path: '/Users/me/proxy.txt', kind: 'file' },
     ]);

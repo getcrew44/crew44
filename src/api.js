@@ -47,18 +47,24 @@ export async function listProjectChats(projectId) {
   return data.items || [];
 }
 
-export async function listProjectFiles(projectId, query, limit = 50) {
-  const data = await rpc.call('projects.files.list', { id: projectId, query: query || '', limit });
+export async function listProjectFiles(projectId, query, limit = 50, chatId = '') {
+  const data = await rpc.call('projects.files.list', { id: projectId, chat_id: chatId || '', query: query || '', limit });
   return data.items || [];
 }
 
-export async function readProjectFile(projectId, path) {
-  return rpc.call('projects.files.read', { id: projectId, path });
+export async function readProjectFile(projectId, path, chatId = '') {
+  return rpc.call('projects.files.read', { id: projectId, chat_id: chatId || '', path });
 }
 
-export async function getProjectGitDiff(projectId) {
-  const data = await rpc.call('projects.git.diff', { id: projectId });
+export async function getProjectGitDiff(projectId, chatId = '') {
+  const data = await rpc.call('projects.git.diff', { id: projectId, chat_id: chatId || '' });
   return data.items || [];
+}
+
+// getGitInfo reports whether a project workdir is a git repo plus the branches
+// available as worktree bases. Powers the New Task worktree controls.
+export async function getGitInfo(projectId) {
+  return rpc.call('projects.git.info', { id: projectId });
 }
 
 export async function listAgents() {
@@ -164,8 +170,12 @@ export async function listChats(projectId = '') {
   return data.items || [];
 }
 
-export async function createChat(projectId, title, mainAgentId) {
-  return rpc.call('chats.create', { project_id: projectId, title, main_agent_id: mainAgentId });
+export async function createChat(projectId, title, mainAgentId, { useWorktree, baseRef, id } = {}) {
+  const params = { project_id: projectId, title, main_agent_id: mainAgentId };
+  if (useWorktree !== undefined) params.use_worktree = useWorktree;
+  if (baseRef) params.base_ref = baseRef;
+  if (id) params.id = id;
+  return rpc.call('chats.create', params);
 }
 
 export async function updateChat(id, data) {

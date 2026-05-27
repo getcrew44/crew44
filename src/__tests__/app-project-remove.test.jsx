@@ -11,6 +11,8 @@ vi.mock('../api.js', () => ({
   listProjectChats: vi.fn(),
   listRemoteDevices: vi.fn(),
   getOnboardingStatus: vi.fn(),
+  getGitInfo: vi.fn(),
+  updateProject: vi.fn(),
   completeOnboarding: vi.fn(),
   deleteProject: vi.fn(),
 }));
@@ -32,6 +34,8 @@ beforeEach(() => {
   api.listRuntimes.mockResolvedValue([{ id: 'runtime-1', name: 'Test Desk' }]);
   api.listProjectChats.mockResolvedValue([]);
   api.listRemoteDevices.mockResolvedValue([]);
+  api.getGitInfo.mockResolvedValue({ is_git_repo: false });
+  api.updateProject.mockResolvedValue({});
   api.getOnboardingStatus.mockResolvedValue({
     last_onboarding_version: '1',
     onboarding_required: false,
@@ -44,7 +48,7 @@ beforeEach(() => {
 });
 
 describe('App project removal', () => {
-  it('deletes and refreshes a project from the sidebar Remove menu item', async () => {
+  it('requires confirmation before deleting a project from the sidebar Remove menu item', async () => {
     render(<App />);
 
     await screen.findByText('first-project');
@@ -55,6 +59,11 @@ describe('App project removal', () => {
 
     fireEvent.click(menuButton);
     fireEvent.click(screen.getByText('Remove'));
+
+    expect(api.deleteProject).not.toHaveBeenCalled();
+    expect(await screen.findByRole('alertdialog')).toHaveTextContent('associated worktrees');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Delete project' }));
 
     await waitFor(() => expect(api.deleteProject).toHaveBeenCalledWith('p1'));
     expect(api.listProjects).toHaveBeenCalledTimes(2);

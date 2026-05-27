@@ -2,6 +2,22 @@
 
 All notable changes to this project are documented here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2026-05-27
+
+### Added
+- Run a task in an isolated git worktree. Toggle "Git worktree" in the New Task composer and the crew works on its own branch (`crew/<id>`, renamed to a slug of your task title) without touching your working tree. Pick the base branch the worktree forks from.
+- Worktree badges across the UI: the task header shows the branch and its base ref, and the sidebar marks worktree-backed chats with a branch glyph.
+- File views, the diff drawer, working-tree file counts, and `@`-file mentions are now scoped to a chat's worktree when it has one, so each task shows its own changes instead of the shared project directory.
+- Confirmation dialog before deleting a project, warning that the project's chats and any associated worktrees may be removed from disk.
+
+### Fixed
+- Worktrees are detached from your source repo when their chat is deleted and when the owning project is deleted (including archived chats), so no stale `git worktree` admin refs or branches linger.
+- Retrying a task after the first message fails to send no longer wedges on an already-provisioned worktree branch — it reuses the chat instead of trying to recreate it.
+- The worktree toggle keeps your choice when you switch between projects and survives chat refreshes.
+
+### Removed
+- Untracked internal planning docs (`docs/`) from the repository.
+
 ## [0.5.8] - 2026-05-25
 
 ### Added

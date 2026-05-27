@@ -22,7 +22,7 @@ func TestReconcileStaleStreamViaGetChat(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	chat, err := a.CreateChat(project.ID, "stuck chat", agentID)
+	chat, err := a.CreateChat(project.ID, "stuck chat", agentID, nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,7 +86,7 @@ func TestReconcileStaleStreamSkipsActiveGoroutine(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	chat, err := a.CreateChat(project.ID, "live chat", agentID)
+	chat, err := a.CreateChat(project.ID, "live chat", agentID, nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -124,7 +124,7 @@ func TestPostMessageRecoversStaleStreamBeforeConflictCheck(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	chat, err := a.CreateChat(project.ID, "stale chat", agentID)
+	chat, err := a.CreateChat(project.ID, "stale chat", agentID, nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -184,7 +184,7 @@ func TestListProjectChatsRecoversStaleStreams(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	chat, err := a.CreateChat(project.ID, "stale chat", agentID)
+	chat, err := a.CreateChat(project.ID, "stale chat", agentID, nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -31,14 +31,13 @@ type GitDiffLine struct {
 }
 
 // GitDiff returns the working-tree diff (staged + unstaged) for a project's
-// workdir. Returns ErrBadRequest when the workdir is missing, or a wrapped
-// error when the workdir is not a git repository.
-func (a *App) GitDiff(projectID string) ([]GitDiffFile, error) {
-	project, err := a.store.GetProject(projectID)
+// workdir, or for a chat's worktree when chatID is set. Returns ErrBadRequest
+// when the workdir is missing, or a wrapped error when it is not a git repo.
+func (a *App) GitDiff(projectID, chatID string) ([]GitDiffFile, error) {
+	root, err := a.resolveWorkdir(projectID, chatID)
 	if err != nil {
-		return nil, a.mapError(err)
+		return nil, err
 	}
-	root := strings.TrimSpace(project.Workdir)
 	if root == "" {
 		return nil, ErrBadRequest
 	}
@@ -118,6 +117,67 @@ func isGitRepo(root string) bool {
 func gitHasHead(root string) bool {
 	_, err := runGit(root, "rev-parse", "--verify", "HEAD")
 	return err == nil
+}
+
+func gitCurrentBranch(root string) string {
+	out, err := runGit(root, "rev-parse", "--abbrev-ref", "HEAD")
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
+func gitToplevel(root string) (string, error) {
+	out, err := runGit(root, "rev-parse", "--show-toplevel")
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+func gitRevParse(root, ref string) (string, error) {
+	out, err := runGit(root, "rev-parse", "--verify", ref+"^{commit}")
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+func gitLocalBranches(root string) []string {
+	out, err := runGit(root, "for-each-ref", "--format=%(refname:short)", "refs/heads")
+	if err != nil {
+		return nil
+	}
+	branches := []string{}
+	for _, line := range strings.Split(string(out), "\n") {
+		if b := strings.TrimSpace(line); b != "" {
+			branches = append(branches, b)
+		}
+	}
+	return branches
+}
+
+func gitBranchExists(root, branch string) bool {
+	_, err := runGit(root, "rev-parse", "--verify", "refs/heads/"+branch)
+	return err == nil
+}
+
+// gitWorktreeAdd creates a new worktree at path checked out to a fresh branch
+// forked from baseRef. repoRoot must be the source repo's toplevel.
+func gitWorktreeAdd(repoRoot, path, branch, baseRef string) error {
+	_, err := runGit(repoRoot, "worktree", "add", "-b", branch, path, baseRef)
+	return err
+}
+
+func gitWorktreeRemove(repoRoot, path string) error {
+	_, err := runGit(repoRoot, "worktree", "remove", "--force", path)
+	return err
+}
+
+// gitRenameBranch renames the branch currently checked out in worktreeRoot.
+func gitRenameBranch(worktreeRoot, newName string) error {
+	_, err := runGit(worktreeRoot, "branch", "-m", newName)
+	return err
 }
 
 func gitPathPrefix(root string) string {
@@ -389,12 +449,11 @@ type ProjectFileContent struct {
 // project-relative; absolute paths and path traversal segments (`..`) are
 // rejected so the daemon can't be tricked into reading arbitrary disk paths.
 // Binary content is detected and refused (Content stays empty).
-func (a *App) ReadProjectFile(projectID, relPath string) (ProjectFileContent, error) {
-	project, err := a.store.GetProject(projectID)
+func (a *App) ReadProjectFile(projectID, chatID, relPath string) (ProjectFileContent, error) {
+	root, err := a.resolveWorkdir(projectID, chatID)
 	if err != nil {
-		return ProjectFileContent{}, a.mapError(err)
+		return ProjectFileContent{}, err
 	}
-	root := strings.TrimSpace(project.Workdir)
 	if root == "" {
 		return ProjectFileContent{}, ErrBadRequest
 	}

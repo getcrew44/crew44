@@ -460,6 +460,21 @@ function SessionItem({ session, active, onPick, onArchive, onRename }) {
             {session.title}
           </span>
         )}
+        {!renaming && session.worktree && (
+          <span
+            data-testid="sidebar-worktree-icon"
+            title={`Worktree · ${session.worktree.branch}`}
+            style={{ display: 'inline-flex', flexShrink: 0, color: '#B69A52' }}
+          >
+            <svg width="11" height="11" viewBox="0 0 16 16" aria-hidden="true">
+              <circle cx="4" cy="3.5" r="1.4" fill="none" stroke="currentColor" strokeWidth="1.3"/>
+              <circle cx="4" cy="12.5" r="1.4" fill="none" stroke="currentColor" strokeWidth="1.3"/>
+              <circle cx="11.5" cy="7" r="1.4" fill="none" stroke="currentColor" strokeWidth="1.3"/>
+              <path d="M4 5v6" stroke="currentColor" strokeWidth="1.3" fill="none" strokeLinecap="round"/>
+              <path d="M4 8.5c0-2.5 7.5-1 7.5-3.5" stroke="currentColor" strokeWidth="1.3" fill="none" strokeLinecap="round"/>
+            </svg>
+          </span>
+        )}
         {renaming ? null : isRunning ? (
           <SessionProgress title={session.title} />
         ) : confirming ? (

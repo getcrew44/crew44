@@ -72,6 +72,7 @@ beforeEach(() => {
       isDirectory: false,
     }))),
     readFileDataURL: vi.fn().mockResolvedValue('data:image/png;base64,input-image'),
+    revealInFinder: vi.fn(),
   };
   generateImageThumbnail.mockResolvedValue('thumb-base64');
   api.getChat.mockResolvedValue(chat);
@@ -828,6 +829,26 @@ describe('TaskView', () => {
     // composer's Stop button and the elapsed-time tick, not a header label.
     expect(screen.queryByText('active')).not.toBeInTheDocument();
     expect(screen.queryByText('running')).not.toBeInTheDocument();
+  });
+
+  it('places the worktree badge immediately after the short chat id', async () => {
+    api.getChat.mockResolvedValue({
+      ...chat,
+      worktree: {
+        branch: 'crew/hello-i-m-doing',
+        base_ref: 'feat/0526',
+        workdir: '/Users/me/project/.worktrees/crew/hello-i-m-doing',
+      },
+    });
+
+    render(<TaskView chatId="chat-1" agentsMap={agentsMap} />);
+
+    const shortId = await screen.findByText('chat-1');
+    const badge = screen.getByTestId('worktree-badge');
+    const opened = screen.getByText(/opened /);
+
+    expect(shortId.compareDocumentPosition(badge) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(badge.compareDocumentPosition(opened) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it('does not render a Share button in the header', async () => {
@@ -1691,7 +1712,7 @@ describe('TaskView', () => {
       fireEvent.click(fileOption);
 
       expect(input).toHaveValue('@src/main.go ');
-      expect(api.listProjectFiles).toHaveBeenCalledWith('proj-1', 'src', expect.any(Number));
+      expect(api.listProjectFiles).toHaveBeenCalledWith('proj-1', 'src', expect.any(Number), 'chat-1');
     });
 
     it('highlights both agent mentions and skill commands in the composer', async () => {
@@ -1780,7 +1801,7 @@ describe('TaskView', () => {
 
       const toggle = await screen.findByTestId('files-drawer-toggle');
       await waitFor(() => expect(toggle).toHaveTextContent('5'));
-      expect(api.getProjectGitDiff).toHaveBeenCalledWith('proj-1');
+      expect(api.getProjectGitDiff).toHaveBeenCalledWith('proj-1', 'chat-1');
     });
 
     it('coalesces working-tree badge refreshes during bursts of tool events', async () => {
@@ -1793,7 +1814,7 @@ describe('TaskView', () => {
 
       render(<TaskView chatId="chat-1" agentsMap={agentsMap} projects={projects} />);
       await waitFor(() => expect(stream.onEvent).toBeDefined());
-      await waitFor(() => expect(api.getProjectGitDiff).toHaveBeenCalledWith('proj-1'));
+      await waitFor(() => expect(api.getProjectGitDiff).toHaveBeenCalledWith('proj-1', 'chat-1'));
       api.getProjectGitDiff.mockClear();
 
       await act(async () => {
@@ -1872,7 +1893,7 @@ describe('TaskView', () => {
       fireEvent.click(await screen.findByTestId('files-drawer-toggle'));
       fireEvent.click(await screen.findByText('foo.js'));
 
-      await waitFor(() => expect(api.readProjectFile).toHaveBeenCalledWith('proj-1', 'src/foo.js'));
+      await waitFor(() => expect(api.readProjectFile).toHaveBeenCalledWith('proj-1', 'src/foo.js', 'chat-1'));
       expect(await screen.findByText('const x = 1;')).toBeInTheDocument();
       expect(screen.getByText('const y = 2;')).toBeInTheDocument();
     });
@@ -1932,12 +1953,12 @@ describe('TaskView', () => {
 
       const { rerender } = render(<TaskView chatId="chat-1" agentsMap={agentsMap} projects={projects} />);
       fireEvent.click(await screen.findByTestId('files-drawer-toggle'));
-      await waitFor(() => expect(api.getProjectGitDiff).toHaveBeenCalledWith('proj-1'));
+      await waitFor(() => expect(api.getProjectGitDiff).toHaveBeenCalledWith('proj-1', 'chat-1'));
       expect(await screen.findByText('old-project.js')).toBeInTheDocument();
 
       rerender(<TaskView chatId="chat-2" agentsMap={agentsMap} projects={projects} />);
       fireEvent.click(await screen.findByTestId('files-drawer-toggle'));
-      await waitFor(() => expect(api.getProjectGitDiff).toHaveBeenCalledWith('proj-2'));
+      await waitFor(() => expect(api.getProjectGitDiff).toHaveBeenCalledWith('proj-2', 'chat-2'));
 
       expect(screen.queryByText('old-project.js')).not.toBeInTheDocument();
       resolveProj2Diff([]);
@@ -1971,6 +1992,36 @@ describe('TaskView', () => {
       // Diff view is the default when a diff payload is present.
       expect(await screen.findByText('const y = 2;')).toBeInTheDocument();
       expect(screen.getByText('const y = 22;')).toBeInTheDocument();
+    });
+
+    it('uses the chat worktree workdir for drawer reveal paths', async () => {
+      api.getChat.mockResolvedValue({
+        ...chat,
+        project_id: 'proj-1',
+        worktree: {
+          branch: 'crew/refactor',
+          base_ref: 'main',
+          workdir: '/tmp/worktree/pkg',
+          path: '/tmp/worktree',
+        },
+      });
+      api.listProjectFiles.mockResolvedValue([
+        { path: 'src/foo.js', is_dir: false },
+      ]);
+      const projects = [{ id: 'proj-1', name: 'demo', workdir: '/tmp/source/pkg' }];
+
+      const { container } = render(<TaskView chatId="chat-1" agentsMap={agentsMap} projects={projects} />);
+
+      fireEvent.click(await screen.findByTestId('files-drawer-toggle'));
+      fireEvent.click(screen.getByTestId('files-drawer-mode-tree'));
+      const file = await screen.findByText('foo.js');
+      const row = file.closest('div');
+      fireEvent.mouseEnter(row);
+
+      const buttons = Array.from(container.querySelectorAll('button'));
+      fireEvent.click(buttons[buttons.length - 1]);
+
+      expect(window.electronAPI.revealInFinder).toHaveBeenCalledWith('/tmp/worktree/pkg/src/foo.js');
     });
 
     it('disables the diff toggle and defaults to tree when the project has no workdir', async () => {

@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log"
 	"os"
 	"path/filepath"
@@ -780,7 +781,10 @@ func (a *App) CreateProject(name, workdir, mainAgentID string) (model.ProjectRec
 	return project, nil
 }
 
-func (a *App) UpdateProject(project model.ProjectRecord) (model.ProjectRecord, error) {
+// UpdateProject applies a partial update. useWorktreeDefault is a tri-state
+// pointer so the toggle can be set to false (a bare bool would be
+// indistinguishable from "omitted").
+func (a *App) UpdateProject(project model.ProjectRecord, useWorktreeDefault *bool) (model.ProjectRecord, error) {
 	current, err := a.store.GetProject(project.ID)
 	if err != nil {
 		return model.ProjectRecord{}, a.mapError(err)
@@ -797,6 +801,9 @@ func (a *App) UpdateProject(project model.ProjectRecord) (model.ProjectRecord, e
 		}
 		current.MainAgentID = project.MainAgentID
 	}
+	if useWorktreeDefault != nil {
+		current.UseWorktreeDefault = *useWorktreeDefault
+	}
 	current.UpdatedAt = time.Now().UTC()
 	if err := a.store.SaveProject(current); err != nil {
 		return model.ProjectRecord{}, err
@@ -805,7 +812,62 @@ func (a *App) UpdateProject(project model.ProjectRecord) (model.ProjectRecord, e
 }
 
 func (a *App) DeleteProject(id string) error {
+	if project, err := a.store.GetProject(id); err == nil {
+		a.removeProjectWorktrees(project)
+	}
 	return a.mapError(a.store.DeleteProject(id))
+}
+
+// removeProjectWorktrees detaches every chat worktree from the source repo so
+// no stale admin refs linger after the project's state dir is deleted.
+// Best-effort: failures don't block project deletion.
+func (a *App) removeProjectWorktrees(project model.ProjectRecord) {
+	root := strings.TrimSpace(project.Workdir)
+	if root == "" || !isGitRepo(root) {
+		return
+	}
+	top, err := gitToplevel(root)
+	if err != nil {
+		return
+	}
+	// ListProjectChats (not ListChats) so archived chats are included —
+	// otherwise their worktrees keep stale admin refs in the source repo
+	// after the project state dir is gone.
+	chats, err := a.store.ListProjectChats(project.ID)
+	if err != nil {
+		return
+	}
+	for _, chat := range chats {
+		if chat.Worktree != nil {
+			_ = gitWorktreeRemove(top, chat.Worktree.Path)
+		}
+	}
+}
+
+// GitInfo reports a project workdir's git state for the New Task composer:
+// whether it's a repo, its current branch, HEAD sha, and the local branches
+// available as worktree bases.
+type GitInfo struct {
+	IsGitRepo     bool     `json:"is_git_repo"`
+	CurrentBranch string   `json:"current_branch,omitempty"`
+	HeadSHA       string   `json:"head_sha,omitempty"`
+	Branches      []string `json:"branches,omitempty"`
+}
+
+func (a *App) GitInfo(projectID string) (GitInfo, error) {
+	project, err := a.store.GetProject(projectID)
+	if err != nil {
+		return GitInfo{}, a.mapError(err)
+	}
+	root := strings.TrimSpace(project.Workdir)
+	if root == "" || !isGitRepo(root) {
+		return GitInfo{IsGitRepo: false}, nil
+	}
+	info := GitInfo{IsGitRepo: true, CurrentBranch: gitCurrentBranch(root), Branches: gitLocalBranches(root)}
+	if sha, err := gitRevParse(root, "HEAD"); err == nil {
+		info.HeadSHA = sha
+	}
+	return info, nil
 }
 
 // ProjectFile is a relative entry inside a project's workdir.
@@ -840,12 +902,11 @@ var projectFileSkipDirs = map[string]bool{
 // whose relative path contains query (case-insensitive). Symlinks are not
 // followed. Hidden top-level entries (other than common dotfile configs) are
 // skipped to keep the suggestion list focused on user-relevant content.
-func (a *App) ListProjectFiles(projectID, query string, limit int) ([]ProjectFile, error) {
-	project, err := a.store.GetProject(projectID)
+func (a *App) ListProjectFiles(projectID, chatID, query string, limit int) ([]ProjectFile, error) {
+	root, err := a.resolveWorkdir(projectID, chatID)
 	if err != nil {
-		return nil, a.mapError(err)
+		return nil, err
 	}
-	root := strings.TrimSpace(project.Workdir)
 	if root == "" {
 		return nil, ErrBadRequest
 	}
@@ -907,7 +968,45 @@ func (a *App) ListProjectChats(projectID string) ([]model.ChatRecord, error) {
 	return a.reconcileStaleStreams(records), nil
 }
 
-func (a *App) CreateChat(projectID, title, mainAgentID string) (model.ChatRecord, error) {
+// chatWorkdir is the cwd for a chat: its worktree when bound, else the
+// project workdir. Single source of truth for every project-scoped operation.
+func chatWorkdir(chat model.ChatRecord, project model.ProjectRecord) string {
+	if chat.Worktree != nil && strings.TrimSpace(chat.Worktree.Workdir) != "" {
+		return chat.Worktree.Workdir
+	}
+	return project.Workdir
+}
+
+// resolveWorkdir returns the workdir for a project operation, honoring a chat's
+// worktree binding when chatID is set. The chat must belong to the project.
+func (a *App) resolveWorkdir(projectID, chatID string) (string, error) {
+	project, err := a.store.GetProject(projectID)
+	if err != nil {
+		return "", a.mapError(err)
+	}
+	if strings.TrimSpace(chatID) == "" {
+		return strings.TrimSpace(project.Workdir), nil
+	}
+	chat, err := a.store.GetChat(chatID)
+	if err != nil {
+		return "", a.mapError(err)
+	}
+	if chat.ProjectID != projectID {
+		return "", ErrBadRequest
+	}
+	return strings.TrimSpace(chatWorkdir(chat, project)), nil
+}
+
+// CreateChat creates a chat under a project. useWorktree is tri-state: nil
+// falls back to the project default, otherwise it's an explicit request. When
+// a worktree is wanted but the workdir isn't a git repo, an explicit request
+// is rejected while a default-derived one silently falls back to no worktree.
+//
+// chatIDOverride lets a caller pre-allocate the chat's ID — the new-task UI
+// supplies one so it can preview the exact worktree branch (crew/<id8>) before
+// the chat exists. Ignored unless it is a single, syntactically safe value;
+// otherwise a fresh ID is minted.
+func (a *App) CreateChat(projectID, title, mainAgentID string, useWorktree *bool, baseRef string, chatIDOverride ...string) (model.ChatRecord, error) {
 	project, err := a.store.GetProject(projectID)
 	if err != nil {
 		return model.ChatRecord{}, a.mapError(err)
@@ -919,15 +1018,45 @@ func (a *App) CreateChat(projectID, title, mainAgentID string) (model.ChatRecord
 		return model.ChatRecord{}, err
 	}
 
+	want := project.UseWorktreeDefault
+	explicit := useWorktree != nil
+	if explicit {
+		want = *useWorktree
+	}
+	chatID := id.New()
+	if len(chatIDOverride) > 0 && safeChatID(chatIDOverride[0]) {
+		// store.SaveChat upserts by ID (and would even move the chat across
+		// projects), so honoring an ID that already belongs to a chat would
+		// silently overwrite that record and orphan any worktree it held.
+		// Only take the client-supplied ID when it's actually free; on a
+		// collision keep the freshly minted one rather than clobber.
+		if _, err := a.store.GetChat(chatIDOverride[0]); err != nil {
+			chatID = chatIDOverride[0]
+		}
+	}
+	var binding *model.WorktreeBinding
+	if want {
+		if !isGitRepo(strings.TrimSpace(project.Workdir)) {
+			if explicit {
+				return model.ChatRecord{}, fmt.Errorf("not a git repository: %w", ErrBadRequest)
+			}
+			// Project default points at a workdir that is no longer a git
+			// repo; quietly create the chat without a worktree.
+		} else if binding, err = a.provisionWorktree(project, chatID, baseRef); err != nil {
+			return model.ChatRecord{}, err
+		}
+	}
+
 	now := time.Now().UTC()
 	record := model.ChatRecord{
-		ID:                  id.New(),
+		ID:                  chatID,
 		ProjectID:           project.ID,
 		Title:               model.NormalizeChatTitle(title),
 		MainAgentID:         mainAgentID,
 		CurrentAgentID:      mainAgentID,
 		ParticipantAgentIDs: []string{mainAgentID},
 		Status:              "active",
+		Worktree:            binding,
 		Stream: model.ChatStreamState{
 			Status: "idle",
 		},
@@ -935,9 +1064,78 @@ func (a *App) CreateChat(projectID, title, mainAgentID string) (model.ChatRecord
 		UpdatedAt: now,
 	}
 	if err := a.store.SaveChat(record); err != nil {
+		// Don't leak a worktree for a chat that was never persisted.
+		if binding != nil {
+			if top, e := gitToplevel(project.Workdir); e == nil {
+				_ = gitWorktreeRemove(top, binding.Path)
+			}
+		}
 		return model.ChatRecord{}, err
 	}
 	return record, nil
+}
+
+func shortID(s string) string {
+	if len(s) > 8 {
+		return s[:8]
+	}
+	return s
+}
+
+// safeChatID reports whether s is acceptable as a client-supplied chat ID. The
+// ID becomes a filesystem path component (chat-<id>) and a git branch suffix,
+// so we restrict it to the shape of a minted UUID: hex digits and hyphens, no
+// separators or traversal sequences.
+func safeChatID(s string) bool {
+	if len(s) < 8 || len(s) > 64 {
+		return false
+	}
+	for _, r := range s {
+		switch {
+		case r >= '0' && r <= '9', r >= 'a' && r <= 'f', r == '-':
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+// provisionWorktree creates an isolated git worktree for a chat, forked from
+// baseRef (defaulting to the project repo's current branch). The branch is the
+// placeholder crew/<chatID8>, renamed later once the chat earns a title.
+func (a *App) provisionWorktree(project model.ProjectRecord, chatID, baseRef string) (*model.WorktreeBinding, error) {
+	root := strings.TrimSpace(project.Workdir)
+	if strings.TrimSpace(baseRef) == "" {
+		baseRef = gitCurrentBranch(root)
+	}
+	baseSHA, err := gitRevParse(root, baseRef)
+	if err != nil {
+		return nil, fmt.Errorf("base ref %q not found: %w", baseRef, ErrBadRequest)
+	}
+	toplevel, err := gitToplevel(root)
+	if err != nil {
+		return nil, err
+	}
+	path := a.store.ChatWorktreePath(project.ID, chatID)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return nil, err
+	}
+	branch := "crew/" + shortID(chatID)
+	if err := gitWorktreeAdd(toplevel, path, branch, baseRef); err != nil {
+		return nil, err
+	}
+	workdir := path
+	if prefix := gitPathPrefix(root); prefix != "" {
+		workdir = filepath.Join(path, filepath.FromSlash(prefix))
+	}
+	return &model.WorktreeBinding{
+		Path:      path,
+		Workdir:   workdir,
+		Branch:    branch,
+		BaseRef:   baseRef,
+		BaseSHA:   baseSHA,
+		CreatedAt: time.Now().UTC(),
+	}, nil
 }
 
 func (a *App) ListChats(projectID string) ([]model.ChatRecord, error) {
@@ -982,6 +1180,7 @@ func (a *App) UpdateChat(chat model.ChatRecord) (model.ChatRecord, error) {
 		// Any title that lands here came from a user-driven rename
 		// (RPC chats.update). Lock it against the auto-summarizer.
 		current.TitleSetByUser = true
+		applyWorktreeRename(&current)
 	}
 	if chat.Status != "" {
 		current.Status = chat.Status
@@ -1014,6 +1213,7 @@ func (a *App) applyAutoChatTitle(chatID, title string) (model.ChatRecord, bool, 
 		return current, false, nil
 	}
 	current.Title = title
+	applyWorktreeRename(&current)
 	current.UpdatedAt = time.Now().UTC()
 	if err := a.store.SaveChat(current); err != nil {
 		return model.ChatRecord{}, false, err
@@ -1027,7 +1227,64 @@ func (a *App) applyAutoChatTitle(chatID, title string) (model.ChatRecord, bool, 
 	return current, true, nil
 }
 
+// applyWorktreeRename renames a chat's placeholder worktree branch
+// (crew/<chatID8>) to a slug derived from its title, exactly once. No-op for
+// chats without a worktree, already-renamed branches, or empty slugs. Mutates
+// the binding in place so the caller persists it in the same save.
+func applyWorktreeRename(chat *model.ChatRecord) {
+	wt := chat.Worktree
+	if wt == nil {
+		return
+	}
+	short := shortID(chat.ID)
+	if wt.Branch != "crew/"+short {
+		return // already renamed
+	}
+	slug := branchSlug(chat.Title)
+	if slug == "" {
+		return
+	}
+	target := "crew/" + slug
+	if gitBranchExists(wt.Path, target) {
+		target += "-" + short
+	}
+	if err := gitRenameBranch(wt.Path, target); err != nil {
+		return // keep the placeholder; not worth failing the title update
+	}
+	wt.Branch = target
+}
+
+// branchSlug derives a git-safe slug from a chat title: the first line,
+// lowercased, alphanumerics only, up to four words joined by hyphens.
+func branchSlug(title string) string {
+	line := strings.SplitN(strings.TrimSpace(title), "\n", 2)[0]
+	var b strings.Builder
+	for _, r := range strings.ToLower(line) {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
+			b.WriteRune(r)
+		default:
+			b.WriteByte(' ')
+		}
+	}
+	words := strings.Fields(b.String())
+	if len(words) > 4 {
+		words = words[:4]
+	}
+	return strings.Join(words, "-")
+}
+
 func (a *App) DeleteChat(id string) error {
+	// Detach the chat's worktree before dropping its record, otherwise the
+	// source repo keeps a stale linked checkout and branch with nothing left
+	// in Crew44 to clean them up. Best-effort: don't block the delete on it.
+	if chat, err := a.store.GetChat(id); err == nil && chat.Worktree != nil {
+		if project, perr := a.store.GetProject(chat.ProjectID); perr == nil {
+			if top, terr := gitToplevel(strings.TrimSpace(project.Workdir)); terr == nil {
+				_ = gitWorktreeRemove(top, chat.Worktree.Path)
+			}
+		}
+	}
 	return a.mapError(a.store.DeleteChat(id))
 }
 

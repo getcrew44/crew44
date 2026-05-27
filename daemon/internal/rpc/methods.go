@@ -53,6 +53,7 @@ func (s *Server) registerMethods() {
 		"projects.files.list":              s.projectsFilesList,
 		"projects.files.read":              s.projectsFilesRead,
 		"projects.git.diff":                s.projectsGitDiff,
+		"projects.git.info":                s.projectsGitInfo,
 		"chats.create":                     s.chatsCreate,
 		"chats.list":                       s.chatsList,
 		"chats.get":                        s.chatsGet,
@@ -407,11 +408,23 @@ func (s *Server) projectsGet(_ context.Context, _ Peer, params json.RawMessage) 
 }
 
 func (s *Server) projectsUpdate(_ context.Context, _ Peer, params json.RawMessage) (any, error) {
-	var body model.ProjectRecord
+	var body struct {
+		ID          string `json:"id"`
+		Name        string `json:"name"`
+		Workdir     string `json:"workdir"`
+		MainAgentID string `json:"main_agent_id"`
+		// Pointer so an explicit false is distinguishable from "omitted".
+		UseWorktreeDefault *bool `json:"use_worktree_default"`
+	}
 	if err := decodeParams(params, &body); err != nil {
 		return nil, err
 	}
-	return s.app.UpdateProject(body)
+	return s.app.UpdateProject(model.ProjectRecord{
+		ID:          body.ID,
+		Name:        body.Name,
+		Workdir:     body.Workdir,
+		MainAgentID: body.MainAgentID,
+	}, body.UseWorktreeDefault)
 }
 
 func (s *Server) projectsDelete(_ context.Context, _ Peer, params json.RawMessage) (any, error) {
@@ -429,14 +442,15 @@ func (s *Server) projectsDelete(_ context.Context, _ Peer, params json.RawMessag
 
 func (s *Server) projectsFilesList(_ context.Context, _ Peer, params json.RawMessage) (any, error) {
 	var body struct {
-		ID    string `json:"id"`
-		Query string `json:"query"`
-		Limit int    `json:"limit"`
+		ID     string `json:"id"`
+		ChatID string `json:"chat_id"`
+		Query  string `json:"query"`
+		Limit  int    `json:"limit"`
 	}
 	if err := decodeParams(params, &body); err != nil {
 		return nil, err
 	}
-	items, err := s.app.ListProjectFiles(body.ID, body.Query, body.Limit)
+	items, err := s.app.ListProjectFiles(body.ID, body.ChatID, body.Query, body.Limit)
 	if err != nil {
 		return nil, err
 	}
@@ -445,27 +459,39 @@ func (s *Server) projectsFilesList(_ context.Context, _ Peer, params json.RawMes
 
 func (s *Server) projectsFilesRead(_ context.Context, _ Peer, params json.RawMessage) (any, error) {
 	var body struct {
-		ID   string `json:"id"`
-		Path string `json:"path"`
+		ID     string `json:"id"`
+		ChatID string `json:"chat_id"`
+		Path   string `json:"path"`
 	}
 	if err := decodeParams(params, &body); err != nil {
 		return nil, err
 	}
-	return s.app.ReadProjectFile(body.ID, body.Path)
+	return s.app.ReadProjectFile(body.ID, body.ChatID, body.Path)
 }
 
 func (s *Server) projectsGitDiff(_ context.Context, _ Peer, params json.RawMessage) (any, error) {
+	var body struct {
+		ID     string `json:"id"`
+		ChatID string `json:"chat_id"`
+	}
+	if err := decodeParams(params, &body); err != nil {
+		return nil, err
+	}
+	items, err := s.app.GitDiff(body.ID, body.ChatID)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{"items": items}, nil
+}
+
+func (s *Server) projectsGitInfo(_ context.Context, _ Peer, params json.RawMessage) (any, error) {
 	var body struct {
 		ID string `json:"id"`
 	}
 	if err := decodeParams(params, &body); err != nil {
 		return nil, err
 	}
-	items, err := s.app.GitDiff(body.ID)
-	if err != nil {
-		return nil, err
-	}
-	return map[string]any{"items": items}, nil
+	return s.app.GitInfo(body.ID)
 }
 
 func (s *Server) projectsChatsList(_ context.Context, _ Peer, params json.RawMessage) (any, error) {
@@ -506,11 +532,17 @@ func (s *Server) chatsCreate(_ context.Context, _ Peer, params json.RawMessage) 
 		ProjectID   string `json:"project_id"`
 		Title       string `json:"title"`
 		MainAgentID string `json:"main_agent_id"`
+		// Pointer so an absent flag falls back to the project default.
+		UseWorktree *bool `json:"use_worktree"`
+		BaseRef     string `json:"base_ref"`
+		// Optional client-allocated ID so the new-task UI can preview the
+		// exact worktree branch; validated server-side before use.
+		ID string `json:"id"`
 	}
 	if err := decodeParams(params, &body); err != nil {
 		return nil, err
 	}
-	return s.app.CreateChat(body.ProjectID, body.Title, body.MainAgentID)
+	return s.app.CreateChat(body.ProjectID, body.Title, body.MainAgentID, body.UseWorktree, body.BaseRef, body.ID)
 }
 
 func (s *Server) chatsList(_ context.Context, _ Peer, params json.RawMessage) (any, error) {

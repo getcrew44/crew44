@@ -318,7 +318,7 @@ func (a *App) runChat(ctx context.Context, controller *chatRunController, chatID
 			Agent:           runtimeAgent,
 			AgentSkills:     agentSkills,
 			Prompt:          currentPrompt,
-			WorkDir:         project.Workdir,
+			WorkDir:         chatWorkdir(chat, project),
 			RuntimeEnvDir:   a.store.RuntimeEnvDir(currentAgentID),
 			ResumeSessionID: resumeSessionID,
 			// Only the main interactive turn gets the headless browser. Utility

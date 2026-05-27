@@ -113,7 +113,7 @@ func TestGitDiffReportsWorkingTreeChanges(t *testing.T) {
 		t.Fatalf("create project: %v", err)
 	}
 
-	files, err := a.GitDiff(project.ID)
+	files, err := a.GitDiff(project.ID, "")
 	if err != nil {
 		t.Fatalf("GitDiff: %v", err)
 	}
@@ -169,7 +169,7 @@ func TestGitDiffReportsTrackedStatuses(t *testing.T) {
 		t.Fatalf("create project: %v", err)
 	}
 
-	files, err := a.GitDiff(project.ID)
+	files, err := a.GitDiff(project.ID, "")
 	if err != nil {
 		t.Fatalf("GitDiff: %v", err)
 	}
@@ -209,7 +209,7 @@ func TestGitDiffWorksInEmptyRepo(t *testing.T) {
 		t.Fatalf("create project: %v", err)
 	}
 
-	files, err := a.GitDiff(project.ID)
+	files, err := a.GitDiff(project.ID, "")
 	if err != nil {
 		t.Fatalf("GitDiff: %v", err)
 	}
@@ -243,7 +243,7 @@ func TestGitDiffWorksFromRepoSubdirectory(t *testing.T) {
 		t.Fatalf("create project: %v", err)
 	}
 
-	files, err := a.GitDiff(project.ID)
+	files, err := a.GitDiff(project.ID, "")
 	if err != nil {
 		t.Fatalf("GitDiff: %v", err)
 	}
@@ -277,7 +277,7 @@ func TestGitDiffErrorsWhenNotARepo(t *testing.T) {
 		t.Fatalf("create project: %v", err)
 	}
 
-	if _, err := a.GitDiff(project.ID); err == nil {
+	if _, err := a.GitDiff(project.ID, ""); err == nil {
 		t.Fatalf("expected error for non-git project")
 	}
 }
@@ -294,7 +294,7 @@ func TestReadProjectFileReturnsContent(t *testing.T) {
 		t.Fatalf("create project: %v", err)
 	}
 
-	res, err := a.ReadProjectFile(project.ID, "src/hello.txt")
+	res, err := a.ReadProjectFile(project.ID, "", "src/hello.txt")
 	if err != nil {
 		t.Fatalf("ReadProjectFile: %v", err)
 	}
@@ -319,7 +319,7 @@ func TestReadProjectFileRejectsTraversal(t *testing.T) {
 	}
 
 	for _, bad := range []string{"../etc/passwd", "/etc/passwd", "src/../../etc/passwd"} {
-		if _, err := a.ReadProjectFile(project.ID, bad); err == nil {
+		if _, err := a.ReadProjectFile(project.ID, "", bad); err == nil {
 			t.Fatalf("expected error reading %q, got nil", bad)
 		}
 	}
@@ -341,7 +341,7 @@ func TestReadProjectFileRejectsSymlinkEscape(t *testing.T) {
 		t.Fatalf("create project: %v", err)
 	}
 
-	if _, err := a.ReadProjectFile(project.ID, "link.txt"); err == nil {
+	if _, err := a.ReadProjectFile(project.ID, "", "link.txt"); err == nil {
 		t.Fatalf("expected error reading symlink that points outside workdir")
 	}
 }
@@ -359,7 +359,7 @@ func TestReadProjectFileTruncatesLargeFile(t *testing.T) {
 		t.Fatalf("create project: %v", err)
 	}
 
-	res, err := a.ReadProjectFile(project.ID, "big.txt")
+	res, err := a.ReadProjectFile(project.ID, "", "big.txt")
 	if err != nil {
 		t.Fatalf("ReadProjectFile: %v", err)
 	}

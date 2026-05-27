@@ -67,6 +67,7 @@ The same skills folder runs across every provider, so you're never locked in. Ha
 | Skill     | A file-based capability (`SKILL.md` + assets) injected into the runtime session when its agent runs.    |
 | Project   | A working directory plus the chats that belong to it. Stored under `Documents/Crew44/` or a folder you pick. |
 | Chat      | A turn-by-turn thread. One in-flight response at a time; events are an append-only `events.jsonl`.      |
+| Worktree  | An optional isolated git checkout for a chat. Toggle it on a new task and the crew works on its own `crew/…` branch without touching your working tree. |
 | Handover  | A marker an agent emits to pass the turn to a teammate, with a one-line brief.                          |
 
 The default crew ships with a **Partner**, an **Engineer**, a **Product Lead**, and a **Designer** — each owning a role, a model, and its own skills folder.

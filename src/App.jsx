@@ -122,6 +122,65 @@ function FolderAccessWarningDialog({ folderName, onCancel, onConfirm }) {
   );
 }
 
+function ProjectDeleteConfirmDialog({ project, chatCount = 0, onCancel, onConfirm }) {
+  const [submitting, setSubmitting] = React.useState(false);
+  const handleConfirm = async () => {
+    if (submitting) return;
+    setSubmitting(true);
+    try {
+      await onConfirm();
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, zIndex: 9999,
+      background: 'rgba(28,26,23,0.28)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      padding: 24,
+    }}>
+      <div role="alertdialog" aria-modal="true" aria-labelledby="project-delete-title" style={{
+        width: 'min(520px, 100%)',
+        background: '#FCFBF7',
+        border: '1px solid #E6DFCC',
+        borderRadius: 10,
+        boxShadow: '0 20px 60px rgba(28,26,23,0.22)',
+        padding: 22,
+      }}>
+        <div id="project-delete-title" style={{ fontSize: 17, fontWeight: 650, color: '#1C1A17', marginBottom: 8 }}>
+          Delete “{project?.name || 'project'}”?
+        </div>
+        <div style={{ fontSize: 13.5, lineHeight: 1.55, color: '#5C544B', marginBottom: 18 }}>
+          This removes the project from Crew44, including {chatCount === 1 ? '1 chat' : `${chatCount} chats`}. Any associated worktrees may also be removed from disk.
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+          <button onClick={onCancel} disabled={submitting} style={{
+            border: '1px solid #D8CFB8',
+            background: '#FCFBF7',
+            color: '#5C544B',
+            borderRadius: 6,
+            padding: '8px 14px',
+            fontSize: 13,
+            cursor: submitting ? 'default' : 'pointer',
+          }}>Cancel</button>
+          <button autoFocus onClick={handleConfirm} disabled={submitting} style={{
+            border: '1px solid #B0413E',
+            background: '#B0413E',
+            color: '#FCFBF7',
+            borderRadius: 6,
+            padding: '8px 14px',
+            fontSize: 13,
+            fontWeight: 500,
+            cursor: submitting ? 'default' : 'pointer',
+          }}>{submitting ? 'Deleting…' : 'Delete project'}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function BrowserFolderDialog({ onCancel, onSubmit }) {
   const [path, setPath] = React.useState('');
   const canSubmit = path.trim().length > 0;
@@ -217,6 +276,7 @@ export default function App() {
   const [toast, setToast] = React.useState(null);
   const [folderPathDialogOpen, setFolderPathDialogOpen] = React.useState(false);
   const [pendingFolderPaths, setPendingFolderPaths] = React.useState([]);
+  const [deleteProjectFor, setDeleteProjectFor] = React.useState(null);
   const [pairMobileOpen, setPairMobileOpen] = React.useState(false);
   const [onboardingRequired, setOnboardingRequired] = React.useState(false);
   const [forceOnboarding, setForceOnboarding] = React.useState(false);
@@ -324,7 +384,12 @@ export default function App() {
       const idx = list.findIndex(x => x.id === updatedChat.id);
       if (idx === -1) return prev;
       const next = list.slice();
-      next[idx] = { ...next[idx], title: updatedChat.title, updated_at: updatedChat.updated_at };
+      next[idx] = {
+        ...next[idx],
+        title: updatedChat.title,
+        updated_at: updatedChat.updated_at,
+        worktree: updatedChat.worktree ?? next[idx].worktree,
+      };
       return { ...prev, [updatedChat.project_id]: next };
     });
   }, []);
@@ -353,7 +418,13 @@ export default function App() {
           // title is included so an auto-summarized title (set by the daemon
           // after the first turn) propagates to the sidebar entry that the
           // user can see while the chat is closed.
-          updated[idx] = { ...updated[idx], title: c.title, updated_at: c.updated_at, status: c.status };
+          updated[idx] = {
+            ...updated[idx],
+            title: c.title,
+            updated_at: c.updated_at,
+            status: c.status,
+            worktree: c.worktree ?? updated[idx].worktree,
+          };
           return { ...prev, [c.project_id]: updated };
         });
       }).catch(() => {});
@@ -533,19 +604,28 @@ export default function App() {
     }
   }, [projects, loadData]);
 
-  const handleRemoveProject = React.useCallback(async (id) => {
-    const removedProjectChats = projectChats[id] || [];
+  const handleRemoveProject = React.useCallback((id) => {
+    const project = projects.find(p => p.id === id);
+    if (!project) return;
+    setDeleteProjectFor(project);
+  }, [projects]);
+
+  const confirmRemoveProject = React.useCallback(async () => {
+    const project = deleteProjectFor;
+    if (!project) return;
+    const removedProjectChats = projectChats[project.id] || [];
     try {
-      await api.deleteProject(id);
+      await api.deleteProject(project.id);
       if (removedProjectChats.some(chat => chat.id === currentChatId)) {
         setCurrentChatId(null);
         setRoute('new');
       }
+      setDeleteProjectFor(null);
       loadData();
     } catch (err) {
       showToast(`Failed to remove project: ${err.message}`);
     }
-  }, [currentChatId, projectChats, loadData, showToast]);
+  }, [currentChatId, deleteProjectFor, projectChats, loadData, showToast]);
 
   const handleRenameChat = React.useCallback(async (chatId, nextTitle) => {
     const title = (nextTitle || '').trim();
@@ -568,13 +648,18 @@ export default function App() {
     }
     try {
       const updated = await api.updateChat(chatId, { title });
-      if (projectId && updated?.title && updated.title !== title) {
+      if (projectId && updated?.id) {
         setProjectChats(prev => {
           const list = prev[projectId];
           if (!list) return prev;
           return {
             ...prev,
-            [projectId]: list.map(c => c.id === chatId ? { ...c, title: updated.title } : c),
+            [projectId]: list.map(c => c.id === chatId ? {
+              ...c,
+              title: updated.title || title,
+              updated_at: updated.updated_at || c.updated_at,
+              worktree: updated.worktree ?? c.worktree,
+            } : c),
           };
         });
       }
@@ -679,6 +764,7 @@ export default function App() {
         title: c.title || 'Untitled',
         status: chatStatusOverrides[c.id] || c.status || 'active',
         age: relativeTime(c.updated_at),
+        worktree: c.worktree || null,
       })),
     })),
     [projects, projectChats, chatStatusOverrides, nowTick]
@@ -792,6 +878,14 @@ export default function App() {
         folderName={pendingFolderName}
         onCancel={cancelPendingFolders}
         onConfirm={confirmPendingFolder}
+      />
+    )}
+    {deleteProjectFor && (
+      <ProjectDeleteConfirmDialog
+        project={deleteProjectFor}
+        chatCount={(projectChats[deleteProjectFor.id] || []).length}
+        onCancel={() => setDeleteProjectFor(null)}
+        onConfirm={confirmRemoveProject}
       />
     )}
     {pairMobileOpen && (mobileDevices.length > 0 ? (
