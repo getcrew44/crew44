@@ -45,7 +45,7 @@ func TestApplyAutoChatTitleSucceedsForUnlockedChat(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	chat, err := a.CreateChat(project.ID, "raw user message verbatim", agentID)
+	chat, err := a.CreateChat(project.ID, "raw user message verbatim", agentID, nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -72,7 +72,7 @@ func TestApplyAutoChatTitleRespectsUserLock(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	chat, err := a.CreateChat(project.ID, "raw user message", agentID)
+	chat, err := a.CreateChat(project.ID, "raw user message", agentID, nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -105,7 +105,7 @@ func TestUpdateChatSetsTitleSetByUserFlag(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	chat, err := a.CreateChat(project.ID, "first message", agentID)
+	chat, err := a.CreateChat(project.ID, "first message", agentID, nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -129,7 +129,7 @@ func TestUpdateChatWithoutTitleDoesNotFlipLock(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	chat, err := a.CreateChat(project.ID, "first message", agentID)
+	chat, err := a.CreateChat(project.ID, "first message", agentID, nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -198,7 +198,7 @@ func TestSummarizeChatTitleWritesCleanedTitleBack(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	chat, err := a.CreateChat(project.ID, "Please refactor the login flow so it handles 401s", agentID)
+	chat, err := a.CreateChat(project.ID, "Please refactor the login flow so it handles 401s", agentID, nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -253,7 +253,7 @@ func TestSummarizeChatTitleUsesScopedRuntimeEnvDir(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	chat, err := a.CreateChat(project.ID, "raw first message", agentID)
+	chat, err := a.CreateChat(project.ID, "raw first message", agentID, nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -293,7 +293,7 @@ func TestRunChatTitleSummarizerSkipsLockedChats(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	chat, err := a.CreateChat(project.ID, "raw first message", agentID)
+	chat, err := a.CreateChat(project.ID, "raw first message", agentID, nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -323,7 +323,7 @@ func TestRunChatTitleSummarizerSkipsEmptyFirstMessage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	chat, err := a.CreateChat(project.ID, "raw first", agentID)
+	chat, err := a.CreateChat(project.ID, "raw first", agentID, nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -377,7 +377,7 @@ func TestPostMessageDispatchesTitleSummarizerInParallelWithChatRun(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	chat, err := a.CreateChat(project.ID, "Please refactor the login flow so it handles 401s", agentID)
+	chat, err := a.CreateChat(project.ID, "Please refactor the login flow so it handles 401s", agentID, nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -434,7 +434,7 @@ func TestSummarizeChatTitleHonorsTimeout(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	chat, err := a.CreateChat(project.ID, "raw", agentID)
+	chat, err := a.CreateChat(project.ID, "raw", agentID, nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}

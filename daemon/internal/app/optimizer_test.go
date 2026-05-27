@@ -163,7 +163,7 @@ func TestAppDispatcherBuildScanCorpusUsesIncrementalUserProjectChats(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	incrementalChat, err := a.CreateChat(project.ID, "recent user work", agentID)
+	incrementalChat, err := a.CreateChat(project.ID, "recent user work", agentID, nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -193,7 +193,7 @@ func TestAppDispatcherBuildScanCorpusUsesIncrementalUserProjectChats(t *testing.
 		t.Fatal(err)
 	}
 
-	oldChat, err := a.CreateChat(project.ID, "old work", agentID)
+	oldChat, err := a.CreateChat(project.ID, "old work", agentID, nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -202,7 +202,7 @@ func TestAppDispatcherBuildScanCorpusUsesIncrementalUserProjectChats(t *testing.
 	if err := a.store.SaveChat(oldChat); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := a.CreateChat(optimizer.SystemProjectID, "optimizer should be excluded", agentID); err != nil {
+	if _, err := a.CreateChat(optimizer.SystemProjectID, "optimizer should be excluded", agentID, nil, ""); err != nil {
 		t.Fatal(err)
 	}
 
@@ -552,14 +552,14 @@ func TestMemoryWriterIndexOverflowSpillsToPending(t *testing.T) {
 func TestListChatsWithoutProjectFilterExcludesSystemHiddenProjects(t *testing.T) {
 	a := newOptimizerTestApp(t)
 	agentID := firstAgentID(t, a)
-	if _, err := a.CreateChat(optimizer.SystemProjectID, "hidden scan", agentID); err != nil {
+	if _, err := a.CreateChat(optimizer.SystemProjectID, "hidden scan", agentID, nil, ""); err != nil {
 		t.Fatal(err)
 	}
 	visibleProject, err := a.CreateProject("Visible", t.TempDir(), agentID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	visibleChat, err := a.CreateChat(visibleProject.ID, "visible chat", agentID)
+	visibleChat, err := a.CreateChat(visibleProject.ID, "visible chat", agentID, nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}

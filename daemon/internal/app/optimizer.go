@@ -50,7 +50,7 @@ type appDispatcher struct {
 }
 
 func (d *appDispatcher) CreateChat(_ context.Context, projectID, title, agentID string) (string, error) {
-	chat, err := d.app.CreateChat(projectID, title, agentID)
+	chat, err := d.app.CreateChat(projectID, title, agentID, nil, "")
 	if err != nil {
 		return "", err
 	}
