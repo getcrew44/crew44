@@ -7,10 +7,26 @@ const chip = {
   cursor: 'pointer', fontFamily: UI_FONT,
 };
 
+const ghostChip = {
+  padding: '4px 9px', borderRadius: 6, fontSize: 12.5,
+  border: '1px solid transparent', background: 'transparent', color: '#807972',
+  cursor: 'pointer', fontFamily: UI_FONT,
+  display: 'inline-flex', alignItems: 'center', gap: 5,
+  transition: 'background 100ms ease',
+};
+
 export function ChevronDown() {
   return (
     <svg width="10" height="10" viewBox="0 0 10 10" fill="none" style={{ flexShrink: 0 }}>
       <path d="M2 3.5l3 3 3-3" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
+    </svg>
+  );
+}
+
+function ChipChev() {
+  return (
+    <svg width="8" height="8" viewBox="0 0 9 9" aria-hidden="true" style={{ color: '#A89F92', marginLeft: 1, flexShrink: 0 }}>
+      <path d="M2 3.5l2.5 2.5L7 3.5" stroke="currentColor" strokeWidth="1.2" fill="none" strokeLinecap="round" strokeLinejoin="round"/>
     </svg>
   );
 }
@@ -40,13 +56,16 @@ export function PickerRow({ icon, label, selected, onClick }) {
   );
 }
 
-export function CustomPicker({ icon, placeholder, value, items, onChange, footer, width = 240 }) {
+export function CustomPicker({ icon, label, placeholder, value, items, onChange, footer, width = 240, variant = 'default' }) {
   const [open, setOpen] = React.useState(false);
   const [search, setSearch] = React.useState('');
+  const [hover, setHover] = React.useState(false);
   const ref = React.useRef(null);
   const searchRef = React.useRef(null);
 
   const selected = items.find(i => i.id === value);
+  const isGhost = variant === 'ghost';
+  const displayText = selected ? selected.label : placeholder;
 
   React.useEffect(() => {
     if (!open) return;
@@ -67,8 +86,15 @@ export function CustomPicker({ icon, placeholder, value, items, onChange, footer
   return (
     <div ref={ref} style={{ position: 'relative' }}>
       <button
+        type="button"
+        aria-label={isGhost && label ? `${label} ${displayText}` : undefined}
         onClick={() => setOpen(v => !v)}
-        style={{
+        onMouseEnter={() => setHover(true)}
+        onMouseLeave={() => setHover(false)}
+        style={isGhost ? {
+          ...ghostChip,
+          background: open ? '#EBE5D6' : (hover ? '#F0EAD8' : 'transparent'),
+        } : {
           ...chip,
           display: 'inline-flex', alignItems: 'center', gap: 6,
           background: open ? '#EBE5D6' : '#FCFAF1',
@@ -77,11 +103,23 @@ export function CustomPicker({ icon, placeholder, value, items, onChange, footer
           color: '#807972',
         }}
       >
-        {icon}
-        <span style={{ color: selected ? '#1C1A17' : '#5C544B' }}>
-          {selected ? selected.label : placeholder}
-        </span>
-        <ChevronDown />
+        {isGhost ? (
+          <>
+            {label}
+            <span style={{ color: selected ? '#1C1A17' : '#5C544B', fontWeight: selected ? 500 : 400 }}>
+              {displayText}
+            </span>
+            <ChipChev />
+          </>
+        ) : (
+          <>
+            {icon}
+            <span style={{ color: selected ? '#1C1A17' : '#5C544B' }}>
+              {displayText}
+            </span>
+            <ChevronDown />
+          </>
+        )}
       </button>
 
       {open && (

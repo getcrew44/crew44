@@ -24,6 +24,14 @@ const chip = {
   cursor: 'pointer', fontFamily: UI_FONT,
 };
 
+const ghostChip = {
+  padding: '4px 9px', borderRadius: 6, fontSize: 12.5,
+  border: '1px solid transparent', background: 'transparent', color: '#807972',
+  cursor: 'pointer', fontFamily: UI_FONT,
+  display: 'inline-flex', alignItems: 'center', gap: 5,
+  transition: 'background 100ms ease',
+};
+
 const MONO_FONT = 'ui-monospace, SFMono-Regular, Menlo, monospace';
 
 // deriveBranchSlug mirrors the daemon's branchSlug: first line, lowercased,
@@ -48,18 +56,21 @@ function BranchGlyph() {
 }
 
 function WorktreeChip({ enabled, onToggle }) {
+  const [hover, setHover] = React.useState(false);
   return (
     <button
       type="button"
       data-testid="worktree-toggle"
       onClick={onToggle}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
       title={enabled
         ? 'Disable worktree — the crew will edit your working tree directly'
         : "Run this task in an isolated git worktree so the crew can't dirty your working tree"}
       style={{
-        ...chip, display: 'inline-flex', alignItems: 'center', gap: 7,
+        ...ghostChip, gap: 7,
         padding: '4px 9px 4px 7px',
-        color: enabled ? '#1C1A17' : '#5C544B', fontWeight: enabled ? 500 : 400,
+        background: hover ? '#F0EAD8' : 'transparent',
       }}
     >
       <span aria-hidden="true" style={{
@@ -73,7 +84,9 @@ function WorktreeChip({ enabled, onToggle }) {
           transition: 'left 120ms ease',
         }} />
       </span>
-      {enabled ? 'Worktree' : 'Git worktree'}
+      <span style={enabled ? { color: '#1C1A17', fontWeight: 500 } : undefined}>
+        {enabled ? 'Worktree' : 'Git worktree'}
+      </span>
     </button>
   );
 }
@@ -669,10 +682,12 @@ export default function NewTaskRoute({ projects, agents, skills = [], onNewTask,
             )}
             <CustomPicker
               icon={<FolderAddIcon size={13} />}
+              label="Project"
               placeholder="Pick a project"
               value={selectedProjectId}
               items={projectItems}
               onChange={setSelectedProjectId}
+              variant="ghost"
               footer={(close) => (
                 <PickerRow
                   icon={<FolderAddIcon size={14} />}
@@ -684,10 +699,12 @@ export default function NewTaskRoute({ projects, agents, skills = [], onNewTask,
 
             <CustomPicker
               icon={<AgentIcon size={13} />}
+              label="Lead"
               placeholder="Pick a lead"
               value={selectedAgentId}
               items={agentItems}
               onChange={setSelectedAgentId}
+              variant="ghost"
             />
 
             {gitInfo?.is_git_repo && (

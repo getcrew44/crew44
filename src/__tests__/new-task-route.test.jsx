@@ -68,6 +68,29 @@ describe('NewTaskRoute', () => {
     expect(screen.getByText('Second Project')).toBeInTheDocument();
   });
 
+  it('renders project and lead controls as ghost chips', () => {
+    render(
+      <NewTaskRoute
+        projects={projects}
+        agents={agents}
+        onNewTask={() => {}}
+        initialProjectId="p1"
+      />
+    );
+
+    const projectButton = screen.getByRole('button', { name: /Project First Project/i });
+    const leadButton = screen.getByRole('button', { name: /Lead Aria/i });
+
+    expect(projectButton).toHaveStyle({
+      background: 'transparent',
+    });
+    expect(leadButton).toHaveStyle({
+      background: 'transparent',
+    });
+    expect(projectButton.style.border).toBe('1px solid transparent');
+    expect(leadButton.style.border).toBe('1px solid transparent');
+  });
+
   it('restores the new-chat text draft for the selected project', () => {
     const { unmount } = render(
       <NewTaskRoute
@@ -350,6 +373,10 @@ describe('NewTaskRoute', () => {
 
     // Default-off toggle becomes visible once git info resolves.
     const toggle = await screen.findByTestId('worktree-toggle');
+    expect(toggle).toHaveStyle({
+      background: 'transparent',
+    });
+    expect(toggle.style.border).toBe('1px solid transparent');
     fireEvent.click(toggle);
     expect(await screen.findByTestId('worktree-branch')).toBeInTheDocument();
 
