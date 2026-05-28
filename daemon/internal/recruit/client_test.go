@@ -68,7 +68,7 @@ func TestCandidateRefs(t *testing.T) {
 }
 
 func TestValidateManifest(t *testing.T) {
-	good := Manifest{Name: "X", Version: "1.0.0", Description: "y"}
+	good := Manifest{SchemaVersion: "crew44.agent.v1", Name: "X", Version: "1.0.0", Description: "y"}
 	if err := validateManifest(&good); err != nil {
 		t.Fatalf("valid manifest rejected: %v", err)
 	}
@@ -77,11 +77,13 @@ func TestValidateManifest(t *testing.T) {
 		name string
 		m    Manifest
 	}{
-		{"missing name", Manifest{Version: "1", Description: "d"}},
-		{"missing version", Manifest{Name: "n", Description: "d"}},
-		{"missing description", Manifest{Name: "n", Version: "1"}},
-		{"skill missing name", Manifest{Name: "n", Version: "1", Description: "d", Skills: []SkillDecl{{Path: "skills/x/SKILL.md"}}}},
-		{"skill missing path", Manifest{Name: "n", Version: "1", Description: "d", Skills: []SkillDecl{{Name: "x"}}}},
+		{"missing schema_version", Manifest{Name: "n", Version: "1", Description: "d"}},
+		{"unsupported schema_version", Manifest{SchemaVersion: "crew44.agent.v2", Name: "n", Version: "1", Description: "d"}},
+		{"missing name", Manifest{SchemaVersion: "crew44.agent.v1", Version: "1", Description: "d"}},
+		{"missing version", Manifest{SchemaVersion: "crew44.agent.v1", Name: "n", Description: "d"}},
+		{"missing description", Manifest{SchemaVersion: "crew44.agent.v1", Name: "n", Version: "1"}},
+		{"skill missing name", Manifest{SchemaVersion: "crew44.agent.v1", Name: "n", Version: "1", Description: "d", Skills: []SkillDecl{{Path: "skills/x/SKILL.md"}}}},
+		{"skill missing path", Manifest{SchemaVersion: "crew44.agent.v1", Name: "n", Version: "1", Description: "d", Skills: []SkillDecl{{Name: "x"}}}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -89,6 +91,55 @@ func TestValidateManifest(t *testing.T) {
 				t.Fatal("expected validation error")
 			}
 		})
+	}
+}
+
+func TestValidRegistryEntry(t *testing.T) {
+	good := RegistryEntry{ID: "x", Name: "X", Description: "d", RepoURL: "https://github.com/o/r"}
+	if !validRegistryEntry(&good) {
+		t.Fatal("valid entry rejected")
+	}
+	cases := map[string]RegistryEntry{
+		"missing id":          {Name: "X", Description: "d", RepoURL: "https://github.com/o/r"},
+		"missing name":        {ID: "x", Description: "d", RepoURL: "https://github.com/o/r"},
+		"missing description": {ID: "x", Name: "X", RepoURL: "https://github.com/o/r"},
+		"missing repo_url":    {ID: "x", Name: "X", Description: "d"},
+		"whitespace only":     {ID: "  ", Name: "X", Description: "d", RepoURL: "https://github.com/o/r"},
+	}
+	for name, e := range cases {
+		t.Run(name, func(t *testing.T) {
+			if validRegistryEntry(&e) {
+				t.Fatal("expected entry to be rejected")
+			}
+		})
+	}
+}
+
+// Malformed registry rows must be dropped silently rather than fail the
+// whole list, since a single bad community submission can't be allowed
+// to take down the Recruit surface for everyone.
+func TestFetchRegistryDropsMalformedEntries(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{
+			"schema_version":"crew44.agent-registry.v1",
+			"agents":[
+				{"id":"good","name":"Good","description":"d","repo_url":"https://github.com/o/r"},
+				{"id":"","name":"NoID","description":"d","repo_url":"https://github.com/o/r"},
+				{"id":"no-repo","name":"NoRepo","description":"d"}
+			]
+		}`))
+	}))
+	defer srv.Close()
+	c := NewClient(Config{RawBase: srv.URL})
+	env, err := c.FetchRegistry(context.Background())
+	if err != nil {
+		t.Fatalf("fetch: %v", err)
+	}
+	if len(env.Agents) != 1 {
+		t.Fatalf("expected 1 kept entry, got %d (%+v)", len(env.Agents), env.Agents)
+	}
+	if env.Agents[0].ID != "good" {
+		t.Fatalf("kept wrong entry: %+v", env.Agents[0])
 	}
 }
 

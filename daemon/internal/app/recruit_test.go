@@ -416,6 +416,30 @@ func TestRecruitInstallMissingManifestField(t *testing.T) {
 	}
 }
 
+// Manifests with the wrong schema_version are rejected on install so a
+// daemon that doesn't understand a future v2 layout can't accidentally
+// install one.
+func TestRecruitInstallRejectsUnsupportedSchemaVersion(t *testing.T) {
+	f := newFakeRegistry(t)
+	f.set("/registry/test/HEAD/agents.json", `{
+		"schema_version":"crew44.agent-registry.v1",
+		"agents":[{"id":"future","name":"Future","description":"d","repo_url":"https://github.com/x/future"}]
+	}`)
+	f.set("/x/future/HEAD/crew44-agent.json", `{
+		"schema_version":"crew44.agent.v2","name":"Future","version":"1.0.0","description":"d"
+	}`)
+	srv := httptest.NewServer(f.handler())
+	defer srv.Close()
+	a := newRecruitTestApp(t, srv)
+	_, err := a.InstallRecruitAgent(context.Background(), "future")
+	if !errors.Is(err, recruit.ErrManifestInvalid) {
+		t.Fatalf("expected ErrManifestInvalid, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "schema_version") {
+		t.Fatalf("error should mention schema_version: %v", err)
+	}
+}
+
 // Bad repo URLs in the registry must also surface as ErrBadRequest, not
 // as an internal error. Uses a non-github.com host that parseGitHubRepo
 // rejects with ErrRepoURLInvalid.

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"path"
 	"strings"
@@ -133,6 +134,20 @@ func (c *Client) FetchRegistry(ctx context.Context) (*RegistryEnvelope, error) {
 	if err := json.Unmarshal(body, &env); err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrRegistryInvalid, err)
 	}
+
+	// Drop malformed rows rather than fail the whole list. A single
+	// broken entry from a community contributor must not blank out
+	// the Recruit surface for every user.
+	kept := env.Agents[:0]
+	for _, entry := range env.Agents {
+		if !validRegistryEntry(&entry) {
+			log.Printf("recruit: dropping malformed registry entry id=%q name=%q repo=%q",
+				entry.ID, entry.Name, entry.RepoURL)
+			continue
+		}
+		kept = append(kept, entry)
+	}
+	env.Agents = kept
 
 	c.mu.Lock()
 	c.cached = &env
@@ -267,10 +282,22 @@ func (c *Client) getBytes(ctx context.Context, url string, limit int64) ([]byte,
 	return io.ReadAll(io.LimitReader(resp.Body, limit+1))
 }
 
+// manifestSchemaPrefix gates which schema_version values the install
+// path accepts. Anything outside the v1 family is rejected so an author
+// experimenting with a v2 layout can't accidentally install on a daemon
+// that doesn't understand the new fields.
+const manifestSchemaPrefix = "crew44.agent.v1"
+
 // validateManifest enforces the required fields and rejects unsafe skill
 // paths. Done at parse time so the install path can assume a well-formed
 // manifest.
 func validateManifest(m *Manifest) error {
+	if strings.TrimSpace(m.SchemaVersion) == "" {
+		return fmt.Errorf("%w: missing schema_version", ErrManifestInvalid)
+	}
+	if m.SchemaVersion != manifestSchemaPrefix {
+		return fmt.Errorf("%w: unsupported schema_version %q", ErrManifestInvalid, m.SchemaVersion)
+	}
 	if strings.TrimSpace(m.Name) == "" {
 		return fmt.Errorf("%w: missing name", ErrManifestInvalid)
 	}
@@ -289,6 +316,17 @@ func validateManifest(m *Manifest) error {
 		}
 	}
 	return nil
+}
+
+// validRegistryEntry returns true when the row has all the fields the
+// UI and install path actually need. Malformed rows are dropped from
+// the list with a log; a single bad entry shouldn't take down the
+// whole Recruit surface.
+func validRegistryEntry(e *RegistryEntry) bool {
+	return strings.TrimSpace(e.ID) != "" &&
+		strings.TrimSpace(e.Name) != "" &&
+		strings.TrimSpace(e.Description) != "" &&
+		strings.TrimSpace(e.RepoURL) != ""
 }
 
 // ensureSafePath rejects absolute paths and any path that escapes the
