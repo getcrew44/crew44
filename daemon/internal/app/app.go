@@ -18,6 +18,7 @@ import (
 	"github.com/getcrew44/crew44/daemon/internal/model"
 	"github.com/getcrew44/crew44/daemon/internal/optimizer"
 	"github.com/getcrew44/crew44/daemon/internal/presets"
+	"github.com/getcrew44/crew44/daemon/internal/recruit"
 	"github.com/getcrew44/crew44/daemon/internal/runtime"
 	"github.com/getcrew44/crew44/daemon/internal/store"
 )
@@ -27,6 +28,10 @@ type Config struct {
 	RuntimeScanDir string
 	Scanner        runtime.Scanner
 	Engine         runtime.Engine
+	// Recruit overrides the default registry client. Nil = use production
+	// defaults (raw.githubusercontent.com / getcrew44/agent-registry).
+	// Tests inject an httptest-backed client through this field.
+	Recruit *recruit.Client
 }
 
 type App struct {
@@ -46,6 +51,10 @@ type App struct {
 	// Optimizer subsystem; wired in initOptimizer after bootstrap.
 	optimizer          *optimizer.Manager
 	optimizerScheduler *optimizer.Scheduler
+
+	// recruit fetches the agent registry and per-repo manifests. Lazily
+	// initialized to production defaults if Config.Recruit is nil.
+	recruit *recruit.Client
 }
 
 func New(cfg Config) (*App, error) {
@@ -56,6 +65,10 @@ func New(cfg Config) (*App, error) {
 	if err := os.MkdirAll(cfg.RuntimeScanDir, 0o755); err != nil {
 		return nil, err
 	}
+	recruitClient := cfg.Recruit
+	if recruitClient == nil {
+		recruitClient = recruit.NewClient(recruit.Config{})
+	}
 	app := &App{
 		store:          st,
 		runtimeScanDir: cfg.RuntimeScanDir,
@@ -63,6 +76,7 @@ func New(cfg Config) (*App, error) {
 		engine:         firstEngine(cfg.Engine),
 		broker:         broker.New[model.Event](),
 		runs:           make(map[string]*chatRunController),
+		recruit:        recruitClient,
 	}
 	if err := app.bootstrapDefaultState(); err != nil {
 		return nil, err

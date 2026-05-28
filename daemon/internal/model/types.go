@@ -21,28 +21,47 @@ type RuntimeRecord struct {
 }
 
 type AgentConfig struct {
-	ID          string    `json:"id"`
-	Name        string    `json:"name"`
-	Description string    `json:"description"`
-	Instruction string    `json:"instruction"`
-	RuntimeID   string    `json:"runtime_id"`
-	Model       string    `json:"model"`
-	SkillIDs    []string  `json:"skill_ids"`
-	PresetID    string    `json:"preset_id,omitempty"`
-	PresetKey   string    `json:"preset_key,omitempty"`
-	ArchivedAt  time.Time `json:"archived_at,omitempty"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	ID          string       `json:"id"`
+	Name        string       `json:"name"`
+	Description string       `json:"description"`
+	Instruction string       `json:"instruction"`
+	RuntimeID   string       `json:"runtime_id"`
+	Model       string       `json:"model"`
+	SkillIDs    []string     `json:"skill_ids"`
+	PresetID    string       `json:"preset_id,omitempty"`
+	PresetKey   string       `json:"preset_key,omitempty"`
+	Source      *AgentSource `json:"source,omitempty"`
+	ArchivedAt  time.Time    `json:"archived_at,omitempty"`
+	CreatedAt   time.Time    `json:"created_at"`
+	UpdatedAt   time.Time    `json:"updated_at"`
+}
+
+// AgentSource identifies the upstream registry entry a recruited agent
+// was installed from. Idempotency key for re-install is RepoURL.
+type AgentSource struct {
+	RegistryID  string    `json:"registry_id,omitempty"`
+	RepoURL     string    `json:"repo_url"`
+	Version     string    `json:"version"`
+	InstalledAt time.Time `json:"installed_at"`
 }
 
 type SkillRecord struct {
-	ID         string    `json:"id"`
-	Name       string    `json:"name"`
-	Path       string    `json:"path"`
-	PresetID   string    `json:"preset_id,omitempty"`
-	PresetKey  string    `json:"preset_key,omitempty"`
-	UpdatedAt  time.Time `json:"updated_at"`
-	ArchivedAt time.Time `json:"archived_at,omitempty"`
+	ID         string       `json:"id"`
+	Name       string       `json:"name"`
+	Path       string       `json:"path"`
+	PresetID   string       `json:"preset_id,omitempty"`
+	PresetKey  string       `json:"preset_key,omitempty"`
+	Source     *SkillSource `json:"source,omitempty"`
+	UpdatedAt  time.Time    `json:"updated_at"`
+	ArchivedAt time.Time    `json:"archived_at,omitempty"`
+}
+
+// SkillSource identifies the recruited agent repo and in-repo path a
+// recruited skill came from. Dedupe key on install is (RepoURL, Path).
+type SkillSource struct {
+	RepoURL string `json:"repo_url"`
+	Path    string `json:"path"`
+	Version string `json:"version"`
 }
 
 // PresetMapping records the user copies created from a preset definition.

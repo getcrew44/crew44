@@ -76,6 +76,10 @@ func (s *Server) registerMethods() {
 		"optimizer.schedule.set":     s.optimizerScheduleSet,
 		"optimizer.scans.get":        s.optimizerScansGet,
 		"optimizer.scans.purge":      s.optimizerScansPurge,
+
+		"recruit.agents.list":    s.recruitAgentsList,
+		"recruit.agents.get":     s.recruitAgentsGet,
+		"recruit.agents.install": s.recruitAgentsInstall,
 	}
 }
 
@@ -679,4 +683,32 @@ func (s *Server) chatsCancel(_ context.Context, _ Peer, params json.RawMessage) 
 		return nil, err
 	}
 	return map[string]any{"ok": true}, nil
+}
+
+func (s *Server) recruitAgentsList(ctx context.Context, _ Peer, _ json.RawMessage) (any, error) {
+	items, err := s.app.ListRecruitAgents(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{"items": items}, nil
+}
+
+func (s *Server) recruitAgentsGet(ctx context.Context, _ Peer, params json.RawMessage) (any, error) {
+	var body struct {
+		ID string `json:"id"`
+	}
+	if err := decodeParams(params, &body); err != nil {
+		return nil, err
+	}
+	return s.app.GetRecruitAgent(ctx, body.ID)
+}
+
+func (s *Server) recruitAgentsInstall(ctx context.Context, _ Peer, params json.RawMessage) (any, error) {
+	var body struct {
+		ID string `json:"id"`
+	}
+	if err := decodeParams(params, &body); err != nil {
+		return nil, err
+	}
+	return s.app.InstallRecruitAgent(ctx, body.ID)
 }

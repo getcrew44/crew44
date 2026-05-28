@@ -4,6 +4,7 @@ import TaskView from './TaskView.jsx';
 import CrewRoute from './CrewRoute.jsx';
 import NewTaskRoute from './NewTaskRoute.jsx';
 import OnboardingRoute from './OnboardingRoute.jsx';
+import RecruitRoute from './RecruitRoute.jsx';
 import PairMobileDialog, { ManageMobileDialog } from './PairMobileDialog.jsx';
 import AutoRoute from './AutoRoute.jsx';
 import { Icon } from './components.jsx';
@@ -856,6 +857,8 @@ export default function App() {
     );
   } else if (route === 'auto') {
     content = <AutoRoute onToast={showToast} onPickChat={handlePickChat} />;
+  } else if (route === 'recruit') {
+    content = <RecruitRoute onToast={showToast} onDataRefresh={handleDataRefresh} />;
   } else {
     content = <NewTaskRoute projects={projects} agents={agentsList} skills={skills} onNewTask={handleNewTask} onExistingFolder={handleExistingFolder} initialProjectId={newTaskProjectId} />;
   }
