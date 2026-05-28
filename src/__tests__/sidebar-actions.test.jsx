@@ -41,9 +41,19 @@ describe('Sidebar empty states', () => {
     expect(screen.getByText("Jordan's Mac")).toBeInTheDocument();
   });
 
-  it('keeps the mobile entry hidden while the feature is incomplete', () => {
+  it('shows the mobile pairing entry', () => {
+    const onPairMobile = vi.fn();
+    render(<Sidebar {...baseProps} onPairMobile={onPairMobile} />);
+    const item = screen.getByTestId('nav-pair-mobile');
+    expect(item).toHaveTextContent('Pair Mobile');
+
+    fireEvent.click(item);
+    expect(onPairMobile).toHaveBeenCalledTimes(1);
+  });
+
+  it('labels the mobile entry as management when a device is paired', () => {
     render(<Sidebar {...baseProps} hasMobileDevice />);
-    expect(screen.queryByTestId('nav-pair-mobile')).not.toBeInTheDocument();
+    expect(screen.getByTestId('nav-pair-mobile')).toHaveTextContent('Manage Mobile');
   });
 });
 

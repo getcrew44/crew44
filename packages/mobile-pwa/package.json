@@ -1,0 +1,29 @@
+{
+  "name": "@crew44/mobile-pwa",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "vite --host 0.0.0.0",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview --host 0.0.0.0",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@noble/ciphers": "^2.2.0",
+    "@noble/curves": "^2.2.0",
+    "@noble/hashes": "^2.2.0",
+    "@zxing/browser": "^0.1.5",
+    "react": "19.1.0",
+    "react-dom": "19.1.0"
+  },
+  "devDependencies": {
+    "@types/react": "~19.1.10",
+    "@types/react-dom": "19.1.9",
+    "@vitejs/plugin-react": "^4.3.4",
+    "typescript": "~5.9.2",
+    "vite": "^6.3.2",
+    "vitest": "^4.1.6"
+  }
+}
