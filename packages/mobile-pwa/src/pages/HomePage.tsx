@@ -28,6 +28,12 @@ export function HomePage({ navigate }: { navigate: (path: string) => void }) {
     load();
   }, [load]);
 
+  const confirmUnpair = React.useCallback(() => {
+    const confirmed = window.confirm("Unpair this phone?\n\nThis removes the mobile pairing from this phone and, while connected, from desktop too.");
+    if (!confirmed) return;
+    client.disconnect().catch(() => {});
+  }, [client]);
+
   if (client.status === "error" && !client.api) {
     return (
       <Screen>
@@ -44,6 +50,7 @@ export function HomePage({ navigate }: { navigate: (path: string) => void }) {
 
   return (
     <Screen>
+      {menuOpen ? <button type="button" className="menu-dismiss-layer" aria-label="Close menu" onClick={() => setMenuOpen(false)} /> : null}
       <Header
         title="Crew44"
         right={
@@ -54,7 +61,7 @@ export function HomePage({ navigate }: { navigate: (path: string) => void }) {
             {menuOpen ? (
               <div className="menu">
                 <button type="button" onClick={() => { setMenuOpen(false); navigate("/agents"); }}>Agents</button>
-                <button type="button" className="danger" onClick={() => client.disconnect().catch(() => {})}>Unpair</button>
+                <button type="button" className="danger" onClick={() => { setMenuOpen(false); confirmUnpair(); }}>Unpair</button>
               </div>
             ) : null}
           </div>

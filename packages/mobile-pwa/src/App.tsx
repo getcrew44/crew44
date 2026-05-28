@@ -6,7 +6,7 @@ import { ChatPage } from "@/pages/ChatPage";
 import { HomePage } from "@/pages/HomePage";
 import { PairPage } from "@/pages/PairPage";
 import { ProjectPage } from "@/pages/ProjectPage";
-import { Header, LoadingState, Screen } from "@/ui/Screen";
+import { ConnectingState, Header, Screen } from "@/ui/Screen";
 
 function currentPath(): string {
   return window.location.hash.replace(/^#/, "") || "/";
@@ -39,7 +39,11 @@ export default function App() {
     return (
       <Screen>
         <Header title="Crew44 Mobile" />
-        <LoadingState label={client.status === "reconnecting" ? "Reconnecting to relay..." : "Connecting to the Crew44 desktop..."} />
+        <ConnectingState
+          label={client.status === "reconnecting" ? "Reconnecting to relay..." : "Connecting to the Crew44 desktop..."}
+          showOtherOptions={Boolean(client.profile)}
+          onUnpair={client.disconnect}
+        />
       </Screen>
     );
   }

@@ -60,16 +60,22 @@ export function AgentPage({
         <EmptyState title="Agent not found" />
       ) : (
         <section className="agent-detail">
-          <div className="detail-row">
+          <div className="detail-card">
             <span>Runtime</span>
             <strong>{agent.runtime_id || "Not set"}</strong>
           </div>
-          <div className="detail-row">
+          <div className="detail-card">
             <span>Model</span>
             <strong>{agent.model || "Not set"}</strong>
           </div>
-          <h2>Instructions</h2>
-          <p>{agent.instruction || "No instructions."}</p>
+          <div className="detail-card">
+            <span>Skills</span>
+            <strong>{agent.skill_ids.length ? agent.skill_ids.join(", ") : "None"}</strong>
+          </div>
+          <div className="detail-card">
+            <span>Instruction</span>
+            <p>{agent.instruction || "No instruction set."}</p>
+          </div>
         </section>
       )}
     </Screen>

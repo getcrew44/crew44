@@ -144,7 +144,7 @@ export function ProjectPage({
           <Button onClick={load}>Retry</Button>
         </EmptyState>
       ) : chats.length === 0 ? (
-        <EmptyState title="No chats yet" body="Start a chat from this browser or from the desktop app." />
+        <EmptyState title="No chats yet" body="Start a chat from this phone or from the desktop app." />
       ) : (
         <div className="list">
           {error ? <p className="inline-error">{error}</p> : null}

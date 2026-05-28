@@ -19,6 +19,21 @@ const iconButton = {
   cursor: 'pointer',
 };
 
+const iconButtonGhost = {
+  width: 24,
+  height: 24,
+  border: '1px solid transparent',
+  background: 'transparent',
+  color: '#5C544B',
+  borderRadius: 6,
+  padding: 0,
+  display: 'inline-flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  cursor: 'pointer',
+  transition: 'border-color 0.14s ease, background 0.14s ease',
+};
+
 function formatDate(value) {
   if (!value || String(value).startsWith('0001-01-01T00:00:00')) return '';
   const date = new Date(value);
@@ -39,7 +54,9 @@ function expiryState(pairing, now) {
   }
   const remainingMs = expiresAt.getTime() - now.getTime();
   if (remainingMs <= 0) return { expired: true, label: 'Expired' };
-  const remainingMinutes = Math.max(1, Math.ceil(remainingMs / 60000));
+  // Keep ceil semantics but subtract a tiny buffer to avoid edge flicker
+  // like "6 min" dropping to "5 min" one second later.
+  const remainingMinutes = Math.max(1, Math.ceil((remainingMs - 1000) / 60000));
   return {
     expired: false,
     label: `Expires in ${remainingMinutes} min`,
@@ -220,8 +237,11 @@ export default function PairMobileDialog({ onClose, onChanged }) {
   const [pairing, setPairing] = React.useState(null);
   const [error, setError] = React.useState('');
   const [busy, setBusy] = React.useState(false);
+  const [refreshHover, setRefreshHover] = React.useState(false);
+  const [copiedJson, setCopiedJson] = React.useState(false);
   const [now, setNow] = React.useState(() => new Date());
   const createdRef = React.useRef(false);
+  const copyResetTimerRef = React.useRef(null);
 
   const createPairing = React.useCallback(async (url = relayUrl) => {
     const trimmed = url.trim();
@@ -259,6 +279,19 @@ export default function PairMobileDialog({ onClose, onChanged }) {
   }, [pairing?.offer?.expires_at]);
 
   const expiry = expiryState(pairing, now);
+  const copyPairingJson = React.useCallback(async () => {
+    if (!pairing?.qr_text) return;
+    try {
+      await navigator.clipboard.writeText(pairing.qr_text);
+      setCopiedJson(true);
+      if (copyResetTimerRef.current) window.clearTimeout(copyResetTimerRef.current);
+      copyResetTimerRef.current = window.setTimeout(() => setCopiedJson(false), 1500);
+    } catch {}
+  }, [pairing?.qr_text]);
+
+  React.useEffect(() => () => {
+    if (copyResetTimerRef.current) window.clearTimeout(copyResetTimerRef.current);
+  }, []);
 
   return (
     <ModalShell
@@ -393,8 +426,29 @@ export default function PairMobileDialog({ onClose, onChanged }) {
                 </button>
               )}
             </div>
-            <div style={{ fontFamily: MONO_FONT, color: '#807972', fontSize: 11.5 }}>
-              {expiry.label}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <div style={{ fontFamily: MONO_FONT, color: '#807972', fontSize: 11.5 }}>
+                {expiry.label}
+              </div>
+              {!expiry.expired && (
+                <button
+                  type="button"
+                  aria-label="Refresh QR"
+                  onClick={() => createPairing(relayUrl)}
+                  disabled={busy}
+                  onMouseEnter={() => setRefreshHover(true)}
+                  onMouseLeave={() => setRefreshHover(false)}
+                  style={{
+                    ...iconButtonGhost,
+                    borderColor: 'transparent',
+                    background: refreshHover ? '#F6F2E4' : 'transparent',
+                    opacity: busy ? 0.65 : 1,
+                    cursor: busy ? 'default' : 'pointer',
+                  }}
+                >
+                  <Icon name="reset" size={13} />
+                </button>
+              )}
             </div>
           </>
         ) : (
@@ -404,20 +458,20 @@ export default function PairMobileDialog({ onClose, onChanged }) {
         )}
       </div>
 
-      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-        <button type="button" onClick={onClose} style={ghostBtn}>Close</button>
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
         <button
           type="button"
-          onClick={() => createPairing(relayUrl)}
-          disabled={busy}
+          onClick={copyPairingJson}
+          disabled={!pairing?.qr_text}
           style={{
-            ...primaryBtn,
-            opacity: busy ? 0.65 : 1,
-            cursor: busy ? 'default' : 'pointer',
+            ...ghostBtn,
+            opacity: pairing?.qr_text ? 1 : 0.55,
+            cursor: pairing?.qr_text ? 'pointer' : 'default',
           }}
         >
-          {busy ? 'Creating...' : 'Refresh QR'}
+          {copiedJson ? 'Copied' : 'Copy JSON'}
         </button>
+        <button type="button" onClick={onClose} style={primaryBtn}>Close</button>
       </div>
     </ModalShell>
   );

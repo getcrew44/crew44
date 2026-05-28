@@ -103,6 +103,34 @@ export function LoadingState({ label = "Loading..." }: { label?: string }) {
   return <div className="loading">{label}</div>;
 }
 
+function OfflineComputer() {
+  return (
+    <div className="offline-art" aria-hidden="true">
+      <div className="offline-monitor">
+        <div className="offline-face">
+          <div className="offline-eyes"><span /><span /></div>
+          <div className="offline-sleep" />
+        </div>
+      </div>
+      <div className="offline-stand" />
+      <div className="offline-base" />
+      <div className="offline-cord"><span /><span /></div>
+    </div>
+  );
+}
+
+export function OtherOptions({ onUnpair }: { onUnpair: () => void }) {
+  const [open, setOpen] = React.useState(false);
+  return (
+    <div className="other-options">
+      <button type="button" className="other-button" aria-expanded={open} onClick={() => setOpen(value => !value)}>
+        Other options
+      </button>
+      {open ? <Button variant="danger" onClick={onUnpair}>Unpair</Button> : null}
+    </div>
+  );
+}
+
 export function OfflineState({
   title,
   message,
@@ -115,11 +143,31 @@ export function OfflineState({
   onUnpair: () => void;
 }) {
   return (
-    <EmptyState title={title} body={message}>
-      <div className="button-row">
+    <section className="offline-state">
+      <OfflineComputer />
+      <h2>{title}</h2>
+      <p>{message || "The mobile app cannot reach your paired desktop right now."}</p>
+      <div className="offline-actions">
         <Button onClick={onRetry}>Retry</Button>
-        <Button variant="danger" onClick={onUnpair}>Unpair</Button>
+        <OtherOptions onUnpair={onUnpair} />
       </div>
-    </EmptyState>
+    </section>
+  );
+}
+
+export function ConnectingState({
+  label = "Connecting to the Crew44 desktop...",
+  onUnpair,
+  showOtherOptions = false
+}: {
+  label?: string;
+  onUnpair: () => void;
+  showOtherOptions?: boolean;
+}) {
+  return (
+    <section className="connecting-state">
+      <LoadingState label={label} />
+      {showOtherOptions ? <OtherOptions onUnpair={onUnpair} /> : null}
+    </section>
   );
 }

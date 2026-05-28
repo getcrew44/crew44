@@ -3,8 +3,9 @@ import { buildRenderableTimeline, mapBackendEvent, TimelineItem } from "@/api/ev
 import { Agent, BackendEvent, Chat } from "@/api/types";
 import { useMobileClient } from "@/client/MobileClientProvider";
 import { Button, EmptyState, Header, IconButton, LoadingState, OfflineState, Screen } from "@/ui/Screen";
-import { BackIcon } from "@/ui/icons";
-import { Timeline } from "@/ui/Timeline";
+import { BackIcon, SendIcon, StopIcon } from "@/ui/icons";
+import { AgentTargetPicker } from "@/ui/AgentTargetPicker";
+import { LoadedToolDetails, Timeline } from "@/ui/Timeline";
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -19,6 +20,14 @@ function targetAgentFromText(value: string, agents: Agent[]): string {
   return "";
 }
 
+function mentionBounds(value: string, cursor: number) {
+  const before = value.slice(0, cursor);
+  const match = before.match(/(^|\s)@([^\s@]*)$/);
+  if (!match) return null;
+  const start = before.length - match[0].length + match[1].length;
+  return { start, end: cursor, query: match[2] || "" };
+}
+
 export function ChatPage({
   chatId,
   navigate
@@ -31,6 +40,7 @@ export function ChatPage({
   const [agents, setAgents] = React.useState<Agent[]>([]);
   const [items, setItems] = React.useState<TimelineItem[]>([]);
   const [draft, setDraft] = React.useState("");
+  const [cursor, setCursor] = React.useState(0);
   const [targetAgentId, setTargetAgentId] = React.useState("");
   const [loading, setLoading] = React.useState(true);
   const [streaming, setStreaming] = React.useState(false);
@@ -40,7 +50,16 @@ export function ChatPage({
   const didInitialScrollRef = React.useRef(false);
   const lastSeq = React.useRef(0);
   const cleanupRef = React.useRef<() => void>(() => {});
+  const composerRef = React.useRef<HTMLTextAreaElement | null>(null);
 
+  const activeMention = React.useMemo(() => mentionBounds(draft, cursor), [cursor, draft]);
+  const mentionOptions = React.useMemo(() => {
+    if (!activeMention) return [];
+    const query = activeMention.query.toLowerCase();
+    return agents
+      .filter(agent => agent.name.toLowerCase().includes(query))
+      .slice(0, 6);
+  }, [activeMention, agents]);
   const renderItems = React.useMemo(() => buildRenderableTimeline(items), [items]);
 
   const scrollToBottom = React.useCallback((smooth = true) => {
@@ -154,6 +173,7 @@ export function ChatPage({
     const text = draft.trim();
     const steeringActiveRun = streaming;
     setDraft("");
+    setCursor(0);
     shouldStickToBottomRef.current = true;
     if (!steeringActiveRun) {
       const optimisticSeq = -Date.now();
@@ -183,11 +203,56 @@ export function ChatPage({
     }
   }, [agents, chat, chatId, client.api, draft, streaming, subscribe, targetAgentId]);
 
+  const updateCursor = React.useCallback(() => {
+    const el = composerRef.current;
+    if (!el) return;
+    setCursor(el.selectionStart || 0);
+  }, []);
+
+  const selectMention = React.useCallback((agent: Agent) => {
+    if (!activeMention) return;
+    const next = `${draft.slice(0, activeMention.start)}@${agent.name} ${draft.slice(activeMention.end)}`;
+    const nextCursor = activeMention.start + agent.name.length + 2;
+    setDraft(next);
+    setCursor(nextCursor);
+    setTargetAgentId(agent.id);
+    requestAnimationFrame(() => {
+      const el = composerRef.current;
+      if (!el) return;
+      el.focus();
+      el.setSelectionRange(nextCursor, nextCursor);
+    });
+  }, [activeMention, draft]);
+
   const cancel = React.useCallback(async () => {
     if (!client.api) return;
     await client.api.cancelChat(chatId);
     cleanupRef.current();
     setStreaming(false);
+  }, [chatId, client.api]);
+
+  const loadToolDetails = React.useCallback(async (toolCallSeq: number): Promise<LoadedToolDetails> => {
+    if (!client.api) throw new Error("Not connected");
+    const details = await client.api.getToolDetails(chatId, toolCallSeq);
+    const call = mapBackendEvent(details.tool_call);
+    const result = details.tool_result ? mapBackendEvent(details.tool_result) : null;
+    if (!call || call.kind !== "tool") throw new Error("Tool call not found");
+    if (result?.kind === "tool_result") {
+      return {
+        path: call.path,
+        input: call.input,
+        result: "ok",
+        output: result.output,
+        detail: result.output.slice(0, 120)
+      };
+    }
+    return {
+      path: call.path,
+      input: call.input,
+      result: call.result,
+      output: call.output,
+      detail: call.detail
+    };
   }, [chatId, client.api]);
 
   if (client.status === "error" && !client.api) {
@@ -217,29 +282,54 @@ export function ChatPage({
             {renderItems.length === 0 ? (
               <EmptyState title="No messages yet" body="Send the first message to this crew." />
             ) : (
-              <Timeline items={renderItems} agents={agents} />
+              <Timeline items={renderItems} agents={agents} onLoadToolDetails={loadToolDetails} />
             )}
           </div>
           {error ? <p className="inline-error">{error}</p> : null}
           {streaming ? <p className="streaming-label">Agent is working...</p> : null}
-          {!streaming && agents.length > 0 ? (
-            <div className="target-row">
-              <select value={targetAgentId} onChange={event => setTargetAgentId(event.target.value)} aria-label="Target agent">
-                {agents.map(agent => (
-                  <option value={agent.id} key={agent.id}>{agent.name}</option>
-                ))}
-              </select>
+          {mentionOptions.length > 0 ? (
+            <div className="mention-menu">
+              {mentionOptions.map(agent => (
+                <button type="button" className="mention-item" key={agent.id} onClick={() => selectMention(agent)}>
+                  <span className="mention-avatar">{(agent.name || "?")[0].toUpperCase()}</span>
+                  <span>{agent.name}</span>
+                </button>
+              ))}
             </div>
           ) : null}
           <form className="composer" onSubmit={event => { event.preventDefault(); send().catch(() => {}); }}>
             <textarea
+              ref={composerRef}
               value={draft}
-              onChange={event => setDraft(event.target.value)}
+              onChange={event => {
+                setDraft(event.target.value);
+                setCursor(event.target.selectionStart || event.target.value.length);
+              }}
+              onSelect={updateCursor}
+              onClick={updateCursor}
+              onKeyUp={updateCursor}
               placeholder={streaming ? "Steer this run" : "Message the crew"}
-              rows={2}
+              rows={1}
             />
-            <button type="submit" className="send-button" disabled={!draft.trim()}>{streaming ? "Steer" : "Send"}</button>
-            {streaming ? <button type="button" className="stop-button" onClick={() => cancel().catch(() => {})}>Stop</button> : null}
+            <div className="composer-meta">
+              {!streaming && agents.length > 0 ? (
+                <AgentTargetPicker
+                  agents={agents}
+                  value={targetAgentId || chat?.current_agent_id || chat?.main_agent_id || agents[0].id}
+                  onChange={setTargetAgentId}
+                />
+              ) : <span />}
+              <div className="composer-actions">
+                {streaming ? (
+                  <button type="button" className="stop-button" aria-label="Stop" onClick={() => cancel().catch(() => {})}>
+                    <StopIcon />
+                  </button>
+                ) : null}
+                <button type="submit" className="send-button" aria-label={streaming ? "Steer" : "Send"} disabled={!draft.trim()}>
+                  <SendIcon />
+                </button>
+              </div>
+            </div>
           </form>
         </>
       )}
