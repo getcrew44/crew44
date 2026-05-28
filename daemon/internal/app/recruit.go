@@ -26,7 +26,7 @@ type RecruitListItem struct {
 func (a *App) ListRecruitAgents(ctx context.Context) ([]RecruitListItem, error) {
 	env, err := a.recruit.FetchRegistry(ctx)
 	if err != nil {
-		return nil, err
+		return nil, mapRecruitError(err)
 	}
 	installed, err := a.installedRepoURLs()
 	if err != nil {
@@ -53,11 +53,14 @@ func (a *App) GetRecruitAgent(ctx context.Context, registryID string) (recruit.A
 	}
 	manifest, coord, err := a.recruit.FetchManifest(ctx, entry.RepoURL)
 	if err != nil {
-		return recruit.AgentDetail{}, err
+		return recruit.AgentDetail{}, mapRecruitError(err)
 	}
 	agentBody, err := a.recruit.FetchAtRef(ctx, coord, recruit.DefaultRegistryRef, "AGENT.md")
 	if err != nil {
-		return recruit.AgentDetail{}, fmt.Errorf("read AGENT.md: %w", err)
+		if errors.Is(err, recruit.ErrTagNotFound) {
+			return recruit.AgentDetail{}, fmt.Errorf("%w: AGENT.md missing in repo", ErrBadRequest)
+		}
+		return recruit.AgentDetail{}, mapRecruitError(err)
 	}
 	return recruit.AgentDetail{
 		Entry:     entry,
@@ -78,21 +81,21 @@ func (a *App) InstallRecruitAgent(ctx context.Context, registryID string) (model
 	}
 	headManifest, coord, err := a.recruit.FetchManifest(ctx, entry.RepoURL)
 	if err != nil {
-		return model.AgentConfig{}, err
+		return model.AgentConfig{}, mapRecruitError(err)
 	}
 	tag, pinnedManifest, err := a.recruit.ResolveTag(ctx, coord, headManifest.Version)
 	if err != nil {
 		if errors.Is(err, recruit.ErrTagNotFound) {
 			return model.AgentConfig{}, fmt.Errorf("%w: author has not published release %s yet", ErrBadRequest, headManifest.Version)
 		}
-		return model.AgentConfig{}, err
+		return model.AgentConfig{}, mapRecruitError(err)
 	}
 	agentBody, err := a.recruit.FetchAtRef(ctx, coord, tag, "AGENT.md")
 	if err != nil {
 		if errors.Is(err, recruit.ErrTagNotFound) {
 			return model.AgentConfig{}, fmt.Errorf("%w: AGENT.md missing at release %s", ErrBadRequest, tag)
 		}
-		return model.AgentConfig{}, err
+		return model.AgentConfig{}, mapRecruitError(err)
 	}
 
 	runtimeRecord, err := a.pickAvailableRuntime()
@@ -107,7 +110,7 @@ func (a *App) InstallRecruitAgent(ctx context.Context, registryID string) (model
 			if errors.Is(err, recruit.ErrTagNotFound) {
 				return model.AgentConfig{}, fmt.Errorf("%w: skill file missing at release %s: %s", ErrBadRequest, tag, decl.Path)
 			}
-			return model.AgentConfig{}, err
+			return model.AgentConfig{}, mapRecruitError(err)
 		}
 		skillFiles[decl.Path] = body
 	}
@@ -265,7 +268,7 @@ func (a *App) installedRepoURLs() (map[string]bool, error) {
 func (a *App) findRegistryEntry(ctx context.Context, registryID string) (recruit.RegistryEntry, error) {
 	env, err := a.recruit.FetchRegistry(ctx)
 	if err != nil {
-		return recruit.RegistryEntry{}, err
+		return recruit.RegistryEntry{}, mapRecruitError(err)
 	}
 	for _, entry := range env.Agents {
 		if entry.ID == registryID {
@@ -273,4 +276,27 @@ func (a *App) findRegistryEntry(ctx context.Context, registryID string) (recruit
 		}
 	}
 	return recruit.RegistryEntry{}, ErrNotFound
+}
+
+// mapRecruitError converts errors emitted by the registry client into
+// app-layer sentinels the RPC boundary already knows how to translate.
+// Metadata problems (invalid manifest, unsafe path, invalid registry,
+// version mismatch, bad repo url) are joined with ErrBadRequest so the
+// UI sees the underlying message instead of a generic "internal error",
+// and tests can still detect the original recruit sentinel via
+// errors.Is. Network errors and other unexpected failures pass through
+// unchanged and remain internal.
+func mapRecruitError(err error) error {
+	if err == nil {
+		return nil
+	}
+	switch {
+	case errors.Is(err, recruit.ErrManifestInvalid),
+		errors.Is(err, recruit.ErrUnsafePath),
+		errors.Is(err, recruit.ErrRegistryInvalid),
+		errors.Is(err, recruit.ErrVersionMismatch),
+		errors.Is(err, recruit.ErrRepoURLInvalid):
+		return errors.Join(ErrBadRequest, err)
+	}
+	return err
 }

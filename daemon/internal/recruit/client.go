@@ -34,11 +34,12 @@ const (
 // Sentinels returned by the client so the RPC layer can map errors to
 // user-facing toasts without string-matching.
 var (
-	ErrTagNotFound      = errors.New("recruit: release tag not found")
-	ErrManifestInvalid  = errors.New("recruit: invalid manifest")
-	ErrRegistryInvalid  = errors.New("recruit: invalid registry")
-	ErrUnsafePath       = errors.New("recruit: unsafe path in manifest")
-	ErrVersionMismatch  = errors.New("recruit: tag manifest version disagrees with requested version")
+	ErrTagNotFound     = errors.New("recruit: release tag not found")
+	ErrManifestInvalid = errors.New("recruit: invalid manifest")
+	ErrRegistryInvalid = errors.New("recruit: invalid registry")
+	ErrUnsafePath      = errors.New("recruit: unsafe path in manifest")
+	ErrVersionMismatch = errors.New("recruit: tag manifest version disagrees with requested version")
+	ErrRepoURLInvalid  = errors.New("recruit: invalid repo url")
 )
 
 // Config is the externally-tunable knobs for Client. All fields are

@@ -15,19 +15,19 @@ type repoCoord struct {
 
 // parseGitHubRepo accepts forms like https://github.com/owner/repo or
 // https://github.com/owner/repo.git and returns the owner/repo coordinate.
-// Returns an error for any non-github.com host so the install path can
-// give a clear "only github.com is supported in v1" message.
+// Returns ErrRepoURLInvalid for any non-github.com host or malformed
+// path so callers can map the failure to a clear user-facing error.
 func parseGitHubRepo(repoURL string) (repoCoord, error) {
 	u, err := url.Parse(strings.TrimSpace(repoURL))
 	if err != nil {
-		return repoCoord{}, fmt.Errorf("invalid repo url: %w", err)
+		return repoCoord{}, fmt.Errorf("%w: %v", ErrRepoURLInvalid, err)
 	}
 	if u.Host != "github.com" {
-		return repoCoord{}, fmt.Errorf("only github.com repos are supported (got %q)", u.Host)
+		return repoCoord{}, fmt.Errorf("%w: only github.com repos are supported (got %q)", ErrRepoURLInvalid, u.Host)
 	}
 	parts := strings.Split(strings.Trim(u.Path, "/"), "/")
 	if len(parts) < 2 || parts[0] == "" || parts[1] == "" {
-		return repoCoord{}, fmt.Errorf("repo url missing owner/repo: %s", repoURL)
+		return repoCoord{}, fmt.Errorf("%w: missing owner/repo in %s", ErrRepoURLInvalid, repoURL)
 	}
 	return repoCoord{Owner: parts[0], Repo: strings.TrimSuffix(parts[1], ".git")}, nil
 }

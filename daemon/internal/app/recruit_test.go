@@ -408,6 +408,33 @@ func TestRecruitInstallMissingManifestField(t *testing.T) {
 	if !errors.Is(err, recruit.ErrManifestInvalid) {
 		t.Fatalf("expected ErrManifestInvalid, got %v", err)
 	}
+	// Recruit metadata failures must map to ErrBadRequest so the RPC
+	// layer translates them to a -32000 bad-request the UI can render
+	// as a clean toast, not a generic internal error.
+	if !errors.Is(err, ErrBadRequest) {
+		t.Fatalf("expected ErrBadRequest (for RPC mapping), got %v", err)
+	}
+}
+
+// Bad repo URLs in the registry must also surface as ErrBadRequest, not
+// as an internal error. Uses a non-github.com host that parseGitHubRepo
+// rejects with ErrRepoURLInvalid.
+func TestRecruitInstallBadRepoURLMapsToBadRequest(t *testing.T) {
+	f := newFakeRegistry(t)
+	f.set("/registry/test/HEAD/agents.json", `{
+		"schema_version":"crew44.agent-registry.v1",
+		"agents":[{"id":"x","name":"X","description":"d","repo_url":"https://gitlab.com/o/r"}]
+	}`)
+	srv := httptest.NewServer(f.handler())
+	defer srv.Close()
+	a := newRecruitTestApp(t, srv)
+	_, err := a.InstallRecruitAgent(context.Background(), "x")
+	if !errors.Is(err, ErrBadRequest) {
+		t.Fatalf("expected ErrBadRequest, got %v", err)
+	}
+	if !errors.Is(err, recruit.ErrRepoURLInvalid) {
+		t.Fatalf("expected ErrRepoURLInvalid, got %v", err)
+	}
 }
 
 func TestRecruitGetReturnsHEADManifestAndBody(t *testing.T) {
