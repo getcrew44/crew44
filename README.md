@@ -11,10 +11,13 @@
 ![Platforms](https://img.shields.io/badge/platforms-macOS%20·%20Windows%20·%20Linux-1c1a17)
 ![Free](https://img.shields.io/badge/price-free-5b9c5f.svg)
 
+
 [**Download**](https://crew44.io/download) · [Website](https://crew44.io) · [What's new](CHANGELOG.md)
 
 
+<a href="https://www.producthunt.com/products/crew44?embed=true&amp;utm_source=badge-featured&amp;utm_medium=badge&amp;utm_campaign=badge-crew44" target="_blank" rel="noopener noreferrer"><img alt="Crew44 - Turn coding agents into specialist teams | Product Hunt" width="250" height="54" src="https://api.producthunt.com/widgets/embed-image/v1/featured.svg?post_id=1156940&amp;theme=light&amp;t=1779982023946"></a>
 </div>
+
 
 ---
 
