@@ -38,22 +38,25 @@ select {
 }
 
 .header {
-  min-height: calc(56px + env(safe-area-inset-top));
-  padding: calc(8px + env(safe-area-inset-top)) 12px 8px;
-  display: grid;
-  grid-template-columns: 72px minmax(0, 1fr) 72px;
+  min-height: calc(58px + env(safe-area-inset-top));
+  padding: calc(12px + env(safe-area-inset-top)) 18px 12px;
+  display: flex;
+  gap: 12px;
   align-items: center;
   border-bottom: 1px solid #e6dfcc;
-  background: #fcfbf7;
+  background: #faf5e8;
   flex-shrink: 0;
+  z-index: 30;
 }
 
 .header h1 {
+  flex: 1;
   margin: 0;
-  font-size: 17px;
+  color: #1c1a17;
+  font-size: 22px;
   font-weight: 700;
   line-height: 1.25;
-  text-align: center;
+  text-align: left;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -80,8 +83,8 @@ select {
 
 .button {
   min-height: 38px;
-  padding: 8px 13px;
-  font-size: 13px;
+  padding: 8px 14px;
+  font-size: 14px;
 }
 
 .button:disabled,
@@ -91,14 +94,14 @@ select {
 }
 
 .button-ghost {
-  background: #fcfaf1;
-  border-color: #d8cfb8;
+  background: #fffef8;
+  border-color: #e6dfcc;
   color: #5c544b;
 }
 
 .button-danger {
-  background: #fff8f5;
-  border-color: #efc9bb;
+  background: #fffef8;
+  border-color: #e7b8aa;
   color: #b8553e;
 }
 
@@ -130,6 +133,13 @@ select {
   stroke: none;
 }
 
+.back-symbol {
+  color: #1c1a17;
+  font-size: 32px;
+  line-height: 34px;
+  font-weight: 500;
+}
+
 .button-row {
   display: flex;
   gap: 10px;
@@ -148,6 +158,23 @@ select {
   padding: 28px;
   text-align: center;
   color: #807972;
+}
+
+.loading::before {
+  content: "";
+  width: 20px;
+  height: 20px;
+  border: 2px solid #d8cfb8;
+  border-top-color: #20744a;
+  border-radius: 50%;
+  margin-bottom: 10px;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .empty-state h2 {
@@ -186,8 +213,8 @@ select {
 }
 
 .camera-box {
-  height: min(52vh, 340px);
-  min-height: 260px;
+  height: 300px;
+  min-height: 300px;
   border: 1px solid #d8cfb8;
   border-radius: 8px;
   overflow: hidden;
@@ -217,19 +244,19 @@ select {
 
 textarea {
   width: 100%;
-  border: 1px solid #d8cfb8;
-  background: #fffdf7;
+  border: 1px solid #e6dfcc;
+  background: #fffef8;
   color: #1c1a17;
   border-radius: 8px;
   padding: 11px 12px;
   resize: vertical;
-  min-height: 84px;
+  min-height: 92px;
   outline: none;
 }
 
 select {
-  border: 1px solid #d8cfb8;
-  background: #fcfaf1;
+  border: 1px solid #e6dfcc;
+  background: #fffef8;
   color: #1c1a17;
   border-radius: 7px;
   padding: 7px 9px;
@@ -267,16 +294,16 @@ select {
 
 .row {
   width: 100%;
-  min-height: 64px;
+  min-height: 68px;
   border: 0;
   border-bottom: 1px solid #ece6d5;
-  background: #fcfbf7;
+  background: transparent;
   color: #1c1a17;
   display: flex;
   align-items: center;
   gap: 12px;
   text-align: left;
-  padding: 12px 18px;
+  padding: 13px 18px;
   cursor: pointer;
 }
 
@@ -296,19 +323,23 @@ select {
 }
 
 .row-title {
-  font-size: 15px;
-  font-weight: 700;
+  font-size: 16px;
+  font-weight: 600;
 }
 
 .row-subtitle {
   color: #807972;
-  font-size: 12.5px;
+  font-size: 13px;
+  line-height: 18px;
+  margin-top: 3px;
 }
 
 .chevron,
 .row-right {
   color: #a89f92;
   flex-shrink: 0;
+  font-size: 26px;
+  line-height: 28px;
 }
 
 .menu-host {
@@ -534,23 +565,60 @@ select {
 }
 
 .composer {
-  display: grid;
-  grid-template-columns: minmax(96px, 34%) 1fr 38px;
-  gap: 8px;
+  display: flex;
+  gap: 10px;
   align-items: end;
-  padding: 10px 12px calc(10px + env(safe-area-inset-bottom));
+  padding: 12px 12px calc(12px + env(safe-area-inset-bottom));
   border-top: 1px solid #e6dfcc;
-  background: #fcfbf7;
-}
-
-.composer:has(.icon-button:nth-last-child(2)) {
-  grid-template-columns: minmax(88px, 28%) 1fr 38px 38px;
+  background: #faf5e8;
 }
 
 .composer textarea {
-  min-height: 38px;
+  flex: 1;
+  min-height: 42px;
   max-height: 120px;
   resize: none;
+  font-size: 15px;
+  padding: 10px 12px;
+}
+
+.target-row {
+  padding: 8px 12px 0;
+  background: #faf5e8;
+}
+
+.target-row select {
+  width: 100%;
+  min-height: 38px;
+}
+
+.send-button,
+.stop-button {
+  min-height: 42px;
+  border-radius: 8px;
+  padding: 0 12px;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.send-button {
+  min-width: 66px;
+  border: 1px solid #1c1a17;
+  background: #1c1a17;
+  color: #fcfbf7;
+}
+
+.send-button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.stop-button {
+  min-width: 58px;
+  border: 1px solid #e6dfcc;
+  background: transparent;
+  color: #807972;
 }
 
 .agent-detail {

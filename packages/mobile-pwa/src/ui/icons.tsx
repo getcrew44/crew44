@@ -1,9 +1,5 @@
 export function BackIcon() {
-  return (
-    <svg viewBox="0 0 16 16" aria-hidden="true">
-      <path d="M10 3.5 5.5 8l4.5 4.5" />
-    </svg>
-  );
+  return <span className="back-symbol" aria-hidden="true">‹</span>;
 }
 
 export function MoreIcon() {

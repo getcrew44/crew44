@@ -15,9 +15,9 @@ export function Header({
 }) {
   return (
     <header className="header">
-      <div className="header-side">{left}</div>
+      {left ? <div className="header-side">{left}</div> : null}
       <h1>{title}</h1>
-      <div className="header-side header-right">{right}</div>
+      {right ? <div className="header-side header-right">{right}</div> : null}
     </header>
   );
 }

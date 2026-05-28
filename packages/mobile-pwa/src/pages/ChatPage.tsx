@@ -3,7 +3,7 @@ import { buildRenderableTimeline, mapBackendEvent, TimelineItem } from "@/api/ev
 import { Agent, BackendEvent, Chat } from "@/api/types";
 import { useMobileClient } from "@/client/MobileClientProvider";
 import { Button, EmptyState, Header, IconButton, LoadingState, OfflineState, Screen } from "@/ui/Screen";
-import { BackIcon, SendIcon, StopIcon } from "@/ui/icons";
+import { BackIcon } from "@/ui/icons";
 import { Timeline } from "@/ui/Timeline";
 
 function escapeRegExp(value: string): string {
@@ -222,26 +222,24 @@ export function ChatPage({
           </div>
           {error ? <p className="inline-error">{error}</p> : null}
           {streaming ? <p className="streaming-label">Agent is working...</p> : null}
+          {!streaming && agents.length > 0 ? (
+            <div className="target-row">
+              <select value={targetAgentId} onChange={event => setTargetAgentId(event.target.value)} aria-label="Target agent">
+                {agents.map(agent => (
+                  <option value={agent.id} key={agent.id}>{agent.name}</option>
+                ))}
+              </select>
+            </div>
+          ) : null}
           <form className="composer" onSubmit={event => { event.preventDefault(); send().catch(() => {}); }}>
-            <select value={targetAgentId} onChange={event => setTargetAgentId(event.target.value)} aria-label="Target agent">
-              {agents.map(agent => (
-                <option value={agent.id} key={agent.id}>{agent.name}</option>
-              ))}
-            </select>
             <textarea
               value={draft}
               onChange={event => setDraft(event.target.value)}
-              placeholder={streaming ? "Steer the running agent..." : "Message the crew..."}
+              placeholder={streaming ? "Steer this run" : "Message the crew"}
               rows={2}
             />
-            {streaming ? (
-              <IconButton label="Stop" onClick={() => cancel().catch(() => {})}>
-                <StopIcon />
-              </IconButton>
-            ) : null}
-            <IconButton type="submit" label={streaming ? "Interrupt" : "Send"} disabled={!draft.trim()}>
-              <SendIcon />
-            </IconButton>
+            <button type="submit" className="send-button" disabled={!draft.trim()}>{streaming ? "Steer" : "Send"}</button>
+            {streaming ? <button type="button" className="stop-button" onClick={() => cancel().catch(() => {})}>Stop</button> : null}
           </form>
         </>
       )}
