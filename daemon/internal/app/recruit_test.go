@@ -254,6 +254,36 @@ func TestRecruitInstallVersionBumpUpdatesContent(t *testing.T) {
 	}
 }
 
+// Install must refuse a tag whose pinned manifest disagrees with the
+// HEAD manifest's version. Simulates a force-pushed release tag.
+func TestRecruitInstallRejectsVersionMismatch(t *testing.T) {
+	f := newFakeRegistry(t)
+	f.set("/registry/test/HEAD/agents.json", `{
+		"schema_version":"crew44.agent-registry.v1",
+		"agents":[{"id":"patch","name":"Patch","description":"d","repo_url":"https://github.com/hex/patch-agent"}]
+	}`)
+	// HEAD says 1.0.0, but both candidate tags claim 9.9.9.
+	f.set("/hex/patch-agent/HEAD/crew44-agent.json", `{
+		"schema_version":"crew44.agent.v1","name":"Patch","version":"1.0.0","description":"d"
+	}`)
+	divergent := `{
+		"schema_version":"crew44.agent.v1","name":"Patch","version":"9.9.9","description":"d"
+	}`
+	f.set("/hex/patch-agent/v1.0.0/crew44-agent.json", divergent)
+	f.set("/hex/patch-agent/1.0.0/crew44-agent.json", divergent)
+	srv := httptest.NewServer(f.handler())
+	defer srv.Close()
+	a := newRecruitTestApp(t, srv)
+
+	_, err := a.InstallRecruitAgent(context.Background(), "patch")
+	if err == nil {
+		t.Fatal("expected install to reject divergent tag manifest")
+	}
+	if !errors.Is(err, recruit.ErrVersionMismatch) {
+		t.Fatalf("expected ErrVersionMismatch, got %v", err)
+	}
+}
+
 func TestRecruitInstallMissingTag(t *testing.T) {
 	f := newFakeRegistry(t)
 	// Registry + HEAD manifest exist, but no tag was published.

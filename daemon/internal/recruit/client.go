@@ -38,6 +38,7 @@ var (
 	ErrManifestInvalid  = errors.New("recruit: invalid manifest")
 	ErrRegistryInvalid  = errors.New("recruit: invalid registry")
 	ErrUnsafePath       = errors.New("recruit: unsafe path in manifest")
+	ErrVersionMismatch  = errors.New("recruit: tag manifest version disagrees with requested version")
 )
 
 // Config is the externally-tunable knobs for Client. All fields are
@@ -185,15 +186,18 @@ func (c *Client) FetchAtRef(ctx context.Context, coord repoCoord, ref, filePath 
 }
 
 // ResolveTag picks the first candidate ref (vX or X) whose
-// crew44-agent.json exists. Returns ErrTagNotFound if neither exists.
-// The fetched manifest at the tag is returned alongside, so the caller
-// can verify name/skills haven't drifted between HEAD and the tag.
+// crew44-agent.json exists AND declares a matching version, so a
+// force-pushed tag carrying a divergent manifest is rejected rather
+// than silently installed. Returns ErrTagNotFound when no candidate
+// ref exists, and ErrVersionMismatch when a ref exists but its
+// manifest version disagrees with the requested version.
 func (c *Client) ResolveTag(ctx context.Context, coord repoCoord, version string) (string, Manifest, error) {
 	candidates := candidateRefs(version)
 	if len(candidates) == 0 {
 		return "", Manifest{}, fmt.Errorf("%w: empty version", ErrManifestInvalid)
 	}
 	var lastErr error
+	var mismatch *versionMismatchInfo
 	for _, ref := range candidates {
 		body, err := c.getBytes(ctx, rawFileURL(c.rawBase, coord, ref, "crew44-agent.json"), maxJSONBytes)
 		if err != nil {
@@ -207,12 +211,36 @@ func (c *Client) ResolveTag(ctx context.Context, coord repoCoord, version string
 		if err := validateManifest(&m); err != nil {
 			return "", Manifest{}, err
 		}
+		if !versionMatches(m.Version, version) {
+			// Record the first mismatch but keep trying — the other
+			// candidate ref might be correct.
+			if mismatch == nil {
+				mismatch = &versionMismatchInfo{ref: ref, gotVersion: m.Version}
+			}
+			continue
+		}
 		return ref, m, nil
+	}
+	if mismatch != nil {
+		return "", Manifest{}, fmt.Errorf("%w: tag %s declares version %q, expected %q",
+			ErrVersionMismatch, mismatch.ref, mismatch.gotVersion, version)
 	}
 	if errors.Is(lastErr, ErrTagNotFound) {
 		return "", Manifest{}, ErrTagNotFound
 	}
 	return "", Manifest{}, ErrTagNotFound
+}
+
+type versionMismatchInfo struct {
+	ref        string
+	gotVersion string
+}
+
+// versionMatches compares two version strings allowing the same
+// v-prefix tolerance the tag resolver uses elsewhere. "1.2.0",
+// "v1.2.0", and " v1.2.0 " are all considered equivalent.
+func versionMatches(a, b string) bool {
+	return strings.TrimPrefix(strings.TrimSpace(a), "v") == strings.TrimPrefix(strings.TrimSpace(b), "v")
 }
 
 // getBytes performs a single GET and reads up to limit bytes. 404 is

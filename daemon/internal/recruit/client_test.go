@@ -194,3 +194,68 @@ func TestResolveTagMissing(t *testing.T) {
 		t.Fatalf("expected ErrTagNotFound, got %v", err)
 	}
 }
+
+// A force-pushed tag whose manifest declares a different version must
+// be rejected, not silently installed. Both candidate refs (vX and X)
+// are served the divergent manifest so the resolver has nothing valid
+// to fall back to.
+func TestResolveTagRejectsVersionMismatch(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"schema_version":"crew44.agent.v1","name":"X","version":"9.9.9","description":"d"}`))
+	}))
+	defer srv.Close()
+	c := NewClient(Config{RawBase: srv.URL})
+	_, _, err := c.ResolveTag(context.Background(), repoCoord{Owner: "o", Repo: "r"}, "1.0.0")
+	if !errors.Is(err, ErrVersionMismatch) {
+		t.Fatalf("expected ErrVersionMismatch, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "9.9.9") || !strings.Contains(err.Error(), "1.0.0") {
+		t.Fatalf("error should name both versions: %v", err)
+	}
+}
+
+// When only one of the candidate refs is mismatched but the other is
+// correct, the correct one wins. Guards against breaking the v-prefix
+// fallback while adding the version check.
+func TestResolveTagFallsBackBetweenCandidates(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "/v1.0.0/") {
+			// v-prefixed tag is wrong: declares 9.9.9.
+			w.Write([]byte(`{"schema_version":"crew44.agent.v1","name":"X","version":"9.9.9","description":"d"}`))
+			return
+		}
+		if strings.Contains(r.URL.Path, "/1.0.0/") {
+			// Bare-version tag is correct.
+			w.Write([]byte(`{"schema_version":"crew44.agent.v1","name":"X","version":"1.0.0","description":"d"}`))
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
+	c := NewClient(Config{RawBase: srv.URL})
+	ref, _, err := c.ResolveTag(context.Background(), repoCoord{Owner: "o", Repo: "r"}, "1.0.0")
+	if err != nil {
+		t.Fatalf("expected fallback to succeed, got %v", err)
+	}
+	if ref != "1.0.0" {
+		t.Fatalf("expected ref=1.0.0, got %s", ref)
+	}
+}
+
+func TestVersionMatchesAllowsVPrefix(t *testing.T) {
+	cases := []struct {
+		a, b string
+		want bool
+	}{
+		{"1.0.0", "v1.0.0", true},
+		{"v1.0.0", "1.0.0", true},
+		{" v2.3 ", "2.3", true},
+		{"1.0.0", "1.0.1", false},
+		{"", "1.0.0", false},
+	}
+	for _, tc := range cases {
+		if got := versionMatches(tc.a, tc.b); got != tc.want {
+			t.Fatalf("versionMatches(%q,%q) = %v, want %v", tc.a, tc.b, got, tc.want)
+		}
+	}
+}
