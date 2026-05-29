@@ -48,6 +48,7 @@ var (
 type Config struct {
 	HTTPClient   *http.Client
 	RawBase      string
+	CodeloadBase string
 	RegistryRepo string
 	RegistryFile string
 	RegistryRef  string
@@ -60,6 +61,7 @@ type Config struct {
 type Client struct {
 	http         *http.Client
 	rawBase      string
+	codeloadBase string
 	registryRepo string
 	registryFile string
 	registryRef  string
@@ -74,6 +76,7 @@ func NewClient(cfg Config) *Client {
 	c := &Client{
 		http:         cfg.HTTPClient,
 		rawBase:      cfg.RawBase,
+		codeloadBase: cfg.CodeloadBase,
 		registryRepo: cfg.RegistryRepo,
 		registryFile: cfg.RegistryFile,
 		registryRef:  cfg.RegistryRef,
