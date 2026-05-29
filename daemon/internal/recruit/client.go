@@ -65,9 +65,9 @@ type Client struct {
 	registryRef  string
 	cacheTTL     time.Duration
 
-	mu        sync.Mutex
-	cached    *RegistryEnvelope
-	cachedAt  time.Time
+	mu       sync.Mutex
+	cached   *RegistryEnvelope
+	cachedAt time.Time
 }
 
 func NewClient(cfg Config) *Client {
@@ -314,8 +314,99 @@ func validateManifest(m *Manifest) error {
 		if err := ensureSafePath(sd.Path); err != nil {
 			return err
 		}
+		if !strings.HasSuffix(sd.Path, "SKILL.md") {
+			return fmt.Errorf("%w: skill %d path must end with SKILL.md (got %q)", ErrManifestInvalid, i, sd.Path)
+		}
+	}
+	if m.SourceType == SourceTypeUpstreamWrapper {
+		if m.Upstream == nil || strings.TrimSpace(m.Upstream.RepoURL) == "" {
+			return fmt.Errorf("%w: source_type=%q requires upstream.repo_url", ErrManifestInvalid, m.SourceType)
+		}
+	}
+	if m.Upstream != nil && strings.TrimSpace(m.Upstream.Path) != "" {
+		if err := ensureSafePath(m.Upstream.Path); err != nil {
+			return err
+		}
+	}
+	if m.Payload != nil {
+		for _, p := range m.Payload.Include {
+			if err := ensureSafeGlob(p); err != nil {
+				return err
+			}
+		}
+		for _, p := range m.Payload.Exclude {
+			if err := ensureSafeGlob(p); err != nil {
+				return err
+			}
+		}
 	}
 	return nil
+}
+
+// ensureSafeGlob applies the same anti-traversal checks as ensureSafePath
+// but tolerates the gitignore-style glob characters (`*`, `**`, `?`) the
+// manifest payload spec accepts.
+func ensureSafeGlob(p string) error {
+	if strings.TrimSpace(p) == "" {
+		return fmt.Errorf("%w: empty payload glob", ErrManifestInvalid)
+	}
+	if strings.HasPrefix(p, "/") {
+		return fmt.Errorf("%w: %s", ErrUnsafePath, p)
+	}
+	if strings.HasPrefix(p, "!") {
+		return fmt.Errorf("%w: gitignore-negation globs are not supported in v1.1 (%q)", ErrManifestInvalid, p)
+	}
+	// path.Clean would collapse `**`, so reject `..` segments by walking
+	// the path manually.
+	for _, seg := range strings.Split(p, "/") {
+		if seg == ".." {
+			return fmt.Errorf("%w: %s", ErrUnsafePath, p)
+		}
+	}
+	return nil
+}
+
+// ResolvedPayload is what the install flow uses after manifest parsing:
+// a concrete list of include/exclude globs that already account for the
+// "no payload block ⇒ sensible default" fallback described in the plan.
+type ResolvedPayload struct {
+	Include []string
+	Exclude []string
+}
+
+// ResolvePayload returns the include/exclude globs the installer should
+// apply for this manifest. When the manifest omits a Payload block, the
+// default is AGENT.md, crew44-agent.json, every declared skills[].path,
+// and — when an upstream block is present — `{upstream.path}/**`. The
+// default applies to both native and wrapper repos; an explicit Payload
+// block in the manifest is used as-is.
+func ResolvePayload(m *Manifest) ResolvedPayload {
+	if m.Payload != nil && (len(m.Payload.Include) > 0 || len(m.Payload.Exclude) > 0) {
+		out := ResolvedPayload{
+			Include: append([]string(nil), m.Payload.Include...),
+			Exclude: append([]string(nil), m.Payload.Exclude...),
+		}
+		if len(out.Include) == 0 {
+			out.Include = defaultIncludes(m)
+		}
+		return out
+	}
+	return ResolvedPayload{Include: defaultIncludes(m)}
+}
+
+func defaultIncludes(m *Manifest) []string {
+	out := []string{"AGENT.md", "crew44-agent.json"}
+	for _, s := range m.Skills {
+		out = append(out, s.Path)
+	}
+	if m.Upstream != nil {
+		p := strings.TrimSpace(m.Upstream.Path)
+		if p == "" {
+			p = UpstreamPathDefault
+		}
+		out = append(out, p+"/**")
+	}
+	return out
 }
 
 // validRegistryEntry returns true when the row has all the fields the
