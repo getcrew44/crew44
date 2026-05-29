@@ -744,6 +744,40 @@ func (a *App) resolveAgentSkills(skillIDs []string) ([]runtime.SkillContext, err
 	return out, nil
 }
 
+// resolveRunSkills returns the full set of SkillContexts a chat run
+// should inject into the runtime: global skills referenced by
+// AgentConfig.SkillIDs plus the agent-private recruited skills under
+// the installed agent's recruited-skills.json. The merged slice
+// preserves SkillIDs order followed by recruited entries in manifest
+// order so the runtime's "first match wins" behavior stays predictable.
+//
+// A recruited skill whose SourcePath is missing on disk is a hard error:
+// the install rotation guarantees source/ is intact, so a missing file
+// after a successful install means the user (or some other process)
+// damaged the installed payload.
+func (a *App) resolveRunSkills(agent model.AgentConfig) ([]runtime.SkillContext, error) {
+	out, err := a.resolveAgentSkills(agent.SkillIDs)
+	if err != nil {
+		return nil, err
+	}
+	recruited, err := a.store.LoadRecruitedSkills(agent.ID)
+	if err != nil {
+		return nil, err
+	}
+	for _, entry := range recruited {
+		body, err := os.ReadFile(entry.SourcePath)
+		if err != nil {
+			return nil, fmt.Errorf("installed agent source is incomplete: %s: %w", entry.SourcePath, err)
+		}
+		out = append(out, runtime.SkillContext{
+			ID:      "recruited:" + entry.Path,
+			Name:    entry.Name,
+			Content: string(body),
+		})
+	}
+	return out, nil
+}
+
 func (a *App) ListProjects() ([]model.ProjectRecord, error) {
 	all, err := a.store.ListProjects()
 	if err != nil {

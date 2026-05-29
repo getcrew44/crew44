@@ -1,11 +1,15 @@
 package app
 
 import (
+	"archive/tar"
+	"bytes"
+	"compress/gzip"
 	"context"
 	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -15,29 +19,62 @@ import (
 	"github.com/getcrew44/crew44/daemon/internal/runtime"
 )
 
-// fakeRegistry composes an httptest server that serves agents.json plus
-// per-repo manifests and content files. Files are keyed by full request
-// path so a test can both seed normal happy-path content and substitute
-// "missing tag" or "missing AGENT.md" responses.
+// fakeRegistry composes an httptest server that serves both raw-content
+// requests (registry, HEAD manifests, HEAD AGENT.md) and codeload tarball
+// requests. Raw files are keyed by full URL path; tarballs are keyed by
+// (owner, repo, ref) and built on demand from the seeded file map.
 type fakeRegistry struct {
-	t      *testing.T
-	files  map[string]string
-	missed map[string]int
+	t        *testing.T
+	rawFiles map[string]string
+	// tarRefs records which (owner, repo, ref) tuples a tarball should be
+	// served for. Files matching the ref's repo prefix are bundled into
+	// the synthetic tarball.
+	tarRefs map[string]map[string]bool // "owner/repo" -> set of refs
 }
 
 func newFakeRegistry(t *testing.T) *fakeRegistry {
-	return &fakeRegistry{t: t, files: map[string]string{}, missed: map[string]int{}}
+	return &fakeRegistry{
+		t:        t,
+		rawFiles: map[string]string{},
+		tarRefs:  map[string]map[string]bool{},
+	}
 }
 
 func (f *fakeRegistry) set(path, body string) {
-	f.files[path] = body
+	f.rawFiles[path] = body
+}
+
+// publishTag registers a tag for codeload serving. When the installer
+// requests /{owner}/{repo}/tar.gz/{ref}, the handler builds a tarball
+// from every rawFiles entry matching /{owner}/{repo}/{ref}/...
+func (f *fakeRegistry) publishTag(owner, repo, ref string) {
+	key := owner + "/" + repo
+	if f.tarRefs[key] == nil {
+		f.tarRefs[key] = map[string]bool{}
+	}
+	f.tarRefs[key][ref] = true
 }
 
 func (f *fakeRegistry) handler() http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		body, ok := f.files[r.URL.Path]
+	mux := http.NewServeMux()
+	// Tarball endpoint: /{owner}/{repo}/tar.gz/{ref}
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		// Match the codeload tarball path first.
+		parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+		if len(parts) == 4 && parts[2] == "tar.gz" {
+			owner, repo, ref := parts[0], parts[1], parts[3]
+			key := owner + "/" + repo
+			if !f.tarRefs[key][ref] {
+				w.WriteHeader(http.StatusNotFound)
+				return
+			}
+			tarBytes := f.buildTarball(owner, repo, ref)
+			w.Header().Set("Content-Type", "application/gzip")
+			w.Write(tarBytes)
+			return
+		}
+		body, ok := f.rawFiles[r.URL.Path]
 		if !ok {
-			f.missed[r.URL.Path]++
 			w.WriteHeader(http.StatusNotFound)
 			return
 		}
@@ -46,6 +83,33 @@ func (f *fakeRegistry) handler() http.Handler {
 		}
 		w.Write([]byte(body))
 	})
+	return mux
+}
+
+func (f *fakeRegistry) buildTarball(owner, repo, ref string) []byte {
+	prefix := "/" + owner + "/" + repo + "/" + ref + "/"
+	var buf bytes.Buffer
+	gz := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gz)
+	wrapper := repo + "-abcd1234"
+	tw.WriteHeader(&tar.Header{Name: wrapper + "/", Typeflag: tar.TypeDir, Mode: 0o755})
+	for path, body := range f.rawFiles {
+		if !strings.HasPrefix(path, prefix) {
+			continue
+		}
+		rel := strings.TrimPrefix(path, prefix)
+		hdr := &tar.Header{
+			Name:     wrapper + "/" + rel,
+			Mode:     0o644,
+			Size:     int64(len(body)),
+			Typeflag: tar.TypeReg,
+		}
+		tw.WriteHeader(hdr)
+		tw.Write([]byte(body))
+	}
+	tw.Close()
+	gz.Close()
+	return buf.Bytes()
 }
 
 func newRecruitTestApp(t *testing.T, srv *httptest.Server) *App {
@@ -53,6 +117,7 @@ func newRecruitTestApp(t *testing.T, srv *httptest.Server) *App {
 	root := t.TempDir()
 	client := recruit.NewClient(recruit.Config{
 		RawBase:      srv.URL,
+		CodeloadBase: srv.URL,
 		RegistryRepo: "registry/test",
 	})
 	a, err := New(Config{
@@ -101,6 +166,7 @@ func seedPatchAgent(f *fakeRegistry, version string) {
 	f.set("/hex/patch-agent/"+tag+"/AGENT.md", "# Patch\nReproduces bugs at "+version+".\n")
 	f.set("/hex/patch-agent/"+tag+"/skills/minimal-failing-test/SKILL.md",
 		"---\nname: minimal-failing-test\n---\n# Minimal failing test\nWrite the failing test first.\n")
+	f.publishTag("hex", "patch-agent", tag)
 }
 
 func TestRecruitListMarksInstalled(t *testing.T) {
@@ -120,7 +186,6 @@ func TestRecruitListMarksInstalled(t *testing.T) {
 	if _, err := a.InstallRecruitAgent(context.Background(), "patch"); err != nil {
 		t.Fatal(err)
 	}
-	// Invalidate the client cache so the second list re-fetches.
 	a.recruit.InvalidateRegistry()
 	items, err = a.ListRecruitAgents(context.Background())
 	if err != nil {
@@ -131,7 +196,11 @@ func TestRecruitListMarksInstalled(t *testing.T) {
 	}
 }
 
-func TestRecruitInstallCreatesAgentAndSkill(t *testing.T) {
+// Install must create a payload-backed source/ directory, write
+// recruited-skills.json with SKILL.md paths under source/, and NOT
+// create a global SkillRecord. The agent body comes from the tag's
+// AGENT.md (not HEAD).
+func TestRecruitInstallCreatesPayloadAndRecruitedSkills(t *testing.T) {
 	f := newFakeRegistry(t)
 	seedPatchAgent(f, "1.0.0")
 	srv := httptest.NewServer(f.handler())
@@ -157,33 +226,51 @@ func TestRecruitInstallCreatesAgentAndSkill(t *testing.T) {
 	if agent.Source.Version != "1.0.0" {
 		t.Fatalf("source version = %q", agent.Source.Version)
 	}
-	if len(agent.SkillIDs) != 1 {
-		t.Fatalf("skill_ids = %v", agent.SkillIDs)
+	if strings.TrimSpace(agent.Source.SourceDir) == "" {
+		t.Fatalf("source dir not recorded")
 	}
-
-	skills, err := a.ListSkills()
-	if err != nil {
-		t.Fatal(err)
+	// Recruited skills must NOT be promoted to global SkillIDs.
+	if len(agent.SkillIDs) != 0 {
+		t.Fatalf("recruited skills should not populate SkillIDs: %v", agent.SkillIDs)
 	}
-	var attached *model.SkillRecord
-	for i := range skills {
-		if skills[i].ID == agent.SkillIDs[0] {
-			attached = &skills[i]
-			break
+	// Payload files must exist under source/.
+	for _, expected := range []string{"AGENT.md", "crew44-agent.json", "skills/minimal-failing-test/SKILL.md"} {
+		full := filepath.Join(agent.Source.SourceDir, expected)
+		if _, err := os.Stat(full); err != nil {
+			t.Errorf("payload missing %s: %v", expected, err)
 		}
 	}
-	if attached == nil {
-		t.Fatal("attached skill not in list")
-	}
-	if attached.Source == nil || attached.Source.Path != "skills/minimal-failing-test/SKILL.md" {
-		t.Fatalf("skill source not recorded: %+v", attached.Source)
-	}
-	files, err := a.ListSkillFiles(attached.ID)
+	// recruited-skills.json should index the manifest skill.
+	skills, err := a.store.LoadRecruitedSkills(agent.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(files) == 0 || !strings.Contains(files[0].Content, "Write the failing test first") {
-		t.Fatalf("SKILL.md not written; files=%+v", files)
+	if len(skills) != 1 {
+		t.Fatalf("recruited skills = %v", skills)
+	}
+	if skills[0].Name != "minimal-failing-test" {
+		t.Fatalf("recruited skill name = %q", skills[0].Name)
+	}
+	wantPath := filepath.Join(agent.Source.SourceDir, "skills", "minimal-failing-test", "SKILL.md")
+	if skills[0].SourcePath != wantPath {
+		t.Fatalf("recruited skill source path = %q, want %q", skills[0].SourcePath, wantPath)
+	}
+	body, err := os.ReadFile(skills[0].SourcePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(body), "Write the failing test first") {
+		t.Fatalf("SKILL.md body not in source/: %q", body)
+	}
+	// No global skill registry entry should reference this repo.
+	global, err := a.ListSkills()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range global {
+		if s.Source != nil && s.Source.RepoURL == "https://github.com/hex/patch-agent" {
+			t.Fatalf("recruited skills should not be in global registry: %+v", s)
+		}
 	}
 }
 
@@ -204,9 +291,6 @@ func TestRecruitInstallIdempotent(t *testing.T) {
 	}
 	if first.ID != second.ID {
 		t.Fatalf("idempotency broken: %s vs %s", first.ID, second.ID)
-	}
-	if len(second.SkillIDs) != 1 || first.SkillIDs[0] != second.SkillIDs[0] {
-		t.Fatalf("skill IDs changed: %v vs %v", first.SkillIDs, second.SkillIDs)
 	}
 	agents, err := a.ListAgents()
 	if err != nil {
@@ -235,7 +319,6 @@ func TestRecruitInstallVersionBumpUpdatesContent(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Author publishes 1.1.0 — update HEAD manifest and add a new tag.
 	seedPatchAgent(f, "1.1.0")
 	a.recruit.InvalidateRegistry()
 
@@ -252,17 +335,22 @@ func TestRecruitInstallVersionBumpUpdatesContent(t *testing.T) {
 	if second.Source.Version != "1.1.0" {
 		t.Fatalf("source version not bumped: %s", second.Source.Version)
 	}
+	// source/ must reflect 1.1.0 too.
+	body, err := os.ReadFile(filepath.Join(second.Source.SourceDir, "AGENT.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(body), "1.1.0") {
+		t.Fatalf("source AGENT.md not updated: %q", body)
+	}
 }
 
-// Install must refuse a tag whose pinned manifest disagrees with the
-// HEAD manifest's version. Simulates a force-pushed release tag.
 func TestRecruitInstallRejectsVersionMismatch(t *testing.T) {
 	f := newFakeRegistry(t)
 	f.set("/registry/test/HEAD/agents.json", `{
 		"schema_version":"crew44.agent-registry.v1",
 		"agents":[{"id":"patch","name":"Patch","description":"d","repo_url":"https://github.com/hex/patch-agent"}]
 	}`)
-	// HEAD says 1.0.0, but both candidate tags claim 9.9.9.
 	f.set("/hex/patch-agent/HEAD/crew44-agent.json", `{
 		"schema_version":"crew44.agent.v1","name":"Patch","version":"1.0.0","description":"d"
 	}`)
@@ -286,7 +374,6 @@ func TestRecruitInstallRejectsVersionMismatch(t *testing.T) {
 
 func TestRecruitInstallMissingTag(t *testing.T) {
 	f := newFakeRegistry(t)
-	// Registry + HEAD manifest exist, but no tag was published.
 	f.set("/registry/test/HEAD/agents.json", `{
 		"schema_version":"crew44.agent-registry.v1",
 		"agents":[{"id":"patch","name":"Patch","description":"d","repo_url":"https://github.com/hex/patch-agent"}]
@@ -333,10 +420,12 @@ func TestRecruitInstallRejectsUnsafeSkillPath(t *testing.T) {
 	}
 }
 
+// Two agents declaring a skill named "shared" must end up with two
+// fully isolated agent-private skill records under their own
+// recruited-skills.json files. Nothing lands in the global skill
+// registry.
 func TestRecruitNamespacingIsolatesSameNamedSkill(t *testing.T) {
 	f := newFakeRegistry(t)
-	// Two agents declare a skill named "shared" — they must end up as two
-	// separate skill records keyed by (repo_url, path).
 	register := func(id, repo string) {
 		manifest := `{
 			"schema_version":"crew44.agent.v1",
@@ -344,12 +433,14 @@ func TestRecruitNamespacingIsolatesSameNamedSkill(t *testing.T) {
 			"skills":[{"name":"shared","path":"skills/shared/SKILL.md"}]
 		}`
 		f.set("/registry/test/HEAD/agents.json",
-			coalesceRegistry(f.files["/registry/test/HEAD/agents.json"], id, repo))
+			coalesceRegistry(f.rawFiles["/registry/test/HEAD/agents.json"], id, repo))
 		f.set("/"+repo+"/HEAD/crew44-agent.json", manifest)
 		f.set("/"+repo+"/HEAD/AGENT.md", "# "+id+"\n")
 		f.set("/"+repo+"/v1.0.0/crew44-agent.json", manifest)
 		f.set("/"+repo+"/v1.0.0/AGENT.md", "# "+id+"\n")
 		f.set("/"+repo+"/v1.0.0/skills/shared/SKILL.md", "# shared from "+id+"\n")
+		parts := strings.SplitN(repo, "/", 2)
+		f.publishTag(parts[0], parts[1], "v1.0.0")
 	}
 	register("alpha", "o/alpha")
 	register("beta", "o/beta")
@@ -365,24 +456,41 @@ func TestRecruitNamespacingIsolatesSameNamedSkill(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if a1.SkillIDs[0] == a2.SkillIDs[0] {
-		t.Fatal("same-named skills from different repos should not share an ID")
+	skills1, err := a.store.LoadRecruitedSkills(a1.ID)
+	if err != nil {
+		t.Fatal(err)
 	}
-	skills, _ := a.ListSkills()
-	matches := 0
-	for _, s := range skills {
-		if s.Name == "shared" {
-			matches++
+	skills2, err := a.store.LoadRecruitedSkills(a2.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(skills1) != 1 || len(skills2) != 1 {
+		t.Fatalf("expected one private skill each, got alpha=%v beta=%v", skills1, skills2)
+	}
+	if skills1[0].SourcePath == skills2[0].SourcePath {
+		t.Fatal("private skills must be isolated under each agent dir")
+	}
+	body1, _ := os.ReadFile(skills1[0].SourcePath)
+	body2, _ := os.ReadFile(skills2[0].SourcePath)
+	if !strings.Contains(string(body1), "from alpha") {
+		t.Fatalf("alpha skill body wrong: %q", body1)
+	}
+	if !strings.Contains(string(body2), "from beta") {
+		t.Fatalf("beta skill body wrong: %q", body2)
+	}
+	// Nothing should be in the global skill registry from these
+	// recruited installs.
+	global, err := a.ListSkills()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range global {
+		if s.Source != nil && (s.Source.RepoURL == "https://github.com/o/alpha" || s.Source.RepoURL == "https://github.com/o/beta") {
+			t.Fatalf("recruited skill leaked into global registry: %+v", s)
 		}
-	}
-	if matches != 2 {
-		t.Fatalf("expected two 'shared' skill records, got %d", matches)
 	}
 }
 
-// coalesceRegistry appends a registry entry into existing agents.json,
-// or starts a new one. Lets the namespacing test register two agents
-// without hand-writing the JSON.
 func coalesceRegistry(existing, id, repo string) string {
 	entry := fmt.Sprintf(`{"id":"%s","name":"%s","description":"d","repo_url":"https://github.com/%s"}`, id, id, repo)
 	if existing == "" {
@@ -397,7 +505,6 @@ func TestRecruitInstallMissingManifestField(t *testing.T) {
 		"schema_version":"crew44.agent-registry.v1",
 		"agents":[{"id":"bad","name":"Bad","description":"d","repo_url":"https://github.com/x/bad"}]
 	}`)
-	// Missing required "version" field.
 	f.set("/x/bad/HEAD/crew44-agent.json", `{
 		"schema_version":"crew44.agent.v1","name":"Bad","description":"d"
 	}`)
@@ -408,17 +515,11 @@ func TestRecruitInstallMissingManifestField(t *testing.T) {
 	if !errors.Is(err, recruit.ErrManifestInvalid) {
 		t.Fatalf("expected ErrManifestInvalid, got %v", err)
 	}
-	// Recruit metadata failures must map to ErrBadRequest so the RPC
-	// layer translates them to a -32000 bad-request the UI can render
-	// as a clean toast, not a generic internal error.
 	if !errors.Is(err, ErrBadRequest) {
 		t.Fatalf("expected ErrBadRequest (for RPC mapping), got %v", err)
 	}
 }
 
-// Manifests with the wrong schema_version are rejected on install so a
-// daemon that doesn't understand a future v2 layout can't accidentally
-// install one.
 func TestRecruitInstallRejectsUnsupportedSchemaVersion(t *testing.T) {
 	f := newFakeRegistry(t)
 	f.set("/registry/test/HEAD/agents.json", `{
@@ -440,9 +541,6 @@ func TestRecruitInstallRejectsUnsupportedSchemaVersion(t *testing.T) {
 	}
 }
 
-// Bad repo URLs in the registry must also surface as ErrBadRequest, not
-// as an internal error. Uses a non-github.com host that parseGitHubRepo
-// rejects with ErrRepoURLInvalid.
 func TestRecruitInstallBadRepoURLMapsToBadRequest(t *testing.T) {
 	f := newFakeRegistry(t)
 	f.set("/registry/test/HEAD/agents.json", `{
@@ -480,5 +578,218 @@ func TestRecruitGetReturnsHEADManifestAndBody(t *testing.T) {
 	}
 	if !strings.Contains(detail.AgentBody, "Reproduces bugs.") {
 		t.Fatalf("AGENT.md body: %q", detail.AgentBody)
+	}
+}
+
+// Upstream-wrapper repos must extract upstream/** by default and surface
+// the upstream manifest metadata on the installed agent's Source record.
+func TestRecruitInstallUpstreamWrapper(t *testing.T) {
+	f := newFakeRegistry(t)
+	manifest := `{
+		"schema_version":"crew44.agent.v1",
+		"name":"Karpathy","version":"1.0.0","description":"wrapped",
+		"source_type":"upstream-wrapper",
+		"upstream":{"repo_url":"https://github.com/multica-ai/andrej-karpathy-skills","path":"upstream","commit":"abc1234"},
+		"skills":[{"name":"writing","path":"upstream/skills/writing/SKILL.md"}]
+	}`
+	f.set("/registry/test/HEAD/agents.json", `{
+		"schema_version":"crew44.agent-registry.v1",
+		"agents":[{"id":"karp","name":"Karpathy","description":"wrapped","repo_url":"https://github.com/multica-ai/karpathy-agent"}]
+	}`)
+	f.set("/multica-ai/karpathy-agent/HEAD/crew44-agent.json", manifest)
+	f.set("/multica-ai/karpathy-agent/HEAD/AGENT.md", "# K HEAD\n")
+	f.set("/multica-ai/karpathy-agent/v1.0.0/crew44-agent.json", manifest)
+	f.set("/multica-ai/karpathy-agent/v1.0.0/AGENT.md", "# K\nWrapped upstream agent.\n")
+	f.set("/multica-ai/karpathy-agent/v1.0.0/upstream/README.md", "# upstream readme\n")
+	f.set("/multica-ai/karpathy-agent/v1.0.0/upstream/skills/writing/SKILL.md", "# writing\n")
+	f.set("/multica-ai/karpathy-agent/v1.0.0/upstream/data/example.txt", "example\n")
+	f.publishTag("multica-ai", "karpathy-agent", "v1.0.0")
+	srv := httptest.NewServer(f.handler())
+	defer srv.Close()
+	a := newRecruitTestApp(t, srv)
+
+	agent, err := a.InstallRecruitAgent(context.Background(), "karp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{
+		"AGENT.md",
+		"crew44-agent.json",
+		"upstream/README.md",
+		"upstream/skills/writing/SKILL.md",
+		"upstream/data/example.txt",
+	} {
+		if _, err := os.Stat(filepath.Join(agent.Source.SourceDir, expected)); err != nil {
+			t.Errorf("upstream payload missing %s: %v", expected, err)
+		}
+	}
+	skills, err := a.store.LoadRecruitedSkills(agent.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(skills) != 1 || skills[0].Path != "upstream/skills/writing/SKILL.md" {
+		t.Fatalf("recruited skill not indexed: %+v", skills)
+	}
+}
+
+// A failed install must leave the previously installed source/ payload
+// intact. Simulates "missing AGENT.md at tag" after a working install.
+func TestRecruitInstallFailureLeavesPreviousSourceIntact(t *testing.T) {
+	f := newFakeRegistry(t)
+	seedPatchAgent(f, "1.0.0")
+	srv := httptest.NewServer(f.handler())
+	defer srv.Close()
+	a := newRecruitTestApp(t, srv)
+
+	first, err := a.InstallRecruitAgent(context.Background(), "patch")
+	if err != nil {
+		t.Fatal(err)
+	}
+	prevSource := filepath.Join(first.Source.SourceDir, "AGENT.md")
+	if _, err := os.Stat(prevSource); err != nil {
+		t.Fatal(err)
+	}
+
+	// Bump HEAD manifest to a new version, publish a tag whose
+	// payload omits AGENT.md to force a deterministic install-time
+	// failure after archive download.
+	manifest11 := `{
+		"schema_version":"crew44.agent.v1",
+		"name":"Patch","version":"1.1.0","description":"d",
+		"skills":[{"name":"minimal-failing-test","path":"skills/minimal-failing-test/SKILL.md"}],
+		"payload":{"include":["skills/**","crew44-agent.json"]}
+	}`
+	f.set("/hex/patch-agent/HEAD/crew44-agent.json", manifest11)
+	f.set("/hex/patch-agent/v1.1.0/crew44-agent.json", manifest11)
+	f.set("/hex/patch-agent/v1.1.0/skills/minimal-failing-test/SKILL.md", "# new\n")
+	f.publishTag("hex", "patch-agent", "v1.1.0")
+	a.recruit.InvalidateRegistry()
+
+	_, err = a.InstallRecruitAgent(context.Background(), "patch")
+	if err == nil {
+		t.Fatal("expected install to fail because AGENT.md missing from payload")
+	}
+	// Previous source must still be 1.0.0.
+	body, err := os.ReadFile(prevSource)
+	if err != nil {
+		t.Fatalf("previous source vanished: %v", err)
+	}
+	if !strings.Contains(string(body), "1.0.0") {
+		t.Fatalf("previous source corrupted: %q", body)
+	}
+}
+
+// Symlink entries inside the tarball must be rejected — never extracted.
+func TestRecruitInstallRejectsSymlinkEscape(t *testing.T) {
+	f := newFakeRegistry(t)
+	f.set("/registry/test/HEAD/agents.json", `{
+		"schema_version":"crew44.agent-registry.v1",
+		"agents":[{"id":"evil","name":"Evil","description":"d","repo_url":"https://github.com/x/evil"}]
+	}`)
+	manifest := `{
+		"schema_version":"crew44.agent.v1","name":"Evil","version":"1.0.0","description":"d"
+	}`
+	f.set("/x/evil/HEAD/crew44-agent.json", manifest)
+	f.set("/x/evil/v1.0.0/crew44-agent.json", manifest)
+	f.set("/x/evil/v1.0.0/AGENT.md", "# E\n")
+	f.publishTag("x", "evil", "v1.0.0")
+	// Inject a symlink entry directly into the codeload handler.
+	hijacked := f.handler()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/tar.gz/v1.0.0") {
+			var buf bytes.Buffer
+			gz := gzip.NewWriter(&buf)
+			tw := tar.NewWriter(gz)
+			tw.WriteHeader(&tar.Header{Name: "evil-abcd/", Typeflag: tar.TypeDir, Mode: 0o755})
+			tw.WriteHeader(&tar.Header{
+				Name:     "evil-abcd/AGENT.md",
+				Typeflag: tar.TypeReg,
+				Size:     5,
+				Mode:     0o644,
+			})
+			tw.Write([]byte("# E\n\n"))
+			tw.WriteHeader(&tar.Header{
+				Name:     "evil-abcd/crew44-agent.json",
+				Typeflag: tar.TypeReg,
+				Size:     int64(len(manifest)),
+				Mode:     0o644,
+			})
+			tw.Write([]byte(manifest))
+			tw.WriteHeader(&tar.Header{
+				Name:     "evil-abcd/escape",
+				Typeflag: tar.TypeSymlink,
+				Linkname: "../../../etc/passwd",
+			})
+			tw.Close()
+			gz.Close()
+			w.Header().Set("Content-Type", "application/gzip")
+			w.Write(buf.Bytes())
+			return
+		}
+		hijacked.ServeHTTP(w, r)
+	}))
+	defer srv.Close()
+	a := newRecruitTestApp(t, srv)
+
+	_, err := a.InstallRecruitAgent(context.Background(), "evil")
+	if err == nil {
+		t.Fatal("expected install to reject symlink entry")
+	}
+	if !errors.Is(err, recruit.ErrArchiveSymlinkEscape) {
+		t.Fatalf("expected ErrArchiveSymlinkEscape, got %v", err)
+	}
+}
+
+// Runtime must receive the installed source dir for a recruited agent.
+// Verified by inspecting the agent record + recruited-skills.json file
+// produced by the install; runtime exposure is wired through
+// runtime.RunRequest.AgentSourceDir → CREW44_AGENT_SOURCE_DIR.
+func TestRecruitInstallRecordsSourceDir(t *testing.T) {
+	f := newFakeRegistry(t)
+	seedPatchAgent(f, "1.0.0")
+	srv := httptest.NewServer(f.handler())
+	defer srv.Close()
+	a := newRecruitTestApp(t, srv)
+
+	agent, err := a.InstallRecruitAgent(context.Background(), "patch")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if agent.Source == nil {
+		t.Fatal("source record missing")
+	}
+	if got, want := agent.Source.SourceDir, a.store.AgentSourceDir(agent.ID); got != want {
+		t.Fatalf("source dir = %q, want %q", got, want)
+	}
+}
+
+// resolveRunSkills must load both global skills (from SkillIDs) and
+// agent-private recruited skills from the installed source/ dir.
+func TestResolveRunSkillsIncludesRecruited(t *testing.T) {
+	f := newFakeRegistry(t)
+	seedPatchAgent(f, "1.0.0")
+	srv := httptest.NewServer(f.handler())
+	defer srv.Close()
+	a := newRecruitTestApp(t, srv)
+
+	agent, err := a.InstallRecruitAgent(context.Background(), "patch")
+	if err != nil {
+		t.Fatal(err)
+	}
+	skills, err := a.resolveRunSkills(agent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, s := range skills {
+		if s.Name == "minimal-failing-test" {
+			found = true
+			if !strings.Contains(s.Content, "Write the failing test first") {
+				t.Fatalf("recruited skill content not loaded: %q", s.Content)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("recruited skill missing from resolveRunSkills: %+v", skills)
 	}
 }

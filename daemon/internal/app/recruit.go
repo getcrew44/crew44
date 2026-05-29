@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -69,11 +71,14 @@ func (a *App) GetRecruitAgent(ctx context.Context, registryID string) (recruit.A
 	}, nil
 }
 
-// InstallRecruitAgent performs the full install: resolve tag from
-// manifest.version, fetch AGENT.md + each SKILL.md at the pinned tag,
-// pick the local default runtime, create or update the agent and its
-// declared skills idempotently. Suggested_runtime in the manifest is
-// ignored at install time (display-only).
+// InstallRecruitAgent performs the full install: resolve the tag from
+// manifest.version, download the tagged GitHub archive, extract the
+// manifest-declared payload into a staged directory under the agent's
+// dir, atomically rotate source/ into place, and write the agent-private
+// recruited-skills.json index. suggested_runtime in the manifest is
+// ignored at install time (display-only). The deterministic install
+// path does not call the model — generation only happens in the
+// importer (Phase 3).
 func (a *App) InstallRecruitAgent(ctx context.Context, registryID string) (model.AgentConfig, error) {
 	entry, err := a.findRegistryEntry(ctx, registryID)
 	if err != nil {
@@ -90,165 +95,196 @@ func (a *App) InstallRecruitAgent(ctx context.Context, registryID string) (model
 		}
 		return model.AgentConfig{}, mapRecruitError(err)
 	}
-	agentBody, err := a.recruit.FetchAtRef(ctx, coord, tag, "AGENT.md")
-	if err != nil {
-		if errors.Is(err, recruit.ErrTagNotFound) {
-			return model.AgentConfig{}, fmt.Errorf("%w: AGENT.md missing at release %s", ErrBadRequest, tag)
-		}
-		return model.AgentConfig{}, mapRecruitError(err)
-	}
 
 	runtimeRecord, err := a.pickAvailableRuntime()
 	if err != nil {
 		return model.AgentConfig{}, fmt.Errorf("install a runtime first: %w", err)
 	}
 
-	skillFiles := make(map[string]string, len(pinnedManifest.Skills))
-	for _, decl := range pinnedManifest.Skills {
-		body, err := a.recruit.FetchAtRef(ctx, coord, tag, decl.Path)
-		if err != nil {
-			if errors.Is(err, recruit.ErrTagNotFound) {
-				return model.AgentConfig{}, fmt.Errorf("%w: skill file missing at release %s: %s", ErrBadRequest, tag, decl.Path)
-			}
-			return model.AgentConfig{}, mapRecruitError(err)
-		}
-		skillFiles[decl.Path] = body
-	}
-
-	skillIDs, err := a.upsertRecruitSkills(entry.RepoURL, pinnedManifest, skillFiles)
+	// Settle the target agent ID before extracting so the staged
+	// directory lives inside the final agent dir and the rotation is
+	// a same-filesystem rename. Reusing the existing agent ID keeps
+	// recruited-skills.json and runtime-env continuity across version
+	// bumps for the same RepoURL.
+	existing, err := a.findRecruitedAgent(entry.RepoURL)
 	if err != nil {
 		return model.AgentConfig{}, err
 	}
+	agentID := ""
+	if existing != nil {
+		agentID = existing.ID
+	} else {
+		agentID = id.New()
+	}
 
-	return a.upsertRecruitAgent(entry, pinnedManifest, agentBody, runtimeRecord.ID, skillIDs)
+	installID := id.New()
+	staged := a.store.AgentSourceTmpDir(agentID, installID)
+	if err := os.MkdirAll(staged, 0o755); err != nil {
+		return model.AgentConfig{}, err
+	}
+	// Guarantee staged + tmp recruited-skills are cleaned up on every
+	// failure path. CleanupAgentSourceTmp is a no-op once the staging
+	// dir has been renamed into source/.
+	defer a.store.CleanupAgentSourceTmp(agentID, installID)
+
+	archivePath, err := a.recruit.FetchArchive(ctx, coord, tag, a.store.RecruitGithubCacheDir())
+	if err != nil {
+		if errors.Is(err, recruit.ErrTagNotFound) {
+			return model.AgentConfig{}, fmt.Errorf("%w: release archive missing at %s", ErrBadRequest, tag)
+		}
+		if errors.Is(err, recruit.ErrArchiveTooLarge) {
+			return model.AgentConfig{}, fmt.Errorf("%w: %v", ErrBadRequest, err)
+		}
+		return model.AgentConfig{}, mapRecruitError(err)
+	}
+
+	resolved := recruit.ResolvePayload(&pinnedManifest)
+	written, err := recruit.ExtractFilteredPayload(archivePath, staged, resolved)
+	if err != nil {
+		return model.AgentConfig{}, mapRecruitError(err)
+	}
+	writtenSet := make(map[string]bool, len(written))
+	for _, p := range written {
+		writtenSet[p] = true
+	}
+
+	// AGENT.md is the runtime instruction the agent uses as its system
+	// prompt. Missing it after filtering means either the author forgot
+	// to include it in the payload spec or stripped it via .gitattributes
+	// export-ignore upstream. Either way, install can't proceed.
+	if !writtenSet["AGENT.md"] {
+		return model.AgentConfig{}, fmt.Errorf("%w: AGENT.md missing from release %s payload", ErrBadRequest, tag)
+	}
+	for _, decl := range pinnedManifest.Skills {
+		if !writtenSet[decl.Path] {
+			return model.AgentConfig{}, fmt.Errorf("%w: %v: %s", ErrBadRequest, recruit.ErrPayloadMissingFile, decl.Path)
+		}
+	}
+
+	agentBodyBytes, err := os.ReadFile(filepath.Join(staged, "AGENT.md"))
+	if err != nil {
+		return model.AgentConfig{}, mapRecruitError(err)
+	}
+	agentBody := string(agentBodyBytes)
+
+	// Recruited skill metadata is generated against the final source/
+	// path so the file is correct as-is once the rotation completes; the
+	// rotation never moves the file, only swaps the parent directory in.
+	finalSource := a.store.AgentSourceDir(agentID)
+	recruited := make([]model.RecruitedSkill, 0, len(pinnedManifest.Skills))
+	for _, decl := range pinnedManifest.Skills {
+		recruited = append(recruited, model.RecruitedSkill{
+			Name:       decl.Name,
+			Path:       decl.Path,
+			SourcePath: filepath.Join(finalSource, filepath.FromSlash(decl.Path)),
+			Version:    pinnedManifest.Version,
+		})
+	}
+	if err := a.store.WriteRecruitedSkillsTmp(agentID, installID, recruited); err != nil {
+		return model.AgentConfig{}, err
+	}
+
+	// Build the final agent record before the atomic commit so the
+	// commit operates on a fully-resolved AgentConfig — any failure
+	// after this rolls back to the previous source/, recruited-skills,
+	// and config in one shot.
+	finalAgent := a.buildRecruitedAgentRecord(agentID, existing, entry, pinnedManifest, agentBody, runtimeRecord.ID, finalSource)
+	if err := a.store.CommitAgentInstall(finalAgent, installID); err != nil {
+		return model.AgentConfig{}, err
+	}
+
+	// Drop any legacy global SkillRecord entries this repo created
+	// under the pre-payload installer. Best-effort: agent install is
+	// already durable, so a failure here only leaves stale rows in
+	// the user-managed skills list (recoverable by hand) and must
+	// not undo a successful install.
+	if err := a.purgeLegacyGlobalRecruitedSkills(entry.RepoURL); err != nil {
+		return finalAgent, err
+	}
+	return finalAgent, nil
 }
 
-// upsertRecruitAgent finds an existing agent with the same Source.RepoURL
-// and overwrites it; otherwise creates a new one. The agent's UpdatedAt
-// bumps either way so the UI's list-by-mtime sort puts the just-recruited
-// agent on top.
-func (a *App) upsertRecruitAgent(
+// buildRecruitedAgentRecord returns the AgentConfig the atomic commit
+// step will persist. For first-time installs the record is brand new;
+// for reinstalls of the same repo, existing CreatedAt is preserved so
+// the UI's by-creation sort doesn't shuffle agents on every update.
+func (a *App) buildRecruitedAgentRecord(
+	agentID string,
+	existing *model.AgentConfig,
 	entry recruit.RegistryEntry,
 	manifest recruit.Manifest,
 	agentBody string,
 	runtimeID string,
-	skillIDs []string,
-) (model.AgentConfig, error) {
-	agents, err := a.store.ListAgents()
-	if err != nil {
-		return model.AgentConfig{}, err
-	}
+	sourceDir string,
+) model.AgentConfig {
 	now := time.Now().UTC()
 	source := &model.AgentSource{
 		RegistryID:  entry.ID,
 		RepoURL:     entry.RepoURL,
 		Version:     manifest.Version,
 		InstalledAt: now,
+		SourceDir:   sourceDir,
 	}
-	for _, existing := range agents {
-		if existing.Source != nil && existing.Source.RepoURL == entry.RepoURL {
-			existing.Name = manifest.Name
-			existing.Description = strings.TrimSpace(manifest.Description)
-			existing.Instruction = agentBody
-			existing.RuntimeID = runtimeID
-			existing.Model = ""
-			existing.SkillIDs = skillIDs
-			existing.Source = source
-			existing.ArchivedAt = time.Time{}
-			existing.UpdatedAt = now
-			if err := a.store.SaveAgent(existing); err != nil {
-				return model.AgentConfig{}, err
-			}
-			return existing, nil
-		}
+	if existing != nil {
+		existing.Name = manifest.Name
+		existing.Description = strings.TrimSpace(manifest.Description)
+		existing.Instruction = agentBody
+		existing.RuntimeID = runtimeID
+		existing.Model = ""
+		// Agent-private recruited skills do not live in SkillIDs.
+		// Clear any legacy IDs from the old installer so the runtime
+		// path doesn't try to load now-deleted global skill records.
+		existing.SkillIDs = nil
+		existing.Source = source
+		existing.ArchivedAt = time.Time{}
+		existing.UpdatedAt = now
+		return *existing
 	}
-	agent := model.AgentConfig{
-		ID:          id.New(),
+	return model.AgentConfig{
+		ID:          agentID,
 		Name:        manifest.Name,
 		Description: strings.TrimSpace(manifest.Description),
 		Instruction: agentBody,
 		RuntimeID:   runtimeID,
 		Model:       "",
-		SkillIDs:    skillIDs,
+		SkillIDs:    nil,
 		Source:      source,
 		CreatedAt:   now,
 		UpdatedAt:   now,
 	}
-	if err := a.store.SaveAgent(agent); err != nil {
-		return model.AgentConfig{}, err
-	}
-	return agent, nil
 }
 
-// upsertRecruitSkills creates or updates skill records keyed by the
-// (RepoURL, in-repo Path) tuple. Same source tuple = reuse the record
-// and overwrite SKILL.md; different tuple (including same name from a
-// different repo) = new record. Returns the ordered skill IDs to attach
-// to the agent.
-func (a *App) upsertRecruitSkills(
-	repoURL string,
-	manifest recruit.Manifest,
-	files map[string]string,
-) ([]string, error) {
+// purgeLegacyGlobalRecruitedSkills removes SkillRecord entries created
+// by the pre-payload recruit installer (which wrote agent-recruited
+// skills to the global ~/.crew44/skills/ store). New recruit-installed
+// skills are agent-private; leftover global records from past installs
+// would shadow the new layout.
+func (a *App) purgeLegacyGlobalRecruitedSkills(repoURL string) error {
 	skills, err := a.store.ListSkills()
 	if err != nil {
-		return nil, err
+		return err
 	}
-	bySource := make(map[string]int, len(skills))
-	for i, s := range skills {
+	keep := make([]model.SkillRecord, 0, len(skills))
+	var dropped []string
+	for _, s := range skills {
 		if s.Source != nil && s.Source.RepoURL == repoURL {
-			bySource[s.Source.Path] = i
-		}
-	}
-	now := time.Now().UTC()
-	out := make([]string, 0, len(manifest.Skills))
-	for _, decl := range manifest.Skills {
-		if _, ok := files[decl.Path]; !ok {
-			return nil, fmt.Errorf("missing skill body for %s", decl.Path)
-		}
-		source := &model.SkillSource{
-			RepoURL: repoURL,
-			Path:    decl.Path,
-			Version: manifest.Version,
-		}
-		if idx, hit := bySource[decl.Path]; hit {
-			skills[idx].Name = decl.Name
-			skills[idx].Source = source
-			skills[idx].UpdatedAt = now
-			skills[idx].ArchivedAt = time.Time{}
-			out = append(out, skills[idx].ID)
+			dropped = append(dropped, s.ID)
 			continue
 		}
-		newID := id.New()
-		record := model.SkillRecord{
-			ID:        newID,
-			Name:      decl.Name,
-			Path:      a.store.SkillDir(newID),
-			Source:    source,
-			UpdatedAt: now,
-		}
-		skills = append(skills, record)
-		out = append(out, newID)
+		keep = append(keep, s)
 	}
-	if err := a.store.SaveSkills(skills); err != nil {
-		return nil, err
+	if len(dropped) == 0 {
+		return nil
 	}
-	for _, decl := range manifest.Skills {
-		var skillID string
-		for _, s := range skills {
-			if s.Source != nil && s.Source.RepoURL == repoURL && s.Source.Path == decl.Path {
-				skillID = s.ID
-				break
-			}
-		}
-		if skillID == "" {
-			return nil, fmt.Errorf("internal: skill id not found after save: %s", decl.Path)
-		}
-		if err := a.store.PutSkillFile(skillID, "SKILL.md", files[decl.Path]); err != nil {
-			return nil, err
+	if err := a.store.SaveSkills(keep); err != nil {
+		return err
+	}
+	for _, skillID := range dropped {
+		if err := os.RemoveAll(a.store.SkillDir(skillID)); err != nil {
+			return err
 		}
 	}
-	return out, nil
+	return nil
 }
 
 func (a *App) installedRepoURLs() (map[string]bool, error) {
@@ -263,6 +299,23 @@ func (a *App) installedRepoURLs() (map[string]bool, error) {
 		}
 	}
 	return out, nil
+}
+
+// findRecruitedAgent returns the existing recruited agent for repoURL,
+// or nil if none exists. Used to settle the agent ID and resolve the
+// idempotent reinstall path.
+func (a *App) findRecruitedAgent(repoURL string) (*model.AgentConfig, error) {
+	agents, err := a.store.ListAgents()
+	if err != nil {
+		return nil, err
+	}
+	for i := range agents {
+		ag := agents[i]
+		if ag.Source != nil && ag.Source.RepoURL == repoURL {
+			return &ag, nil
+		}
+	}
+	return nil, nil
 }
 
 func (a *App) findRegistryEntry(ctx context.Context, registryID string) (recruit.RegistryEntry, error) {
@@ -295,7 +348,14 @@ func mapRecruitError(err error) error {
 		errors.Is(err, recruit.ErrUnsafePath),
 		errors.Is(err, recruit.ErrRegistryInvalid),
 		errors.Is(err, recruit.ErrVersionMismatch),
-		errors.Is(err, recruit.ErrRepoURLInvalid):
+		errors.Is(err, recruit.ErrRepoURLInvalid),
+		errors.Is(err, recruit.ErrArchiveTraversal),
+		errors.Is(err, recruit.ErrArchiveSymlinkEscape),
+		errors.Is(err, recruit.ErrArchiveUnsupported),
+		errors.Is(err, recruit.ErrPayloadTooLarge),
+		errors.Is(err, recruit.ErrPayloadFileTooLarge),
+		errors.Is(err, recruit.ErrPayloadTooManyFiles),
+		errors.Is(err, recruit.ErrPayloadMissingFile):
 		return errors.Join(ErrBadRequest, err)
 	}
 	return err
