@@ -13,6 +13,25 @@ type repoCoord struct {
 	Repo  string
 }
 
+// RepoCoord is the exported alias returned by the importer-facing
+// parser. Kept separate from the unexported repoCoord so the install
+// path is not accidentally coupled to importer-only callers.
+type RepoCoord struct {
+	Owner string
+	Repo  string
+}
+
+// ParseGitHubRepoForImporter is the importer's view of parseGitHubRepo.
+// Exposes the same parse logic without leaking the internal coord type
+// to packages outside this one.
+func ParseGitHubRepoForImporter(repoURL string) (RepoCoord, error) {
+	c, err := parseGitHubRepo(repoURL)
+	if err != nil {
+		return RepoCoord{}, err
+	}
+	return RepoCoord{Owner: c.Owner, Repo: c.Repo}, nil
+}
+
 // parseGitHubRepo accepts forms like https://github.com/owner/repo or
 // https://github.com/owner/repo.git and returns the owner/repo coordinate.
 // Returns ErrRepoURLInvalid for any non-github.com host or malformed

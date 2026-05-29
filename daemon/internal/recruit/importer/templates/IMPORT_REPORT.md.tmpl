@@ -1,0 +1,46 @@
+# Import Report: {{ .Name }}
+
+- Source: {{ .RepoURL }}
+- Version: {{ .Version }}
+{{- if .Commit }}
+- Upstream commit: {{ .Commit }}
+{{- end }}
+- Imported at: {{ .ImportedAt }}
+- Layout: {{ if .Native }}native Crew44 agent{{ else }}upstream-wrapper{{ end }}
+
+## Detected skills ({{ len .Skills }})
+
+{{- if .Skills }}
+{{- range .Skills }}
+- {{ .Name }} — `{{ .Path }}`
+{{- end }}
+{{- else }}
+No `SKILL.md` files were found during the scan. Add `skills[]` entries
+to the manifest by hand if the upstream repo ships skill content the
+auto-scan missed.
+{{- end }}
+
+## Files included in the install payload ({{ len .Included }})
+
+{{- range .Included }}
+- {{ . }}
+{{- end }}
+
+## Files filtered out by the importer ({{ len .Skipped }})
+
+{{- range .Skipped }}
+- {{ . }}
+{{- end }}
+
+## Human review
+
+Before publishing:
+
+1. Read `AGENT.md` and rewrite the placeholder role paragraph so the
+   agent has a concrete job description.
+2. Confirm the detected `skills[]` actually point at real `SKILL.md`
+   files (and remove any that are stale or empty).
+3. Trim `crew44-agent.json` payload globs to keep the installed payload
+   small. The default wrapper exclude list is conservative; large
+   repos usually need more excludes.
+4. Tag the repo with `v{{ .Version }}` once the wrapper is published.

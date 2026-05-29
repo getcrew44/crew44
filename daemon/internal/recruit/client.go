@@ -423,6 +423,23 @@ func validRegistryEntry(e *RegistryEntry) bool {
 		strings.TrimSpace(e.RepoURL) != ""
 }
 
+// ValidateManifestForImporter is the exported entry point the importer
+// uses to confirm a generated manifest passes the same checks the
+// installer applies on the user side. Kept separate from validateManifest
+// only because the latter is unexported by design; the rules are
+// identical so a published wrapper repo cannot trip the installer with
+// a manifest the importer accepted.
+func ValidateManifestForImporter(m *Manifest) error {
+	return validateManifest(m)
+}
+
+// MatchPayloadGlobForImporter exposes the gitignore-style glob matcher
+// to the importer so it can report which files the install would copy
+// without duplicating the matching logic.
+func MatchPayloadGlobForImporter(pattern, candidate string) bool {
+	return matchPayloadGlob(pattern, candidate)
+}
+
 // ensureSafePath rejects absolute paths and any path that escapes the
 // repo root via "..". Empty path is allowed (treated as "no SKILL.md")
 // but the manifest validator separately requires non-empty for declared

@@ -1,0 +1,36 @@
+# {{ .Name }}
+
+{{ .Description }}
+
+You are a Crew44 agent{{ if not .Native }} packaged from the upstream repository at {{ .RepoURL }}{{ end }}.
+
+## Role
+
+Describe how this agent helps the user. Replace this paragraph with the
+agent's intended role before publishing.
+
+{{- if not .Native }}
+
+## Local Source Material
+
+The original repository is preserved under `{{ .UpstreamRel }}/` inside this
+agent's installed Crew44 source directory. Use those files as reference
+material; do not modify them at runtime.
+{{- end }}
+
+## Skills
+
+{{- if .Skills }}
+{{- range .Skills }}
+- `{{ .Name }}`: `{{ .Path }}`
+{{- end }}
+{{- else }}
+This agent does not bundle any Crew44 skills. Add `skills[]` entries to
+`crew44-agent.json` when you publish stable skill files.
+{{- end }}
+
+## Conflict Policy
+
+Follow this `AGENT.md` first. When a Crew44 skill applies, follow that
+`SKILL.md` for the scoped task. Use {{ if .Native }}any other repo files{{ else }}upstream files{{ end }}
+as supporting material unless they conflict with Crew44 instructions.
