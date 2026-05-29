@@ -125,7 +125,7 @@ func jsonSchemaExample() string {
       "id": "m-1",
       "kind": "memory-project",
       "priority": "high",
-      "title": "This repo uses pnpm workspaces; npm install breaks it",
+      "title": "This repo uses npm workspaces; keep package-lock in sync",
       "body": "Three lockfile-recovery sessions in the last week...",
       "impact": "Prevents 10m/slip",
       "evidence": { "runs": ["t-114"], "windows": ["3 sessions, 7d"] },
@@ -133,7 +133,7 @@ func jsonSchemaExample() string {
         "type": "memory",
         "scope": "crew44",
         "scope_id": "PASTE-PROJECT-UUID-HERE",
-        "text": "Project uses pnpm workspaces. Never run npm install at the repo root."
+        "text": "Project uses npm workspaces. Run npm install only when intentionally updating package-lock.json."
       }
     }
   ]

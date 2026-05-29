@@ -60,7 +60,7 @@ The cost of a false positive is high: the user has to read, judge, and reject it
 
 ### Good surfacings (mirror these)
 
-- **memory-project:** "Project uses pnpm workspaces; never run `npm install` at the repo root — it produces a `package-lock.json` that breaks the workspace resolver." Non-obvious, repeatedly rediscovered, not in framework docs, and cannot live in code (the fix is "don't run a command," not a code change).
+- **memory-project:** "Project uses npm workspaces; keep `package-lock.json` synchronized with package manifests." Non-obvious, repeatedly rediscovered, not in framework docs, and cannot live in code (the fix is a workflow convention, not a code change).
 - **memory-user:** "Don't mock the database in integration tests — prior incident where a mocked test passed but the prod migration failed." Explicit correction with a stated reason, applies across projects.
 - **skill:** A 6-step locale-prep ritual the user walks through manually before every render — multi-step, project-specific, non-trivial, and not derivable from any single existing file. Recurrence across sessions strengthens the case, but a single session that crystallizes the full procedure (named steps, clear trigger, expected output) is enough.
 
@@ -221,15 +221,15 @@ Reply with a short plain-English summary the user can skim, then a single fenced
       "id": "m-1",
       "kind": "memory-project",
       "priority": "high",
-      "title": "This repo uses pnpm workspaces; npm install breaks it",
-      "body": "Three lockfile-recovery sessions in the last week. Worth pinning so no agent runs npm install at the repo root again.",
+      "title": "This repo uses npm workspaces; keep package-lock in sync",
+      "body": "Three lockfile-recovery sessions in the last week. Worth pinning so agents update package-lock.json intentionally with package manifest changes.",
       "impact": "Prevents 10m/slip",
       "evidence": { "runs": ["t-114","t-112","t-109"], "windows": ["3 lockfile-recovery sessions"] },
       "preview": {
         "type": "memory",
         "scope": "crew44",
         "scope_id": "PASTE-PROJECT-UUID-HERE",
-        "text": "Project uses pnpm workspaces. Never run npm install at the repo root."
+        "text": "Project uses npm workspaces. Run npm install only when intentionally updating package-lock.json."
       }
     },
     {

@@ -8,18 +8,19 @@ const cwd = path.resolve(__dirname, '..', '..');
 const viteBin = path.join(cwd, 'node_modules', '.bin', process.platform === 'win32' ? 'vite.cmd' : 'vite');
 
 function resolveElectronBin() {
-  const fs = require('fs');
-  const distDir = path.join(cwd, 'node_modules', 'electron', 'dist');
-  if (!fs.existsSync(distDir)) {
+  try {
+    return require('electron');
+  } catch (err) {
     console.error(
       'Electron binary not found at node_modules/electron/dist/.\n' +
-        'pnpm 10 blocks postinstall scripts by default. Fix with one of:\n' +
-        '  pnpm exec install-electron --no\n' +
-        '  pnpm rebuild electron'
+      'The Electron npm package is installed, but its binary download did not finish.\n' +
+      'Fix with:\n' +
+      '  npm exec install-electron --no\n' +
+      'If downloads are slow or blocked, copy .npmrc.example to .npmrc and run the install command again.\n' +
+      `Original error: ${err.message}`
     );
     process.exit(1);
   }
-  return require('electron');
 }
 const electronBin = resolveElectronBin();
 
