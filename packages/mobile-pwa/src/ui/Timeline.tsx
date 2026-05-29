@@ -3,6 +3,7 @@ import { Agent } from "@/api/types";
 import { ErrorItem, RenderableTimelineItem, ThinkingItem, ToolItem } from "@/api/events";
 import { AttachmentTray } from "@/ui/AttachmentTray";
 import { RichText } from "@/ui/RichText";
+import { ToolOutput } from "@/ui/ToolOutput";
 
 export type LoadedToolDetails = Pick<ToolItem, "path" | "input" | "output" | "detail" | "result">;
 
@@ -112,18 +113,27 @@ function ToolLine({
   };
   return (
     <div className={`tool-line ${open ? "tool-line-open" : ""}`}>
-      <button type="button" className="tool-summary" aria-expanded={open} onClick={openTool}>
-        <span className={`tool-caret ${open ? "tool-caret-open" : ""} ${!canOpen ? "tool-caret-muted" : ""}`}>›</span>
+      <div className="tool-summary">
+        <button
+          type="button"
+          className="tool-toggle"
+          aria-label={`${open ? "Collapse" : "Expand"} ${effectiveTool.tool} details`}
+          aria-expanded={open}
+          disabled={!canOpen}
+          onClick={openTool}
+        >
+          <span className={`tool-caret ${open ? "tool-caret-open" : ""} ${!canOpen ? "tool-caret-muted" : ""}`}>›</span>
+        </button>
         <strong>{effectiveTool.tool}</strong>
         {effectiveTool.path ? <span className="tool-path">{effectiveTool.path}</span> : <span className="tool-flex" />}
         <ToolStatus result={effectiveTool.result} />
-      </button>
+      </div>
       {open ? (
         <div className="tool-detail-wrap">
           {loadingDetails ? <p className="tool-loading">Loading details...</p> : null}
           {detailError ? <p className="tool-error">{detailError}</p> : null}
           {effectiveTool.path.length > 70 ? <p className="tool-path-expanded">{effectiveTool.path}</p> : null}
-          {detail ? <pre className="tool-detail">{detail}</pre> : null}
+          {detail ? <ToolOutput output={detail} result={effectiveTool.result} /> : null}
         </div>
       ) : null}
     </div>
@@ -177,12 +187,20 @@ function ToolGroupLine({
       : "ok";
   return (
     <section className={`tool-group ${open ? "tool-line-open" : ""}`}>
-      <button type="button" className="tool-summary" aria-expanded={open} onClick={() => setOpen(value => !value)}>
-        <span className={`tool-caret ${open ? "tool-caret-open" : ""}`}>›</span>
+      <div className="tool-summary">
+        <button
+          type="button"
+          className="tool-toggle"
+          aria-label={`${open ? "Collapse" : "Expand"} tool group details`}
+          aria-expanded={open}
+          onClick={() => setOpen(value => !value)}
+        >
+          <span className={`tool-caret ${open ? "tool-caret-open" : ""}`}>›</span>
+        </button>
         <strong className="tool-group-title">Used {item.events.length} tools</strong>
         {open ? <span className="tool-flex" /> : <span className="tool-path">{toolGroupSummary(item.events)}</span>}
         <ToolStatus result={status} />
-      </button>
+      </div>
       {open ? (
         <div className="tool-group-details">
           {item.events.map(tool => (
@@ -293,7 +311,7 @@ export function Timeline({
           return (
             <article className="event-box" key={`${item.kind}:${item._seq}:${index}`}>
               <div className="message-meta">{item.name || "Tool"} result · {item.time}</div>
-              <pre className="tool-detail">{item.output}</pre>
+              <ToolOutput output={item.output} />
             </article>
           );
         }

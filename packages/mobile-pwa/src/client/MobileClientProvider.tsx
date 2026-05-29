@@ -5,6 +5,7 @@ import { parsePairingOffer } from "@/remote/pairingOffer";
 import { DesktopOfflineError, RelayConnectionError } from "@/remote/relay";
 import { JsonRpcPeer } from "@/remote/rpc";
 import { clearPairing, loadPairing, savePairing } from "@/storage/pairingStore";
+import { PWA_PAIRED_EVENT } from "@/pwa-install/events";
 
 type Status = "loading" | "unpaired" | "connecting" | "reconnecting" | "online" | "error";
 type ConnectionIssue = "" | "relay" | "desktop";
@@ -26,6 +27,20 @@ const relayRetryDelayMs = 1000;
 const keepAliveIntervalMs = 10000;
 const keepAliveTimeoutMs = 5000;
 
+function hasPairingSecretInHash(): boolean {
+  return new URLSearchParams(window.location.hash.replace(/^#/, "")).has("secret");
+}
+
+function resetNavigationToPair() {
+  if (window.location.hash !== "#/pair") window.location.hash = "/pair";
+}
+
+function showRemoteRevokedNotice() {
+  window.setTimeout(() => {
+    window.alert("This browser was unpaired from the Crew44 desktop. Pair again to reconnect.");
+  }, 250);
+}
+
 function deviceName(): string {
   const platform = (navigator as Navigator & { userAgentData?: { platform?: string } }).userAgentData?.platform || navigator.platform || "Browser";
   return `PWA on ${platform}`;
@@ -45,6 +60,7 @@ export function MobileClientProvider({ children }: { children: React.ReactNode }
   const mountedRef = React.useRef(true);
   const statusRef = React.useRef<Status>("loading");
   const revokedRef = React.useRef(false);
+  const suppressRevokedNoticeRef = React.useRef(false);
 
   React.useEffect(() => {
     statusRef.current = status;
@@ -136,12 +152,14 @@ export function MobileClientProvider({ children }: { children: React.ReactNode }
     clearReconnectTimer();
     reconnectAttemptRef.current = 0;
     closeRpc();
+    if (suppressRevokedNoticeRef.current) return;
     await clearPairing();
     setProfile(null);
     setConnectionIssue("");
     setError("");
     setStatus("unpaired");
-    window.alert("This browser was unpaired from the Crew44 desktop. Pair again to reconnect.");
+    resetNavigationToPair();
+    showRemoteRevokedNotice();
   }, [clearReconnectTimer, closeRpc]);
 
   const pingRpc = React.useCallback(async (rpc: JsonRpcPeer) => {
@@ -220,6 +238,27 @@ export function MobileClientProvider({ children }: { children: React.ReactNode }
   }, [connectStoredPairing]);
 
   React.useEffect(() => {
+    if (hasPairingSecretInHash()) {
+      let cancelled = false;
+      clearReconnectTimer();
+      revokedRef.current = true;
+      closeRpc();
+      clearPairing().then(() => {
+        if (cancelled || !mountedRef.current) return;
+        setProfile(null);
+        setConnectionIssue("");
+        setError("");
+        setStatus("unpaired");
+      }).catch(() => {
+        if (!cancelled && mountedRef.current) setStatus("unpaired");
+      });
+      return () => {
+        cancelled = true;
+        mountedRef.current = false;
+        clearReconnectTimer();
+        closeRpc();
+      };
+    }
     connectStoredPairing();
     return () => {
       mountedRef.current = false;
@@ -250,26 +289,45 @@ export function MobileClientProvider({ children }: { children: React.ReactNode }
   }, [classifyConnectionLoss, pingRpc, showDesktopOffline]);
 
   const pairWithQrText = React.useCallback(async (text: string) => {
+    let offer;
+    try {
+      offer = parsePairingOffer(text);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Pairing failed");
+      setConnectionIssue("");
+      throw err;
+    }
+
     clearReconnectTimer();
     reconnectAttemptRef.current = 0;
-    revokedRef.current = false;
+    const oldApi = api;
+    const oldDeviceId = profile?.deviceId || "";
     setStatus("connecting");
     setError("");
     setConnectionIssue("");
+    suppressRevokedNoticeRef.current = true;
+    revokedRef.current = true;
+    if (oldApi && oldDeviceId) {
+      await oldApi.deleteRemoteDevice(oldDeviceId).catch(() => {});
+    }
     closeRpc();
+    await clearPairing();
+    setProfile(null);
+    suppressRevokedNoticeRef.current = false;
+    revokedRef.current = false;
     try {
-      const offer = parsePairingOffer(text);
       const result = await registerPairing(offer, deviceName());
       await savePairing(result.profile, result.privateKey);
       setProfile(result.profile);
       await connectStoredPairing();
+      window.dispatchEvent(new CustomEvent(PWA_PAIRED_EVENT));
     } catch (err) {
       setStatus("unpaired");
       setError(err instanceof Error ? err.message : "Pairing failed");
       setConnectionIssue("");
       throw err;
     }
-  }, [clearReconnectTimer, closeRpc, connectStoredPairing]);
+  }, [api, clearReconnectTimer, closeRpc, connectStoredPairing, profile]);
 
   const disconnect = React.useCallback(async () => {
     const currentApi = api;
@@ -277,6 +335,7 @@ export function MobileClientProvider({ children }: { children: React.ReactNode }
     const wasDesktopConnected = Boolean(currentApi && desktopDeviceId);
     clearReconnectTimer();
     reconnectAttemptRef.current = 0;
+    suppressRevokedNoticeRef.current = true;
     revokedRef.current = true;
     if (currentApi && desktopDeviceId) {
       await currentApi.deleteRemoteDevice(desktopDeviceId).catch(() => {});
@@ -287,6 +346,8 @@ export function MobileClientProvider({ children }: { children: React.ReactNode }
     setConnectionIssue("");
     setError(wasDesktopConnected ? "" : "Also unpair this browser on desktop before pairing again.");
     setStatus("unpaired");
+    resetNavigationToPair();
+    suppressRevokedNoticeRef.current = false;
   }, [api, clearReconnectTimer, closeRpc, profile]);
 
   const value = React.useMemo<MobileClientContextValue>(() => ({

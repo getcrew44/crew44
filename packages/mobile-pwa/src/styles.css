@@ -345,6 +345,10 @@ select {
   line-height: 1.45;
 }
 
+.empty-state-actions {
+  margin-top: 18px;
+}
+
 .muted {
   color: #807972;
   font-size: 14px;
@@ -409,10 +413,26 @@ textarea {
   background: #fffef8;
   color: #1c1a17;
   border-radius: 8px;
+  font-size: 16px;
   padding: 11px 12px;
   resize: vertical;
   min-height: 92px;
   outline: none;
+}
+
+.link-danger-button {
+  border: 0;
+  background: transparent;
+  color: #b8553e;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.4;
+  padding: 8px;
+  cursor: pointer;
+}
+
+.pair-link-button {
+  align-self: center;
 }
 
 select {
@@ -550,6 +570,9 @@ select {
   display: flex;
   justify-content: center;
   padding: 16px;
+  color: #807972;
+  font-size: 12px;
+  font-weight: 600;
 }
 
 .timeline-shell {
@@ -780,6 +803,7 @@ select {
 }
 
 .cw-math-inline {
+  display: inline-block;
   max-width: 100%;
   overflow-x: auto;
   overflow-y: hidden;
@@ -1043,19 +1067,36 @@ select {
 .tool-summary {
   width: 100%;
   min-height: 30px;
-  border: 0;
-  background: transparent;
   display: flex;
   align-items: center;
   gap: 8px;
   color: #5c544b;
   padding: 4px 8px;
   text-align: left;
+}
+
+.tool-toggle {
+  width: 22px;
+  height: 22px;
+  flex: 0 0 22px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: #a89f92;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
   cursor: pointer;
+  touch-action: manipulation;
+}
+
+.tool-toggle:disabled {
+  cursor: default;
 }
 
 .tool-caret {
-  color: #a89f92;
+  color: currentColor;
   display: inline-flex;
   transform: rotate(0deg);
   transition: transform 0.15s;
@@ -1144,18 +1185,6 @@ select {
   margin-left: 0;
 }
 
-.tool-detail {
-  margin: 0;
-  max-height: 260px;
-  overflow: auto;
-  padding: 9px 10px;
-  white-space: pre-wrap;
-  word-break: break-word;
-  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 12.5px;
-  line-height: 1.55;
-}
-
 .tool-loading,
 .tool-error,
 .tool-path-expanded {
@@ -1171,6 +1200,45 @@ select {
   color: #807972;
   word-break: break-word;
   font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.tool-output {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.tool-output-section {
+  margin-top: 0;
+}
+
+.tool-output-label {
+  margin-bottom: 4px;
+  color: #807972;
+  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  text-transform: uppercase;
+}
+
+.tool-output-label-error {
+  color: #b23a2e;
+}
+
+.tool-pre-text {
+  margin: 0;
+  max-height: 260px;
+  overflow: auto;
+  padding: 9px 10px;
+  color: #1c1a17;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+
+.tool-pre-text-error {
+  color: #b23a2e;
 }
 
 .streaming-label {
@@ -1237,7 +1305,7 @@ select {
   min-height: 22px;
   max-height: 66px;
   resize: none;
-  font-size: 15px;
+  font-size: 16px;
   line-height: 22px;
   padding: 0;
   border: 0;
