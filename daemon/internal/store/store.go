@@ -186,6 +186,9 @@ func (s *Store) SaveAgent(agent model.AgentConfig) error {
 func (s *Store) DeleteAgent(id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	// RemoveAll under the agent dir also clears recruited-skills.json,
+	// source/, and source.prev/, so the source-tree cleanup helpers
+	// don't need a separate call from DeleteAgent.
 	if err := os.RemoveAll(filepath.Join(s.root, "agents", "agent-"+id)); err != nil {
 		return err
 	}
