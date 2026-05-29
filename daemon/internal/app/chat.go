@@ -279,7 +279,7 @@ func (a *App) runChat(ctx context.Context, controller *chatRunController, chatID
 			a.finishChatWithError(chatID, err.Error())
 			return
 		}
-		agentSkills, err := a.resolveAgentSkills(agent.SkillIDs)
+		agentSkills, err := a.resolveRunSkills(agent)
 		if err != nil {
 			a.finishChatWithError(chatID, err.Error())
 			return
@@ -313,6 +313,10 @@ func (a *App) runChat(ctx context.Context, controller *chatRunController, chatID
 		var pendingHandoverAgent model.AgentConfig
 		var pendingHandoverNote string
 		pendingToolSeqs := map[string][]int64{}
+		agentSourceDir := ""
+		if agent.Source != nil {
+			agentSourceDir = agent.Source.SourceDir
+		}
 		result, err := a.engine.Run(ctx, runtime.RunRequest{
 			Runtime:         runtimeRecord,
 			Agent:           runtimeAgent,
@@ -320,6 +324,7 @@ func (a *App) runChat(ctx context.Context, controller *chatRunController, chatID
 			Prompt:          currentPrompt,
 			WorkDir:         chatWorkdir(chat, project),
 			RuntimeEnvDir:   a.store.RuntimeEnvDir(currentAgentID),
+			AgentSourceDir:  agentSourceDir,
 			ResumeSessionID: resumeSessionID,
 			// Only the main interactive turn gets the headless browser. Utility
 			// calls like the title summarizer (chat_title.go) leave this off.

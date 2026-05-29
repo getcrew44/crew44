@@ -18,6 +18,13 @@ type RunRequest struct {
 	WorkDir         string
 	RuntimeEnvDir   string
 	ResumeSessionID string
+	// AgentSourceDir is the installed repo payload directory for a
+	// recruited agent (see model.AgentSource.SourceDir). When set, the
+	// runtime exposes it as CREW44_AGENT_SOURCE_DIR so the spawned
+	// process can read upstream/, docs/, examples/ and other reference
+	// material the recruit installer copied alongside SKILL.md files.
+	// Empty for non-recruited agents.
+	AgentSourceDir string
 	// EnableBrowserMCP opts this runtime into the injected Playwright headless
 	// browser. Off by default: utility calls (e.g. the chat-title summarizer)
 	// run on untrusted user content under bypass-permissions, so they must not
