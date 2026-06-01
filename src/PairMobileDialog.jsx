@@ -213,7 +213,7 @@ export function ManageMobileDialog({ devices = [], onClose, onChanged }) {
           lineHeight: 1.45,
           marginBottom: 12,
         }}>
-          To use Crew44 on your paired device, visit <MobileAppLinkWithQr /> with that device&apos;s browser.
+          Open the link below on your paired device to use Crew44 mobile control: <MobileAppLinkWithQr />
         </div>
       )}
 
