@@ -5,6 +5,8 @@ import (
 	"net/url"
 	"path"
 	"strings"
+
+	"github.com/getcrew44/crew44/daemon/recruit/schema"
 )
 
 // repoCoord captures the owner/repo pair parsed from a GitHub repo URL.
@@ -13,42 +15,17 @@ type repoCoord struct {
 	Repo  string
 }
 
-// RepoCoord is the exported alias returned by the importer-facing
-// parser. Kept separate from the unexported repoCoord so the install
-// path is not accidentally coupled to importer-only callers.
-type RepoCoord struct {
-	Owner string
-	Repo  string
-}
-
-// ParseGitHubRepoForImporter is the importer's view of parseGitHubRepo.
-// Exposes the same parse logic without leaking the internal coord type
-// to packages outside this one.
-func ParseGitHubRepoForImporter(repoURL string) (RepoCoord, error) {
-	c, err := parseGitHubRepo(repoURL)
-	if err != nil {
-		return RepoCoord{}, err
-	}
-	return RepoCoord{Owner: c.Owner, Repo: c.Repo}, nil
-}
-
 // parseGitHubRepo accepts forms like https://github.com/owner/repo or
 // https://github.com/owner/repo.git and returns the owner/repo coordinate.
-// Returns ErrRepoURLInvalid for any non-github.com host or malformed
-// path so callers can map the failure to a clear user-facing error.
+// The parse rules (and ErrRepoURLInvalid) live in the public schema
+// package so the importer applies the same validation; this thin wrapper
+// adapts the result to the unexported runtime coord type.
 func parseGitHubRepo(repoURL string) (repoCoord, error) {
-	u, err := url.Parse(strings.TrimSpace(repoURL))
+	c, err := schema.ParseGitHubRepo(repoURL)
 	if err != nil {
-		return repoCoord{}, fmt.Errorf("%w: %v", ErrRepoURLInvalid, err)
+		return repoCoord{}, err
 	}
-	if u.Host != "github.com" {
-		return repoCoord{}, fmt.Errorf("%w: only github.com repos are supported (got %q)", ErrRepoURLInvalid, u.Host)
-	}
-	parts := strings.Split(strings.Trim(u.Path, "/"), "/")
-	if len(parts) < 2 || parts[0] == "" || parts[1] == "" {
-		return repoCoord{}, fmt.Errorf("%w: missing owner/repo in %s", ErrRepoURLInvalid, repoURL)
-	}
-	return repoCoord{Owner: parts[0], Repo: strings.TrimSuffix(parts[1], ".git")}, nil
+	return repoCoord{Owner: c.Owner, Repo: c.Repo}, nil
 }
 
 // rawFileURL builds a {base}/owner/repo/ref/path URL. base is configurable

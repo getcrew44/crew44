@@ -8,10 +8,11 @@ import (
 	"io"
 	"log"
 	"net/http"
-	"path"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/getcrew44/crew44/daemon/recruit/schema"
 )
 
 // Defaults for the production wire-up. Tests override RawBase to point at
@@ -33,14 +34,13 @@ const (
 )
 
 // Sentinels returned by the client so the RPC layer can map errors to
-// user-facing toasts without string-matching.
+// user-facing toasts without string-matching. The manifest/path/repo-url
+// validation sentinels live in the schema package and are re-exported
+// from schema_alias.go.
 var (
 	ErrTagNotFound     = errors.New("recruit: release tag not found")
-	ErrManifestInvalid = errors.New("recruit: invalid manifest")
 	ErrRegistryInvalid = errors.New("recruit: invalid registry")
-	ErrUnsafePath      = errors.New("recruit: unsafe path in manifest")
 	ErrVersionMismatch = errors.New("recruit: tag manifest version disagrees with requested version")
-	ErrRepoURLInvalid  = errors.New("recruit: invalid repo url")
 )
 
 // Config is the externally-tunable knobs for Client. All fields are
@@ -185,7 +185,7 @@ func (c *Client) FetchManifest(ctx context.Context, repoURL string) (Manifest, r
 	if err := json.Unmarshal(body, &m); err != nil {
 		return Manifest{}, coord, fmt.Errorf("%w: %v", ErrManifestInvalid, err)
 	}
-	if err := validateManifest(&m); err != nil {
+	if err := schema.ValidateManifest(&m); err != nil {
 		return Manifest{}, coord, err
 	}
 	return m, coord, nil
@@ -227,7 +227,7 @@ func (c *Client) ResolveTag(ctx context.Context, coord repoCoord, version string
 		if err := json.Unmarshal(body, &m); err != nil {
 			return "", Manifest{}, fmt.Errorf("%w: %v", ErrManifestInvalid, err)
 		}
-		if err := validateManifest(&m); err != nil {
+		if err := schema.ValidateManifest(&m); err != nil {
 			return "", Manifest{}, err
 		}
 		if !versionMatches(m.Version, version) {
@@ -285,133 +285,6 @@ func (c *Client) getBytes(ctx context.Context, url string, limit int64) ([]byte,
 	return io.ReadAll(io.LimitReader(resp.Body, limit+1))
 }
 
-// manifestSchemaPrefix gates which schema_version values the install
-// path accepts. Anything outside the v1 family is rejected so an author
-// experimenting with a v2 layout can't accidentally install on a daemon
-// that doesn't understand the new fields.
-const manifestSchemaPrefix = "crew44.agent.v1"
-
-// validateManifest enforces the required fields and rejects unsafe skill
-// paths. Done at parse time so the install path can assume a well-formed
-// manifest.
-func validateManifest(m *Manifest) error {
-	if strings.TrimSpace(m.SchemaVersion) == "" {
-		return fmt.Errorf("%w: missing schema_version", ErrManifestInvalid)
-	}
-	if m.SchemaVersion != manifestSchemaPrefix {
-		return fmt.Errorf("%w: unsupported schema_version %q", ErrManifestInvalid, m.SchemaVersion)
-	}
-	if strings.TrimSpace(m.Name) == "" {
-		return fmt.Errorf("%w: missing name", ErrManifestInvalid)
-	}
-	if strings.TrimSpace(m.Version) == "" {
-		return fmt.Errorf("%w: missing version", ErrManifestInvalid)
-	}
-	if strings.TrimSpace(m.Description) == "" {
-		return fmt.Errorf("%w: missing description", ErrManifestInvalid)
-	}
-	for i, sd := range m.Skills {
-		if strings.TrimSpace(sd.Name) == "" {
-			return fmt.Errorf("%w: skill %d missing name", ErrManifestInvalid, i)
-		}
-		if err := ensureSafePath(sd.Path); err != nil {
-			return err
-		}
-		if !strings.HasSuffix(sd.Path, "SKILL.md") {
-			return fmt.Errorf("%w: skill %d path must end with SKILL.md (got %q)", ErrManifestInvalid, i, sd.Path)
-		}
-	}
-	if m.SourceType == SourceTypeUpstreamWrapper {
-		if m.Upstream == nil || strings.TrimSpace(m.Upstream.RepoURL) == "" {
-			return fmt.Errorf("%w: source_type=%q requires upstream.repo_url", ErrManifestInvalid, m.SourceType)
-		}
-	}
-	if m.Upstream != nil && strings.TrimSpace(m.Upstream.Path) != "" {
-		if err := ensureSafePath(m.Upstream.Path); err != nil {
-			return err
-		}
-	}
-	if m.Payload != nil {
-		for _, p := range m.Payload.Include {
-			if err := ensureSafeGlob(p); err != nil {
-				return err
-			}
-		}
-		for _, p := range m.Payload.Exclude {
-			if err := ensureSafeGlob(p); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
-}
-
-// ensureSafeGlob applies the same anti-traversal checks as ensureSafePath
-// but tolerates the gitignore-style glob characters (`*`, `**`, `?`) the
-// manifest payload spec accepts.
-func ensureSafeGlob(p string) error {
-	if strings.TrimSpace(p) == "" {
-		return fmt.Errorf("%w: empty payload glob", ErrManifestInvalid)
-	}
-	if strings.HasPrefix(p, "/") {
-		return fmt.Errorf("%w: %s", ErrUnsafePath, p)
-	}
-	if strings.HasPrefix(p, "!") {
-		return fmt.Errorf("%w: gitignore-negation globs are not supported in v1.1 (%q)", ErrManifestInvalid, p)
-	}
-	// path.Clean would collapse `**`, so reject `..` segments by walking
-	// the path manually.
-	for _, seg := range strings.Split(p, "/") {
-		if seg == ".." {
-			return fmt.Errorf("%w: %s", ErrUnsafePath, p)
-		}
-	}
-	return nil
-}
-
-// ResolvedPayload is what the install flow uses after manifest parsing:
-// a concrete list of include/exclude globs that already account for the
-// "no payload block ⇒ sensible default" fallback described in the plan.
-type ResolvedPayload struct {
-	Include []string
-	Exclude []string
-}
-
-// ResolvePayload returns the include/exclude globs the installer should
-// apply for this manifest. When the manifest omits a Payload block, the
-// default is AGENT.md, crew44-agent.json, every declared skills[].path,
-// and — when an upstream block is present — `{upstream.path}/**`. The
-// default applies to both native and wrapper repos; an explicit Payload
-// block in the manifest is used as-is.
-func ResolvePayload(m *Manifest) ResolvedPayload {
-	if m.Payload != nil && (len(m.Payload.Include) > 0 || len(m.Payload.Exclude) > 0) {
-		out := ResolvedPayload{
-			Include: append([]string(nil), m.Payload.Include...),
-			Exclude: append([]string(nil), m.Payload.Exclude...),
-		}
-		if len(out.Include) == 0 {
-			out.Include = defaultIncludes(m)
-		}
-		return out
-	}
-	return ResolvedPayload{Include: defaultIncludes(m)}
-}
-
-func defaultIncludes(m *Manifest) []string {
-	out := []string{"AGENT.md", "crew44-agent.json"}
-	for _, s := range m.Skills {
-		out = append(out, s.Path)
-	}
-	if m.Upstream != nil {
-		p := strings.TrimSpace(m.Upstream.Path)
-		if p == "" {
-			p = UpstreamPathDefault
-		}
-		out = append(out, p+"/**")
-	}
-	return out
-}
-
 // validRegistryEntry returns true when the row has all the fields the
 // UI and install path actually need. Malformed rows are dropped from
 // the list with a log; a single bad entry shouldn't take down the
@@ -423,37 +296,3 @@ func validRegistryEntry(e *RegistryEntry) bool {
 		strings.TrimSpace(e.RepoURL) != ""
 }
 
-// ValidateManifestForImporter is the exported entry point the importer
-// uses to confirm a generated manifest passes the same checks the
-// installer applies on the user side. Kept separate from validateManifest
-// only because the latter is unexported by design; the rules are
-// identical so a published wrapper repo cannot trip the installer with
-// a manifest the importer accepted.
-func ValidateManifestForImporter(m *Manifest) error {
-	return validateManifest(m)
-}
-
-// MatchPayloadGlobForImporter exposes the gitignore-style glob matcher
-// to the importer so it can report which files the install would copy
-// without duplicating the matching logic.
-func MatchPayloadGlobForImporter(pattern, candidate string) bool {
-	return matchPayloadGlob(pattern, candidate)
-}
-
-// ensureSafePath rejects absolute paths and any path that escapes the
-// repo root via "..". Empty path is allowed (treated as "no SKILL.md")
-// but the manifest validator separately requires non-empty for declared
-// skills; this is the second line of defense.
-func ensureSafePath(p string) error {
-	if p == "" {
-		return fmt.Errorf("%w: empty skill path", ErrManifestInvalid)
-	}
-	if strings.HasPrefix(p, "/") {
-		return fmt.Errorf("%w: %s", ErrUnsafePath, p)
-	}
-	cleaned := path.Clean(p)
-	if cleaned == ".." || strings.HasPrefix(cleaned, "../") {
-		return fmt.Errorf("%w: %s", ErrUnsafePath, p)
-	}
-	return nil
-}

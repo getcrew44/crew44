@@ -1,4 +1,4 @@
-package recruit
+package schema
 
 import "testing"
 
@@ -33,8 +33,8 @@ func TestMatchPayloadGlob(t *testing.T) {
 		{"docs/?.md", "docs/ab.md", false},
 	}
 	for _, tc := range cases {
-		if got := matchPayloadGlob(tc.pattern, tc.candidate); got != tc.want {
-			t.Errorf("matchPayloadGlob(%q,%q) = %v, want %v", tc.pattern, tc.candidate, got, tc.want)
+		if got := MatchPayloadGlob(tc.pattern, tc.candidate); got != tc.want {
+			t.Errorf("MatchPayloadGlob(%q,%q) = %v, want %v", tc.pattern, tc.candidate, got, tc.want)
 		}
 	}
 }
