@@ -39,17 +39,36 @@ function ThoughtChip({ thought }: { thought: ThinkingItem }) {
 }
 
 function ErrorDetails({ item }: { item: ErrorItem }) {
-  const metadata = [item.subtype, item.code].filter(Boolean).join(" · ");
   const agentMeta = [
     item.agent_name ? `raised by ${item.agent_name}` : "",
     item.target_agent_name ? `target ${item.target_agent_name}` : ""
-  ].filter(Boolean).join(" · ");
+  ].filter(Boolean);
   return (
     <article className="event-box error-box">
-      <div className="message-meta">Error · {item.time}</div>
-      {metadata ? <p className="error-meta">{metadata}</p> : null}
-      <p className="event-text">{item.message}</p>
-      {agentMeta ? <p className="error-meta">{agentMeta}</p> : null}
+      <div className="error-header-band">
+        <span className="error-header-icon" aria-hidden="true">
+          <svg width="11" height="11" viewBox="0 0 11 11">
+            <path d="M5.5 2v4M5.5 8v0.5" stroke="currentColor" strokeWidth="1.4" fill="none" strokeLinecap="round" />
+            <circle cx="5.5" cy="5.5" r="4.5" stroke="currentColor" strokeWidth="1" fill="none" />
+          </svg>
+        </span>
+        <span className="error-header-title">
+          {(item.subtype || "error").replace(/_/g, " ")}
+        </span>
+        {item.code ? <code className="error-code-chip">{item.code}</code> : null}
+        <span className="error-header-spacer" />
+        <span className="error-header-time">{item.time}</span>
+      </div>
+      <div className="error-body">
+        <p className="event-text">{item.message}</p>
+        {agentMeta.length ? (
+          <div className="error-meta-row error-meta-row-context">
+            {agentMeta.map(entry => (
+              <span key={entry} className="error-meta-chip error-meta-chip-context">{entry}</span>
+            ))}
+          </div>
+        ) : null}
+      </div>
     </article>
   );
 }
@@ -94,8 +113,9 @@ function ToolLine({
   const [loadingDetails, setLoadingDetails] = React.useState(false);
   const [detailError, setDetailError] = React.useState("");
   const effectiveTool = loaded ? { ...tool, ...loaded, compact: false } : tool;
+  const headerPath = effectiveTool.path.trim();
   const detail = effectiveTool.output || effectiveTool.detail || "";
-  const canOpen = Boolean(tool.compact || detail || effectiveTool.path.length > 70);
+  const canOpen = Boolean(tool.compact || detail || headerPath.length > 70);
   const openTool = async () => {
     if (!canOpen) return;
     const nextOpen = !open;
@@ -111,28 +131,39 @@ function ToolLine({
       setLoadingDetails(false);
     }
   };
+  const handleSummaryKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (!canOpen) return;
+    if (event.key !== "Enter" && event.key !== " ") return;
+    event.preventDefault();
+    openTool().catch(() => {});
+  };
   return (
     <div className={`tool-line ${open ? "tool-line-open" : ""}`}>
-      <div className="tool-summary">
-        <button
-          type="button"
-          className="tool-toggle"
-          aria-label={`${open ? "Collapse" : "Expand"} ${effectiveTool.tool} details`}
-          aria-expanded={open}
-          disabled={!canOpen}
-          onClick={openTool}
-        >
+      <div
+        className={`tool-summary ${canOpen ? "tool-summary-clickable" : ""} ${open ? "tool-summary-open" : ""}`}
+        role={canOpen ? "button" : undefined}
+        tabIndex={canOpen ? 0 : undefined}
+        aria-label={canOpen ? `${open ? "Collapse" : "Expand"} ${effectiveTool.tool} details` : undefined}
+        aria-expanded={canOpen ? open : undefined}
+        onClick={canOpen ? () => { openTool().catch(() => {}); } : undefined}
+        onKeyDown={handleSummaryKeyDown}
+      >
+        <span className="tool-toggle" aria-hidden="true">
           <span className={`tool-caret ${open ? "tool-caret-open" : ""} ${!canOpen ? "tool-caret-muted" : ""}`}>›</span>
-        </button>
-        <strong>{effectiveTool.tool}</strong>
-        {effectiveTool.path ? <span className="tool-path">{effectiveTool.path}</span> : <span className="tool-flex" />}
+        </span>
+        <div className="tool-summary-main">
+          <div className="tool-summary-title-row">
+            <strong>{effectiveTool.tool}</strong>
+            {!open && headerPath ? <span className="tool-path">{headerPath}</span> : <span className="tool-flex" />}
+          </div>
+        </div>
         <ToolStatus result={effectiveTool.result} />
+        {open && headerPath ? <div className="tool-path-open">{headerPath}</div> : null}
       </div>
       {open ? (
         <div className="tool-detail-wrap">
           {loadingDetails ? <p className="tool-loading">Loading details...</p> : null}
           {detailError ? <p className="tool-error">{detailError}</p> : null}
-          {effectiveTool.path.length > 70 ? <p className="tool-path-expanded">{effectiveTool.path}</p> : null}
           {detail ? <ToolOutput output={detail} result={effectiveTool.result} /> : null}
         </div>
       ) : null}
@@ -187,16 +218,22 @@ function ToolGroupLine({
       : "ok";
   return (
     <section className={`tool-group ${open ? "tool-line-open" : ""}`}>
-      <div className="tool-summary">
-        <button
-          type="button"
-          className="tool-toggle"
-          aria-label={`${open ? "Collapse" : "Expand"} tool group details`}
-          aria-expanded={open}
-          onClick={() => setOpen(value => !value)}
-        >
+      <div
+        className="tool-summary tool-summary-clickable"
+        role="button"
+        tabIndex={0}
+        aria-label={`${open ? "Collapse" : "Expand"} tool group details`}
+        aria-expanded={open}
+        onClick={() => setOpen(value => !value)}
+        onKeyDown={event => {
+          if (event.key !== "Enter" && event.key !== " ") return;
+          event.preventDefault();
+          setOpen(value => !value);
+        }}
+      >
+        <span className="tool-toggle" aria-hidden="true">
           <span className={`tool-caret ${open ? "tool-caret-open" : ""}`}>›</span>
-        </button>
+        </span>
         <strong className="tool-group-title">Used {item.events.length} tools</strong>
         {open ? <span className="tool-flex" /> : <span className="tool-path">{toolGroupSummary(item.events)}</span>}
         <ToolStatus result={status} />

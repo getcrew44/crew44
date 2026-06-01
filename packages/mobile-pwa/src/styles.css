@@ -532,6 +532,9 @@ select {
 .menu-dismiss-layer {
   position: fixed;
   inset: 0;
+  border: 0;
+  padding: 0;
+  background: transparent;
   z-index: 10;
   cursor: default;
 }
@@ -555,6 +558,7 @@ select {
   border: 0;
   border-bottom: 1px solid #ece6d5;
   background: transparent;
+  color: #1c1a17;
   text-align: left;
   padding: 0 13px;
   font-weight: 650;
@@ -958,17 +962,98 @@ select {
   color: #1c1a17;
   font-size: 13px;
   line-height: 19px;
+  overflow-wrap: anywhere;
 }
 
 .error-box {
   border-color: #e7b8aa;
+  background: #fff7f4;
+  padding: 0;
+  overflow: hidden;
 }
 
-.error-meta {
-  margin: 0 0 4px;
+.error-header-band {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 11px 9px;
+  background: #f7ded7;
+  border-bottom: 1px solid #efc2b5;
+}
+
+.error-header-icon {
+  color: #9f4330;
+  display: inline-flex;
+  flex: 0 0 auto;
+}
+
+.error-header-title {
+  color: #b23a2e;
+  font-size: 12.5px;
+  line-height: 1.2;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+  overflow-wrap: anywhere;
+}
+
+.error-code-chip {
+  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11.5px;
+  color: #b23a2e;
+  background: #f1d4c9;
+  padding: 1px 6px;
+  border-radius: 4px;
+  overflow-wrap: anywhere;
+}
+
+.error-header-spacer {
+  flex: 1;
+  min-width: 0;
+}
+
+.error-header-time {
+  font-size: 11.5px;
+  color: #9c5142;
+  flex: 0 0 auto;
+}
+
+.error-body {
+  padding: 10px 14px;
+}
+
+.error-meta-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  margin: 0;
+}
+
+.error-meta-row-context {
+  margin: 8px 0 0;
+}
+
+.error-meta-chip {
   color: #b8553e;
   font-size: 12px;
   line-height: 18px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.error-meta-chip::after {
+  content: "·";
+  margin-left: 8px;
+  color: #d08c78;
+}
+
+.error-meta-row .error-meta-chip:last-child::after {
+  content: none;
+  margin-left: 0;
+}
+
+.error-meta-chip-context {
+  color: #9c5d4d;
 }
 
 .thought-wrap {
@@ -1077,24 +1162,33 @@ select {
   text-align: left;
 }
 
+.tool-summary-open {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 8px;
+  row-gap: 3px;
+}
+
+.tool-summary-clickable {
+  cursor: pointer;
+}
+
+.tool-summary-clickable:focus-visible {
+  outline: 2px solid #d9a999;
+  outline-offset: -2px;
+  border-radius: 6px;
+}
+
 .tool-toggle {
   width: 22px;
   height: 22px;
   flex: 0 0 22px;
-  border: 0;
-  border-radius: 5px;
-  background: transparent;
   color: #a89f92;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   padding: 0;
-  cursor: pointer;
-  touch-action: manipulation;
-}
-
-.tool-toggle:disabled {
-  cursor: default;
 }
 
 .tool-caret {
@@ -1121,6 +1215,38 @@ select {
   font-weight: 700;
 }
 
+.tool-summary-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.tool-summary-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.tool-summary-open .tool-summary-main {
+  grid-column: 2;
+  grid-row: 1;
+  align-self: center;
+}
+
+.tool-summary-open .tool-toggle {
+  grid-column: 1;
+  grid-row: 1;
+  align-self: center;
+}
+
+.tool-summary-open .tool-status,
+.tool-summary-open .tool-status-wrap,
+.tool-summary-open .tool-dot {
+  grid-column: 3;
+  grid-row: 1;
+  align-self: center;
+}
+
 .tool-path {
   flex: 1;
   min-width: 0;
@@ -1130,6 +1256,18 @@ select {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.tool-path-open {
+  grid-column: 1 / -1;
+  grid-row: 2;
+  align-self: start;
+  color: #807972;
+  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .tool-flex {
@@ -1198,12 +1336,6 @@ select {
   color: #b8553e;
 }
 
-.tool-path-expanded {
-  color: #807972;
-  word-break: break-word;
-  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
-}
-
 .tool-output {
   display: flex;
   flex-direction: column;
@@ -1230,13 +1362,24 @@ select {
   margin: 0;
   max-height: 260px;
   overflow: auto;
+  overscroll-behavior: none;
   padding: 9px 10px;
   color: #1c1a17;
-  white-space: pre-wrap;
-  word-break: break-word;
   font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 12.5px;
   line-height: 1.55;
+}
+
+.tool-pre-text-singleline {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.tool-pre-text-multiline {
+  white-space: pre;
+  overflow-wrap: normal;
+  word-break: normal;
 }
 
 .tool-pre-text-error {

@@ -47,12 +47,10 @@ export default function App() {
 
   let content: React.ReactNode;
 
-  if (client.status === "loading" || client.status === "connecting" || client.status === "reconnecting") {
-    const label = client.status === "reconnecting"
-      ? "Reconnecting to relay..."
-      : client.status === "connecting"
-        ? "Connecting to the Crew44 desktop..."
-        : "Loading pairing...";
+  if (client.status === "loading" || client.status === "connecting") {
+    const label = client.status === "connecting"
+      ? "Connecting to the Crew44 desktop..."
+      : "Loading pairing...";
     content = (
       <Screen>
         <Header title="Crew44 Mobile" />

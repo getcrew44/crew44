@@ -5,6 +5,10 @@ type ToolOutputSection = {
   text: string;
 };
 
+function isMultiline(text: string): boolean {
+  return text.includes("\n");
+}
+
 export function toolOutputSections(rawOutput: string): ToolOutputSection[] {
   if (!rawOutput) return [];
   try {
@@ -28,7 +32,13 @@ export function ToolOutput({ output, result }: { output: string; result?: "ok" |
               {section.label}
             </div>
           ) : null}
-          <pre className={`tool-pre-text ${result === "error" || section.label === "stderr" ? "tool-pre-text-error" : ""}`}>
+          <pre
+            className={[
+              "tool-pre-text",
+              isMultiline(section.text) ? "tool-pre-text-multiline" : "tool-pre-text-singleline",
+              result === "error" || section.label === "stderr" ? "tool-pre-text-error" : ""
+            ].filter(Boolean).join(" ")}
+          >
             {section.text}
           </pre>
         </div>

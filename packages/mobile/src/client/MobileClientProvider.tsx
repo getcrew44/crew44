@@ -3,14 +3,14 @@ import Constants from "expo-constants";
 import { router } from "expo-router";
 import { Alert, AppState } from "react-native";
 import { CrewApi } from "@/api/client";
+import { classifyConnectError } from "@/client/classifyConnectError";
+import { ConnectionIssue } from "@/client/connectionIssue";
 import { connectPairedDevice, PairedProfile, registerPairing } from "@/remote/client";
 import { parsePairingOffer } from "@/remote/pairingOffer";
-import { DesktopOfflineError, RelayConnectionError } from "@/remote/relay";
 import { JsonRpcPeer } from "@/remote/rpc";
 import { clearPairing, loadPairing, savePairing } from "@/storage/pairingStore";
 
-type Status = "loading" | "unpaired" | "connecting" | "reconnecting" | "online" | "error";
-type ConnectionIssue = "" | "relay" | "desktop";
+type Status = "loading" | "unpaired" | "connecting" | "online" | "error";
 
 interface MobileClientContextValue {
   status: Status;
@@ -25,7 +25,6 @@ interface MobileClientContextValue {
 
 const MobileClientContext = React.createContext<MobileClientContextValue | null>(null);
 
-const relayRetryDelayMs = 1000;
 const keepAliveIntervalMs = 10000;
 const keepAliveTimeoutMs = 5000;
 
@@ -56,10 +55,7 @@ export function MobileClientProvider({ children }: { children: React.ReactNode }
   const [error, setError] = React.useState("");
   const [connectionIssue, setConnectionIssue] = React.useState<ConnectionIssue>("");
   const rpcRef = React.useRef<JsonRpcPeer | null>(null);
-  const reconnectTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
-  const reconnectAttemptRef = React.useRef(0);
   const keepAliveTimerRef = React.useRef<ReturnType<typeof setInterval> | null>(null);
-  const connectStoredPairingRef = React.useRef<(options?: { resetBackoff?: boolean; silent?: boolean }) => Promise<void>>(async () => {});
   const mountedRef = React.useRef(true);
   const statusRef = React.useRef<Status>("loading");
   const revokedRef = React.useRef(false);
@@ -68,13 +64,6 @@ export function MobileClientProvider({ children }: { children: React.ReactNode }
   React.useEffect(() => {
     statusRef.current = status;
   }, [status]);
-
-  const clearReconnectTimer = React.useCallback(() => {
-    if (reconnectTimerRef.current) {
-      clearTimeout(reconnectTimerRef.current);
-      reconnectTimerRef.current = null;
-    }
-  }, []);
 
   const stopKeepAlive = React.useCallback(() => {
     if (keepAliveTimerRef.current) {
@@ -92,39 +81,27 @@ export function MobileClientProvider({ children }: { children: React.ReactNode }
 
   const showDesktopOffline = React.useCallback((message = "Can't connect to the Crew44 desktop") => {
     if (!mountedRef.current) return;
-    clearReconnectTimer();
     setApi(null);
     setError(message);
     setConnectionIssue("desktop");
     setStatus("error");
-  }, [clearReconnectTimer]);
+  }, []);
+
+  const showDesktopTimeout = React.useCallback((message = "The Crew44 desktop did not respond within 10 seconds.") => {
+    if (!mountedRef.current) return;
+    setApi(null);
+    setError(message);
+    setConnectionIssue("desktop_timeout");
+    setStatus("error");
+  }, []);
 
   const showRelayError = React.useCallback((message = "Relay connection failed") => {
     if (!mountedRef.current) return;
-    clearReconnectTimer();
     setApi(null);
     setError(message);
     setConnectionIssue("relay");
     setStatus("error");
-  }, [clearReconnectTimer]);
-
-  const scheduleRelayReconnect = React.useCallback((message: string) => {
-    if (!mountedRef.current) return;
-    setApi(null);
-    setError(message);
-    setConnectionIssue("relay");
-    if (reconnectAttemptRef.current >= 1) {
-      showRelayError(message);
-      return;
-    }
-    setStatus("reconnecting");
-    if (reconnectTimerRef.current) return;
-    reconnectAttemptRef.current += 1;
-    reconnectTimerRef.current = setTimeout(() => {
-      reconnectTimerRef.current = null;
-      connectStoredPairingRef.current({ resetBackoff: false, silent: true }).catch(() => {});
-    }, relayRetryDelayMs);
-  }, [showRelayError]);
+  }, []);
 
   const classifyConnectionLoss = React.useCallback(async () => {
     const saved = await loadPairing();
@@ -138,22 +115,21 @@ export function MobileClientProvider({ children }: { children: React.ReactNode }
     showDesktopOffline("Can't connect to the Crew44 desktop");
   }, [showDesktopOffline]);
 
-  const classifyConnectError = React.useCallback((err: unknown) => {
-    if (err instanceof DesktopOfflineError) {
-      showDesktopOffline("Can't connect to the Crew44 desktop");
+  const handleConnectError = React.useCallback((err: unknown) => {
+    const result = classifyConnectError(err);
+    if (result.issue === "relay") {
+      showRelayError(result.message);
       return;
     }
-    if (err instanceof RelayConnectionError) {
-      scheduleRelayReconnect(err.message);
+    if (result.issue === "desktop_timeout") {
+      showDesktopTimeout(result.message);
       return;
     }
-    showDesktopOffline(err instanceof Error ? err.message : "Can't connect to the Crew44 desktop");
-  }, [scheduleRelayReconnect, showDesktopOffline]);
+    showDesktopOffline(result.message);
+  }, [showDesktopOffline, showDesktopTimeout, showRelayError]);
 
   const handleRemoteRevoked = React.useCallback(async () => {
     revokedRef.current = true;
-    clearReconnectTimer();
-    reconnectAttemptRef.current = 0;
     closeRpc();
     if (suppressRevokedNoticeRef.current) return;
     await clearPairing();
@@ -163,7 +139,7 @@ export function MobileClientProvider({ children }: { children: React.ReactNode }
     setStatus("unpaired");
     resetNavigationToPair();
     showRemoteRevokedNotice();
-  }, [clearReconnectTimer, closeRpc]);
+  }, [closeRpc]);
 
   const pingRpc = React.useCallback(async (rpc: JsonRpcPeer) => {
     let timeoutId: ReturnType<typeof setTimeout> | null = null;
@@ -199,16 +175,12 @@ export function MobileClientProvider({ children }: { children: React.ReactNode }
     }, keepAliveIntervalMs);
   }, [classifyConnectionLoss, pingRpc, showDesktopOffline, stopKeepAlive]);
 
-  const connectStoredPairing = React.useCallback(async (options: { resetBackoff?: boolean; silent?: boolean } = {}) => {
-    clearReconnectTimer();
-    if (options.resetBackoff !== false) reconnectAttemptRef.current = 0;
+  const connectStoredPairing = React.useCallback(async () => {
     revokedRef.current = false;
     closeRpc();
-    if (!options.silent) {
-      setStatus("connecting");
-      setError("");
-      setConnectionIssue("");
-    }
+    setStatus("connecting");
+    setError("");
+    setConnectionIssue("");
     const saved = await loadPairing();
     if (!saved) {
       setProfile(null);
@@ -233,27 +205,21 @@ export function MobileClientProvider({ children }: { children: React.ReactNode }
       rpcRef.current = rpc;
       setApi(new CrewApi(rpc));
       startKeepAlive(rpc);
-      reconnectAttemptRef.current = 0;
       setConnectionIssue("");
       setError("");
       setStatus("online");
     } catch (err) {
-      classifyConnectError(err);
+      handleConnectError(err);
     }
-  }, [classifyConnectError, classifyConnectionLoss, clearReconnectTimer, closeRpc, handleRemoteRevoked, showDesktopOffline, startKeepAlive, stopKeepAlive]);
-
-  React.useEffect(() => {
-    connectStoredPairingRef.current = connectStoredPairing;
-  }, [connectStoredPairing]);
+  }, [classifyConnectionLoss, closeRpc, handleConnectError, handleRemoteRevoked, showDesktopOffline, startKeepAlive, stopKeepAlive]);
 
   React.useEffect(() => {
     connectStoredPairing();
     return () => {
       mountedRef.current = false;
-      clearReconnectTimer();
       closeRpc();
     };
-  }, [clearReconnectTimer, connectStoredPairing, closeRpc]);
+  }, [connectStoredPairing, closeRpc]);
 
   React.useEffect(() => {
     const subscription = AppState.addEventListener("change", nextState => {
@@ -284,8 +250,6 @@ export function MobileClientProvider({ children }: { children: React.ReactNode }
       throw err;
     }
 
-    clearReconnectTimer();
-    reconnectAttemptRef.current = 0;
     const oldApi = api;
     const oldDeviceId = profile?.deviceId || "";
     setStatus("connecting");
@@ -312,15 +276,13 @@ export function MobileClientProvider({ children }: { children: React.ReactNode }
       setConnectionIssue("");
       throw err;
     }
-  }, [api, clearReconnectTimer, closeRpc, connectStoredPairing, profile]);
+  }, [api, closeRpc, connectStoredPairing, profile]);
 
   const disconnect = React.useCallback(async () => {
     const currentApi = api;
     const currentProfile = profile;
     const desktopDeviceId = currentProfile?.deviceId || "";
     const wasDesktopConnected = Boolean(currentApi && desktopDeviceId);
-    clearReconnectTimer();
-    reconnectAttemptRef.current = 0;
     suppressRevokedNoticeRef.current = true;
     revokedRef.current = true;
     if (currentApi && desktopDeviceId) {
@@ -334,7 +296,7 @@ export function MobileClientProvider({ children }: { children: React.ReactNode }
     setStatus("unpaired");
     resetNavigationToPair();
     suppressRevokedNoticeRef.current = false;
-  }, [api, clearReconnectTimer, closeRpc, profile]);
+  }, [api, closeRpc, profile]);
 
   const value = React.useMemo<MobileClientContextValue>(() => ({
     status,

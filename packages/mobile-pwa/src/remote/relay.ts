@@ -14,6 +14,13 @@ export class DesktopOfflineError extends Error {
   }
 }
 
+export class DesktopTimeoutError extends Error {
+  constructor(message = "The Crew44 desktop did not respond within 10 seconds.") {
+    super(message);
+    this.name = "DesktopTimeoutError";
+  }
+}
+
 export function buildRelayClientUrl(relayUrl: string, serverId: string): string {
   return buildRelayUrl(relayUrl, serverId, "client");
 }
@@ -57,7 +64,7 @@ export function openRelaySocket(relayUrl: string, serverId: string): Promise<Web
   });
 }
 
-export async function checkRelayDesktopStatus(relayUrl: string, serverId: string): Promise<"desktop_online" | "desktop_offline"> {
+export async function checkRelayDesktopStatus(relayUrl: string, serverId: string): Promise<"desktop_online" | "desktop_offline" | "desktop_timeout"> {
   const socket = await new Promise<WebSocket>((resolve, reject) => {
     const ws = new WebSocket(buildRelayStatusUrl(relayUrl, serverId));
     const cleanup = () => {
@@ -92,10 +99,11 @@ export async function checkRelayDesktopStatus(relayUrl: string, serverId: string
 export function waitForRelayReady(socket: WebSocket): Promise<void> {
   return waitForRelayStatus(socket).then(status => {
     if (status === "desktop_offline") throw new DesktopOfflineError();
+    if (status === "desktop_timeout") throw new DesktopTimeoutError();
   });
 }
 
-function waitForRelayStatus(socket: WebSocket): Promise<"desktop_online" | "desktop_offline"> {
+function waitForRelayStatus(socket: WebSocket): Promise<"desktop_online" | "desktop_offline" | "desktop_timeout"> {
   return new Promise((resolve, reject) => {
     const cleanup = () => {
       socket.removeEventListener("message", onMessage);
@@ -109,7 +117,7 @@ function waitForRelayStatus(socket: WebSocket): Promise<"desktop_online" | "desk
           ? event.data
           : new TextDecoder().decode(await bytesFromWebSocketData(event.data));
         const data = JSON.parse(text) as { type?: string };
-        if (data.type === "desktop_online" || data.type === "desktop_offline") {
+        if (data.type === "desktop_online" || data.type === "desktop_offline" || data.type === "desktop_timeout") {
           resolve(data.type);
           return;
         }

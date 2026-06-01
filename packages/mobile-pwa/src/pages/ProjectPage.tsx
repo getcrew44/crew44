@@ -1,5 +1,6 @@
 import React from "react";
 import { ChatIndexEntry, Project } from "@/api/types";
+import { connectionIssueTitle } from "@/client/connectionIssue";
 import { useMobileClient } from "@/client/MobileClientProvider";
 import { Button, EmptyState, Header, IconButton, LoadingState, OfflineState, Row, Screen } from "@/ui/Screen";
 import { BackIcon } from "@/ui/icons";
@@ -131,7 +132,7 @@ export function ProjectPage({
       <Screen>
         <Header title={project?.name || "Project"} left={<IconButton label="Back" onClick={() => navigate("/")}><BackIcon /></IconButton>} />
         <OfflineState
-          title={client.connectionIssue === "relay" ? "Relay connection issue" : "Can't connect to the Crew44 desktop"}
+          title={connectionIssueTitle(client.connectionIssue)}
           message={client.error}
           onRetry={client.reconnect}
           onUnpair={client.disconnect}

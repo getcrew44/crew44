@@ -1,5 +1,6 @@
 import React from "react";
 import { Agent } from "@/api/types";
+import { connectionIssueTitle } from "@/client/connectionIssue";
 import { useMobileClient } from "@/client/MobileClientProvider";
 import { EmptyState, Header, IconButton, LoadingState, OfflineState, Row, Screen } from "@/ui/Screen";
 import { BackIcon } from "@/ui/icons";
@@ -32,7 +33,7 @@ export function AgentsPage({ navigate }: { navigate: (path: string) => void }) {
       <Screen>
         <Header title="Agents" left={<IconButton label="Back" onClick={() => navigate("/")}><BackIcon /></IconButton>} />
         <OfflineState
-          title={client.connectionIssue === "relay" ? "Relay connection issue" : "Can't connect to the Crew44 desktop"}
+          title={connectionIssueTitle(client.connectionIssue)}
           message={client.error}
           onRetry={client.reconnect}
           onUnpair={client.disconnect}

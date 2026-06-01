@@ -1,5 +1,6 @@
 import React from "react";
 import { Project } from "@/api/types";
+import { connectionIssueTitle } from "@/client/connectionIssue";
 import { useMobileClient } from "@/client/MobileClientProvider";
 import { Button, EmptyState, Header, LoadingState, OfflineState, Row, Screen } from "@/ui/Screen";
 import { MoreIcon } from "@/ui/icons";
@@ -39,7 +40,7 @@ export function HomePage({ navigate }: { navigate: (path: string) => void }) {
       <Screen>
         <Header title="Crew44 Mobile" />
         <OfflineState
-          title={client.connectionIssue === "relay" ? "Relay connection issue" : "Can't connect to the Crew44 desktop"}
+          title={connectionIssueTitle(client.connectionIssue)}
           message={client.error}
           onRetry={client.reconnect}
           onUnpair={client.disconnect}

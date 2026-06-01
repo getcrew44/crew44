@@ -1,6 +1,7 @@
 import React from "react";
 import { router, useLocalSearchParams } from "expo-router";
 import { FlatList, StyleSheet, Text, View } from "react-native";
+import { connectionIssueTitle } from "@/client/connectionIssue";
 import { useMobileClient } from "@/client/MobileClientProvider";
 import { ChatIndexEntry, Project } from "@/api/types";
 import { DesktopOfflineState } from "@/ui/DesktopOfflineState";
@@ -125,7 +126,7 @@ export default function ProjectChatsScreen() {
           left={<BackButton onPress={goBackOrHome} />}
         />
         <DesktopOfflineState
-          title={connectionIssue === "relay" ? "Relay connection issue" : "Can't connect to the Crew44 desktop"}
+          title={connectionIssueTitle(connectionIssue)}
           message={connectionError}
           onRetry={reconnect}
           onUnpair={disconnect}

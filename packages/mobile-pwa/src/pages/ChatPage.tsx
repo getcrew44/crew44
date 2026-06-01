@@ -1,6 +1,7 @@
 import React from "react";
 import { buildRenderableTimeline, mapBackendEvent, TimelineItem } from "@/api/events";
 import { Agent, BackendEvent, Chat } from "@/api/types";
+import { connectionIssueTitle } from "@/client/connectionIssue";
 import { useMobileClient } from "@/client/MobileClientProvider";
 import { Button, EmptyState, Header, IconButton, LoadingState, OfflineState, Screen } from "@/ui/Screen";
 import { BackIcon, SendIcon, StopIcon } from "@/ui/icons";
@@ -61,6 +62,7 @@ export function ChatPage({
       .slice(0, 6);
   }, [activeMention, agents]);
   const renderItems = React.useMemo(() => buildRenderableTimeline(items), [items]);
+  const hasTimelineError = React.useMemo(() => renderItems.some(item => item.kind === "error"), [renderItems]);
 
   const scrollToBottom = React.useCallback((smooth = true) => {
     requestAnimationFrame(() => {
@@ -154,12 +156,12 @@ export function ChatPage({
   }, [agents, chat]);
 
   React.useEffect(() => {
-    if (!items.length) return;
+    if (!renderItems.length) return;
     if (!didInitialScrollRef.current || shouldStickToBottomRef.current) {
       scrollToBottom(!didInitialScrollRef.current ? false : true);
       didInitialScrollRef.current = true;
     }
-  }, [items.length, scrollToBottom]);
+  }, [renderItems, scrollToBottom]);
 
   const handleTimelineScroll = React.useCallback(() => {
     const el = timelineRef.current;
@@ -255,12 +257,20 @@ export function ChatPage({
     };
   }, [chatId, client.api]);
 
+  const backToProject = React.useCallback(() => {
+    if (!chat?.project_id) return;
+    navigate(`/projects/${chat.project_id}`);
+  }, [chat?.project_id, navigate]);
+
   if (client.status === "error" && !client.api) {
     return (
       <Screen>
-        <Header title={chat?.title || "Chat"} left={<IconButton label="Back" onClick={() => navigate("/")}><BackIcon /></IconButton>} />
+        <Header
+          title={chat?.title || "Chat"}
+          left={<IconButton label="Back" onClick={backToProject} disabled={!chat?.project_id}><BackIcon /></IconButton>}
+        />
         <OfflineState
-          title={client.connectionIssue === "relay" ? "Relay connection issue" : "Can't connect to the Crew44 desktop"}
+          title={connectionIssueTitle(client.connectionIssue)}
           message={client.error}
           onRetry={client.reconnect}
           onUnpair={client.disconnect}
@@ -271,7 +281,10 @@ export function ChatPage({
 
   return (
     <Screen>
-      <Header title={chat?.title || "Chat"} left={<IconButton label="Back" onClick={() => navigate("/")}><BackIcon /></IconButton>} />
+      <Header
+        title={chat?.title || "Chat"}
+        left={<IconButton label="Back" onClick={backToProject} disabled={!chat?.project_id}><BackIcon /></IconButton>}
+      />
       {loading ? <LoadingState /> : error && items.length === 0 ? (
         <EmptyState title="Could not load chat" body={error}>
           <Button onClick={load}>Retry</Button>
@@ -285,7 +298,7 @@ export function ChatPage({
               <Timeline items={renderItems} agents={agents} onLoadToolDetails={loadToolDetails} />
             )}
           </div>
-          {error ? <p className="inline-error">{error}</p> : null}
+          {error && !hasTimelineError ? <p className="inline-error">{error}</p> : null}
           {streaming ? <p className="streaming-label">Agent is working...</p> : null}
           {mentionOptions.length > 0 ? (
             <div className="mention-menu">
