@@ -62,6 +62,13 @@ type PayloadSpec struct {
 // new wrapper repos.
 const UpstreamPathDefault = "upstream"
 
+// EntrypointFile is the repo-root file holding the agent's system
+// instructions (its runtime "system prompt"). The installer requires it
+// in the resolved payload and reads it as the agent body; the packager
+// generates it. Centralizing the name here keeps the daemon and the
+// out-of-tree packager from ever disagreeing on the contract.
+const EntrypointFile = "INSTRUCTIONS.md"
+
 // SourceType values understood by the installer. Manifests declaring
 // an unknown value are still accepted (forward-compat); the installer
 // only special-cases SourceTypeUpstreamWrapper for the upstream block.

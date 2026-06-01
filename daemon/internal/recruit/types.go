@@ -38,7 +38,7 @@ type Icon struct {
 // recruit/schema package and are re-exported here; see schema_alias.go.
 
 // AgentDetail is what recruit.agents.get returns to the UI: the registry
-// row, the parsed manifest, and the AGENT.md body. Skills are fetched
+// row, the parsed manifest, and the INSTRUCTIONS.md body. Skills are fetched
 // lazily on install, not on detail open, to keep the detail view fast.
 type AgentDetail struct {
 	Entry     RegistryEntry `json:"entry"`

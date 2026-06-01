@@ -436,7 +436,7 @@ function Detail({ entry, detail, loading, error, busy, onInstall, onBack, onRelo
                   <div style={{ fontSize: 12.5, color: '#5C544B', lineHeight: 1.6 }}>
                     On install, the repo payload is copied into <code style={{
                       fontFamily: MONO, fontSize: 11.5,
-                    }}>~/.crew44/agents/agent-&lt;id&gt;/source/</code> so the runtime can read AGENT.md, declared skills, and other reference files locally.
+                    }}>~/.crew44/agents/agent-&lt;id&gt;/source/</code> so the runtime can read INSTRUCTIONS.md, declared skills, and other reference files locally.
                   </div>
                 </Section>
               )}

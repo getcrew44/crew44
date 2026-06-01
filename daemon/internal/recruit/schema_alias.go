@@ -18,6 +18,7 @@ type (
 
 const (
 	UpstreamPathDefault       = schema.UpstreamPathDefault
+	EntrypointFile            = schema.EntrypointFile
 	SourceTypeNative          = schema.SourceTypeNative
 	SourceTypeUpstreamWrapper = schema.SourceTypeUpstreamWrapper
 )

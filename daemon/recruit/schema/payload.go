@@ -12,8 +12,9 @@ type ResolvedPayload struct {
 
 // ResolvePayload returns the include/exclude globs the installer should
 // apply for this manifest. When the manifest omits a Payload block, the
-// default is AGENT.md, crew44-agent.json, every declared skills[].path,
-// and — when an upstream block is present — `{upstream.path}/**`. The
+// default is INSTRUCTIONS.md, crew44-agent.json, every declared
+// skills[].path, and — when an upstream block is present —
+// `{upstream.path}/**`. The
 // default applies to both native and wrapper repos; an explicit Payload
 // block in the manifest is used as-is.
 func ResolvePayload(m *Manifest) ResolvedPayload {
@@ -31,7 +32,7 @@ func ResolvePayload(m *Manifest) ResolvedPayload {
 }
 
 func defaultIncludes(m *Manifest) []string {
-	out := []string{"AGENT.md", "crew44-agent.json"}
+	out := []string{EntrypointFile, "crew44-agent.json"}
 	for _, s := range m.Skills {
 		out = append(out, s.Path)
 	}

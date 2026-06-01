@@ -45,10 +45,10 @@ func (a *App) ListRecruitAgents(ctx context.Context) ([]RecruitListItem, error) 
 	return out, nil
 }
 
-// GetRecruitAgent fetches the per-repo manifest at HEAD and the AGENT.md
-// body at HEAD. Detail is intentionally read at HEAD (not at the version
-// tag) so the UI shows the author's latest intent; install pins to the
-// version tag separately.
+// GetRecruitAgent fetches the per-repo manifest at HEAD and the
+// instructions body at HEAD. Detail is intentionally read at HEAD (not at
+// the version tag) so the UI shows the author's latest intent; install
+// pins to the version tag separately.
 func (a *App) GetRecruitAgent(ctx context.Context, registryID string) (recruit.AgentDetail, error) {
 	entry, err := a.findRegistryEntry(ctx, registryID)
 	if err != nil {
@@ -58,10 +58,10 @@ func (a *App) GetRecruitAgent(ctx context.Context, registryID string) (recruit.A
 	if err != nil {
 		return recruit.AgentDetail{}, mapRecruitError(err)
 	}
-	agentBody, err := a.recruit.FetchAtRef(ctx, coord, recruit.DefaultRegistryRef, "AGENT.md")
+	agentBody, err := a.recruit.FetchAtRef(ctx, coord, recruit.DefaultRegistryRef, recruit.EntrypointFile)
 	if err != nil {
 		if errors.Is(err, recruit.ErrTagNotFound) {
-			return recruit.AgentDetail{}, fmt.Errorf("%w: AGENT.md missing in repo", ErrBadRequest)
+			return recruit.AgentDetail{}, fmt.Errorf("%w: %s missing in repo", ErrBadRequest, recruit.EntrypointFile)
 		}
 		return recruit.AgentDetail{}, mapRecruitError(err)
 	}
@@ -157,12 +157,13 @@ func (a *App) InstallRecruitAgent(ctx context.Context, registryID string) (model
 		writtenSet[p] = true
 	}
 
-	// AGENT.md is the runtime instruction the agent uses as its system
-	// prompt. Missing it after filtering means either the author forgot
-	// to include it in the payload spec or stripped it via .gitattributes
-	// export-ignore upstream. Either way, install can't proceed.
-	if !writtenSet["AGENT.md"] {
-		return model.AgentConfig{}, fmt.Errorf("%w: AGENT.md missing from release %s payload", ErrBadRequest, tag)
+	// The entrypoint file is the runtime instruction the agent uses as its
+	// system prompt. Missing it after filtering means either the author
+	// forgot to include it in the payload spec or stripped it via
+	// .gitattributes export-ignore upstream. Either way, install can't
+	// proceed.
+	if !writtenSet[recruit.EntrypointFile] {
+		return model.AgentConfig{}, fmt.Errorf("%w: %s missing from release %s payload", ErrBadRequest, recruit.EntrypointFile, tag)
 	}
 	for _, decl := range pinnedManifest.Skills {
 		if !writtenSet[decl.Path] {
@@ -170,7 +171,7 @@ func (a *App) InstallRecruitAgent(ctx context.Context, registryID string) (model
 		}
 	}
 
-	agentBodyBytes, err := os.ReadFile(filepath.Join(staged, "AGENT.md"))
+	agentBodyBytes, err := os.ReadFile(filepath.Join(staged, recruit.EntrypointFile))
 	if err != nil {
 		return model.AgentConfig{}, mapRecruitError(err)
 	}

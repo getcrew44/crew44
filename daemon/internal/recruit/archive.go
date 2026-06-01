@@ -232,7 +232,7 @@ func ExtractFilteredPayload(archivePath, destDir string, resolved ResolvedPayloa
 		}
 		if isBinaryContent(content) {
 			// Skipping a binary is silent: the installer's required-file
-			// check later will surface a missing SKILL.md or AGENT.md
+			// check later will surface a missing SKILL.md or INSTRUCTIONS.md
 			// even if the author accidentally marked one of them
 			// binary (e.g., wrong encoding).
 			continue

@@ -27,9 +27,9 @@ func TestCommitAgentInstallFreshInstall(t *testing.T) {
 		t.Fatal(err)
 	}
 	// source/ has the staged payload.
-	data, err := os.ReadFile(filepath.Join(s.AgentSourceDir(agentID), "AGENT.md"))
+	data, err := os.ReadFile(filepath.Join(s.AgentSourceDir(agentID), "INSTRUCTIONS.md"))
 	if err != nil || string(data) != "v1 source" {
-		t.Fatalf("source AGENT.md = %q, err=%v", data, err)
+		t.Fatalf("source INSTRUCTIONS.md = %q, err=%v", data, err)
 	}
 	// recruited-skills.json moved into place.
 	if _, err := os.Stat(s.RecruitedSkillsPath(agentID)); err != nil {
@@ -75,9 +75,9 @@ func TestCommitAgentInstallReinstallSwapsAtomically(t *testing.T) {
 	if err := s.CommitAgentInstall(v2, "i2"); err != nil {
 		t.Fatal(err)
 	}
-	body, _ := os.ReadFile(filepath.Join(s.AgentSourceDir(agentID), "AGENT.md"))
+	body, _ := os.ReadFile(filepath.Join(s.AgentSourceDir(agentID), "INSTRUCTIONS.md"))
 	if string(body) != "v2 source" {
-		t.Fatalf("source AGENT.md = %q, want v2", body)
+		t.Fatalf("source INSTRUCTIONS.md = %q, want v2", body)
 	}
 	got, _ := s.GetAgent(agentID)
 	if got.Source.Version != "2.0.0" {
@@ -122,9 +122,9 @@ func TestCommitAgentInstallRollsBackOnRenameFailure(t *testing.T) {
 	// Restore write perms before reading back state.
 	os.Chmod(agentDir, 0o755)
 
-	body, readErr := os.ReadFile(filepath.Join(s.AgentSourceDir(agentID), "AGENT.md"))
+	body, readErr := os.ReadFile(filepath.Join(s.AgentSourceDir(agentID), "INSTRUCTIONS.md"))
 	if readErr != nil {
-		t.Fatalf("source AGENT.md missing after rollback: %v", readErr)
+		t.Fatalf("source INSTRUCTIONS.md missing after rollback: %v", readErr)
 	}
 	if string(body) != "v1 source" {
 		t.Fatalf("source rolled forward despite failure: %q", body)
@@ -155,7 +155,7 @@ func stageInstall(t *testing.T, s *Store, agentID, installID, agentBody string, 
 	if err := os.MkdirAll(staged, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(staged, "AGENT.md"), []byte(agentBody), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(staged, "INSTRUCTIONS.md"), []byte(agentBody), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.WriteRecruitedSkillsTmp(agentID, installID, skills); err != nil {

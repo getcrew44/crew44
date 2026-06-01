@@ -20,7 +20,7 @@ import (
 )
 
 // fakeRegistry composes an httptest server that serves both raw-content
-// requests (registry, HEAD manifests, HEAD AGENT.md) and codeload tarball
+// requests (registry, HEAD manifests, HEAD INSTRUCTIONS.md) and codeload tarball
 // requests. Raw files are keyed by full URL path; tarballs are keyed by
 // (owner, repo, ref) and built on demand from the seeded file map.
 type fakeRegistry struct {
@@ -160,10 +160,10 @@ func seedPatchAgent(f *fakeRegistry, version string) {
 		}]
 	}`)
 	f.set("/hex/patch-agent/HEAD/crew44-agent.json", headManifest)
-	f.set("/hex/patch-agent/HEAD/AGENT.md", "# Patch\nReproduces bugs.\n")
+	f.set("/hex/patch-agent/HEAD/INSTRUCTIONS.md", "# Patch\nReproduces bugs.\n")
 	tag := "v" + version
 	f.set("/hex/patch-agent/"+tag+"/crew44-agent.json", headManifest)
-	f.set("/hex/patch-agent/"+tag+"/AGENT.md", "# Patch\nReproduces bugs at "+version+".\n")
+	f.set("/hex/patch-agent/"+tag+"/INSTRUCTIONS.md", "# Patch\nReproduces bugs at "+version+".\n")
 	f.set("/hex/patch-agent/"+tag+"/skills/minimal-failing-test/SKILL.md",
 		"---\nname: minimal-failing-test\n---\n# Minimal failing test\nWrite the failing test first.\n")
 	f.publishTag("hex", "patch-agent", tag)
@@ -199,7 +199,7 @@ func TestRecruitListMarksInstalled(t *testing.T) {
 // Install must create a payload-backed source/ directory, write
 // recruited-skills.json with SKILL.md paths under source/, and NOT
 // create a global SkillRecord. The agent body comes from the tag's
-// AGENT.md (not HEAD).
+// INSTRUCTIONS.md (not HEAD).
 func TestRecruitInstallCreatesPayloadAndRecruitedSkills(t *testing.T) {
 	f := newFakeRegistry(t)
 	seedPatchAgent(f, "1.0.0")
@@ -234,7 +234,7 @@ func TestRecruitInstallCreatesPayloadAndRecruitedSkills(t *testing.T) {
 		t.Fatalf("recruited skills should not populate SkillIDs: %v", agent.SkillIDs)
 	}
 	// Payload files must exist under source/.
-	for _, expected := range []string{"AGENT.md", "crew44-agent.json", "skills/minimal-failing-test/SKILL.md"} {
+	for _, expected := range []string{"INSTRUCTIONS.md", "crew44-agent.json", "skills/minimal-failing-test/SKILL.md"} {
 		full := filepath.Join(agent.Source.SourceDir, expected)
 		if _, err := os.Stat(full); err != nil {
 			t.Errorf("payload missing %s: %v", expected, err)
@@ -336,12 +336,12 @@ func TestRecruitInstallVersionBumpUpdatesContent(t *testing.T) {
 		t.Fatalf("source version not bumped: %s", second.Source.Version)
 	}
 	// source/ must reflect 1.1.0 too.
-	body, err := os.ReadFile(filepath.Join(second.Source.SourceDir, "AGENT.md"))
+	body, err := os.ReadFile(filepath.Join(second.Source.SourceDir, "INSTRUCTIONS.md"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(string(body), "1.1.0") {
-		t.Fatalf("source AGENT.md not updated: %q", body)
+		t.Fatalf("source INSTRUCTIONS.md not updated: %q", body)
 	}
 }
 
@@ -435,9 +435,9 @@ func TestRecruitNamespacingIsolatesSameNamedSkill(t *testing.T) {
 		f.set("/registry/test/HEAD/agents.json",
 			coalesceRegistry(f.rawFiles["/registry/test/HEAD/agents.json"], id, repo))
 		f.set("/"+repo+"/HEAD/crew44-agent.json", manifest)
-		f.set("/"+repo+"/HEAD/AGENT.md", "# "+id+"\n")
+		f.set("/"+repo+"/HEAD/INSTRUCTIONS.md", "# "+id+"\n")
 		f.set("/"+repo+"/v1.0.0/crew44-agent.json", manifest)
-		f.set("/"+repo+"/v1.0.0/AGENT.md", "# "+id+"\n")
+		f.set("/"+repo+"/v1.0.0/INSTRUCTIONS.md", "# "+id+"\n")
 		f.set("/"+repo+"/v1.0.0/skills/shared/SKILL.md", "# shared from "+id+"\n")
 		parts := strings.SplitN(repo, "/", 2)
 		f.publishTag(parts[0], parts[1], "v1.0.0")
@@ -577,7 +577,7 @@ func TestRecruitGetReturnsHEADManifestAndBody(t *testing.T) {
 		t.Fatalf("suggested runtime not parsed: %+v", detail.Manifest)
 	}
 	if !strings.Contains(detail.AgentBody, "Reproduces bugs.") {
-		t.Fatalf("AGENT.md body: %q", detail.AgentBody)
+		t.Fatalf("INSTRUCTIONS.md body: %q", detail.AgentBody)
 	}
 }
 
@@ -597,9 +597,9 @@ func TestRecruitInstallUpstreamWrapper(t *testing.T) {
 		"agents":[{"id":"karp","name":"Karpathy","description":"wrapped","repo_url":"https://github.com/multica-ai/karpathy-agent"}]
 	}`)
 	f.set("/multica-ai/karpathy-agent/HEAD/crew44-agent.json", manifest)
-	f.set("/multica-ai/karpathy-agent/HEAD/AGENT.md", "# K HEAD\n")
+	f.set("/multica-ai/karpathy-agent/HEAD/INSTRUCTIONS.md", "# K HEAD\n")
 	f.set("/multica-ai/karpathy-agent/v1.0.0/crew44-agent.json", manifest)
-	f.set("/multica-ai/karpathy-agent/v1.0.0/AGENT.md", "# K\nWrapped upstream agent.\n")
+	f.set("/multica-ai/karpathy-agent/v1.0.0/INSTRUCTIONS.md", "# K\nWrapped upstream agent.\n")
 	f.set("/multica-ai/karpathy-agent/v1.0.0/upstream/README.md", "# upstream readme\n")
 	f.set("/multica-ai/karpathy-agent/v1.0.0/upstream/skills/writing/SKILL.md", "# writing\n")
 	f.set("/multica-ai/karpathy-agent/v1.0.0/upstream/data/example.txt", "example\n")
@@ -613,7 +613,7 @@ func TestRecruitInstallUpstreamWrapper(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, expected := range []string{
-		"AGENT.md",
+		"INSTRUCTIONS.md",
 		"crew44-agent.json",
 		"upstream/README.md",
 		"upstream/skills/writing/SKILL.md",
@@ -633,7 +633,7 @@ func TestRecruitInstallUpstreamWrapper(t *testing.T) {
 }
 
 // A failed install must leave the previously installed source/ payload
-// intact. Simulates "missing AGENT.md at tag" after a working install.
+// intact. Simulates "missing INSTRUCTIONS.md at tag" after a working install.
 func TestRecruitInstallFailureLeavesPreviousSourceIntact(t *testing.T) {
 	f := newFakeRegistry(t)
 	seedPatchAgent(f, "1.0.0")
@@ -645,13 +645,13 @@ func TestRecruitInstallFailureLeavesPreviousSourceIntact(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	prevSource := filepath.Join(first.Source.SourceDir, "AGENT.md")
+	prevSource := filepath.Join(first.Source.SourceDir, "INSTRUCTIONS.md")
 	if _, err := os.Stat(prevSource); err != nil {
 		t.Fatal(err)
 	}
 
 	// Bump HEAD manifest to a new version, publish a tag whose
-	// payload omits AGENT.md to force a deterministic install-time
+	// payload omits INSTRUCTIONS.md to force a deterministic install-time
 	// failure after archive download.
 	manifest11 := `{
 		"schema_version":"crew44.agent.v1",
@@ -667,7 +667,7 @@ func TestRecruitInstallFailureLeavesPreviousSourceIntact(t *testing.T) {
 
 	_, err = a.InstallRecruitAgent(context.Background(), "patch")
 	if err == nil {
-		t.Fatal("expected install to fail because AGENT.md missing from payload")
+		t.Fatal("expected install to fail because INSTRUCTIONS.md missing from payload")
 	}
 	// Previous source must still be 1.0.0.
 	body, err := os.ReadFile(prevSource)
@@ -701,7 +701,7 @@ func TestRecruitInstallFreshFailureDoesNotPoisonAgentList(t *testing.T) {
 	a := newRecruitTestApp(t, srv)
 
 	if _, err := a.InstallRecruitAgent(context.Background(), "broken"); err == nil {
-		t.Fatal("expected install to fail because AGENT.md is missing from payload")
+		t.Fatal("expected install to fail because INSTRUCTIONS.md is missing from payload")
 	}
 	if _, err := a.ListAgents(); err != nil {
 		t.Fatalf("failed install left agent store unreadable: %v", err)
@@ -741,7 +741,7 @@ func TestRecruitInstallIgnoresLegacySkillCleanupFailureAfterCommit(t *testing.T)
 	if agent.Source == nil || agent.Source.Version != "1.0.0" {
 		t.Fatalf("install did not return committed agent: %+v", agent)
 	}
-	if _, err := os.Stat(filepath.Join(agent.Source.SourceDir, "AGENT.md")); err != nil {
+	if _, err := os.Stat(filepath.Join(agent.Source.SourceDir, "INSTRUCTIONS.md")); err != nil {
 		t.Fatalf("committed source missing after cleanup failure: %v", err)
 	}
 }
@@ -758,7 +758,7 @@ func TestRecruitInstallRejectsSymlinkEscape(t *testing.T) {
 	}`
 	f.set("/x/evil/HEAD/crew44-agent.json", manifest)
 	f.set("/x/evil/v1.0.0/crew44-agent.json", manifest)
-	f.set("/x/evil/v1.0.0/AGENT.md", "# E\n")
+	f.set("/x/evil/v1.0.0/INSTRUCTIONS.md", "# E\n")
 	f.publishTag("x", "evil", "v1.0.0")
 	// Inject a symlink entry directly into the codeload handler.
 	hijacked := f.handler()
@@ -769,7 +769,7 @@ func TestRecruitInstallRejectsSymlinkEscape(t *testing.T) {
 			tw := tar.NewWriter(gz)
 			tw.WriteHeader(&tar.Header{Name: "evil-abcd/", Typeflag: tar.TypeDir, Mode: 0o755})
 			tw.WriteHeader(&tar.Header{
-				Name:     "evil-abcd/AGENT.md",
+				Name:     "evil-abcd/INSTRUCTIONS.md",
 				Typeflag: tar.TypeReg,
 				Size:     5,
 				Mode:     0o644,

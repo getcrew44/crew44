@@ -26,7 +26,7 @@ const (
 )
 
 // Cap manifest and agent body sizes so a malicious entry can't exhaust
-// memory. AGENT.md is the only large file we read; 2MB is generous for
+// memory. the entrypoint file (INSTRUCTIONS.md) is the only large file we read; 2MB is generous for
 // markdown prose.
 const (
 	maxJSONBytes = 256 * 1024
