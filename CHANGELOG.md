@@ -2,6 +2,26 @@
 
 All notable changes to this project are documented here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] - 2026-06-01
+
+### Added
+- **Recruit — browse and install community agents.** A new Recruit section lets you discover agent packages published as tagged GitHub releases and install them with one click. Each entry shows its description, declared skills, recommended runtime, and the upstream repo it wraps. The detail view renders the agent's INSTRUCTIONS.md as rich text, autolinks URLs, and links straight to the source repository.
+- **`recruit-import` CLI** for packaging an upstream repository into an installable agent: it resolves a release tag, fetches the tarball, and produces a manifest you can publish.
+- **`CREW44_AGENT_SOURCE_DIR`** is exposed to spawned runtimes, so an installed agent can read its own INSTRUCTIONS.md, declared skills, and bundled reference files locally at run time.
+
+### Changed
+- **Agent installs now use an archive payload with atomic commit.** Installation downloads the tagged GitHub tarball, filters files through gitignore-style include/exclude globs declared in the manifest, and rotates the new payload into place atomically — a failed or oversize install never leaves partial state behind. Downloads, extracted payloads, per-file size, and file counts are all bounded.
+- **Manifest schema** gained `source_type`, `upstream`, and `payload` fields, with validation that rejects unsafe skill paths, traversal globs, and schema versions outside the v1 family. The schema moved into a public package so the importer and the daemon installer enforce identical rules.
+- The agent entrypoint file was renamed from `AGENT.md` to `INSTRUCTIONS.md`.
+
+### Fixed
+- Release tags whose manifest version disagrees with the tagged commit are rejected, so a mislabeled release can't be installed.
+- Metadata and schema errors surface as bad-request at the RPC layer instead of opaque failures, and malformed registry rows are dropped rather than served.
+- A failed fresh install cleans up its agent directory instead of leaving an empty or partial one.
+- GitHub `git-archive` tarballs that lead with a `pax_global_header` record are handled correctly instead of being mistaken for a second top-level directory.
+- Agent `config.json` is now written atomically (temp file + rename), and the agent listing skips an incomplete agent directory instead of failing entirely — so an install interrupted by a crash can no longer hide every other agent from the UI.
+- Payload extraction bounds total decompressed output across all archive entries, so a small compressed tarball padded with skipped binary files can no longer force unbounded decompression work.
+
 ## [0.6.2] - 2026-06-01
 
 ### Changed
