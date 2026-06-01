@@ -1,10 +1,18 @@
 import React from "react";
 import { BrowserQRCodeReader, IScannerControls } from "@zxing/browser";
 import { useMobileClient } from "@/client/MobileClientProvider";
+import { pairingSecretFromText } from "@/remote/pairingOffer";
 import { Button, Header, Screen } from "@/ui/Screen";
 import { CameraIcon } from "@/ui/icons";
 
 const cameraIdleMs = 60000;
+const pairSecretParam = "secret";
+
+function pairSecretFromLocation(): string {
+  const hash = window.location.hash;
+  if (!new URLSearchParams(hash.replace(/^#/, "")).has(pairSecretParam)) return "";
+  return pairingSecretFromText(hash);
+}
 
 export function PairPage() {
   const client = useMobileClient();
@@ -13,9 +21,11 @@ export function PairPage() {
   const [pairing, setPairing] = React.useState(false);
   const [scanning, setScanning] = React.useState(false);
   const [cameraPaused, setCameraPaused] = React.useState(false);
+  const [urlSecret, setUrlSecret] = React.useState(pairSecretFromLocation);
   const videoRef = React.useRef<HTMLVideoElement | null>(null);
   const controlsRef = React.useRef<IScannerControls | null>(null);
   const idleTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const consumedUrlSecretRef = React.useRef("");
 
   const stopIdleTimer = React.useCallback(() => {
     if (idleTimerRef.current) {
@@ -60,6 +70,21 @@ export function PairPage() {
     }
   }, [client, pairing, stopScanner]);
 
+  React.useEffect(() => {
+    const onHashChange = () => setUrlSecret(pairSecretFromLocation());
+    window.addEventListener("hashchange", onHashChange);
+    return () => window.removeEventListener("hashchange", onHashChange);
+  }, []);
+
+  React.useEffect(() => {
+    const secret = urlSecret;
+    if (!secret || consumedUrlSecretRef.current === secret) return;
+    consumedUrlSecretRef.current = secret;
+    setManualText(secret);
+    window.history.replaceState(null, "", "/");
+    pair(secret).catch(() => {});
+  }, [pair, urlSecret]);
+
   const startScanner = React.useCallback(async () => {
     if (!videoRef.current || scanning) return;
     setError("");
@@ -84,7 +109,7 @@ export function PairPage() {
     <Screen>
       <Header title="Pair device" />
       <section className="pair-body">
-        <p className="muted">Scan the QR code from Crew44's Pair Mobile dialog.</p>
+        <p className="muted">Use your phone camera to scan the Pair Mobile QR, or scan it here if you already opened Crew44 Mobile.</p>
         <div className="camera-box">
           <video ref={videoRef} muted playsInline />
           {!scanning ? (
@@ -111,19 +136,19 @@ export function PairPage() {
         <textarea
           value={manualText}
           onChange={event => setManualText(event.target.value)}
-          placeholder="Or paste QR payload JSON"
+          placeholder="Or paste pair link / secret JSON"
           autoCapitalize="none"
           autoCorrect="off"
         />
         {pairError ? <p className="error-text">{pairError}</p> : null}
         {unpairNotice ? <p className="muted">{unpairNotice}</p> : null}
         <Button disabled={pairing || client.status === "connecting"} onClick={() => pair(manualText)}>
-          {pairing || client.status === "connecting" ? "Pairing..." : "Pair from pasted text"}
+          {pairing || client.status === "connecting" ? "Pairing..." : "Pair from pasted link"}
         </Button>
         {client.profile ? (
-          <Button variant="danger" onClick={() => client.disconnect().catch(() => {})}>
+          <button type="button" className="link-danger-button pair-link-button" onClick={() => client.disconnect().catch(() => {})}>
             Forget saved pairing
-          </Button>
+          </button>
         ) : null}
       </section>
     </Screen>

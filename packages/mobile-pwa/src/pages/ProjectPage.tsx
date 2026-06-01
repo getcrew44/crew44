@@ -55,6 +55,7 @@ export function ProjectPage({
   const [hasMore, setHasMore] = React.useState(true);
   const [creating, setCreating] = React.useState(false);
   const [error, setError] = React.useState("");
+  const listRef = React.useRef<HTMLDivElement | null>(null);
 
   const project = projects.find(item => item.id === projectId);
 
@@ -98,6 +99,13 @@ export function ProjectPage({
   React.useEffect(() => {
     load();
   }, [load]);
+
+  const handleScroll = React.useCallback(() => {
+    const el = listRef.current;
+    if (!el || loading || loadingMore || !hasMore) return;
+    const distanceFromBottom = el.scrollHeight - (el.scrollTop + el.clientHeight);
+    if (distanceFromBottom < 160) loadMore().catch(() => {});
+  }, [hasMore, loadMore, loading, loadingMore]);
 
   const createChat = React.useCallback(async () => {
     if (!client.api || !projectId) return;
@@ -146,7 +154,7 @@ export function ProjectPage({
       ) : chats.length === 0 ? (
         <EmptyState title="No chats yet" body="Start a chat from this phone or from the desktop app." />
       ) : (
-        <div className="list">
+        <div className="list" ref={listRef} onScroll={handleScroll}>
           {error ? <p className="inline-error">{error}</p> : null}
           {chats.map(chat => (
             <Row
@@ -156,13 +164,7 @@ export function ProjectPage({
               onClick={() => navigate(`/chats/${chatId(chat)}`)}
             />
           ))}
-          {hasMore ? (
-            <div className="list-footer">
-              <Button variant="ghost" disabled={loadingMore} onClick={loadMore}>
-                {loadingMore ? "Loading..." : "Load more"}
-              </Button>
-            </div>
-          ) : null}
+          {loadingMore ? <div className="list-footer">Loading more...</div> : null}
         </div>
       )}
     </Screen>

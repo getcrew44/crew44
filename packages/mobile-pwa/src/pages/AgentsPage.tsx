@@ -45,7 +45,13 @@ export function AgentsPage({ navigate }: { navigate: (path: string) => void }) {
     <Screen>
       <Header title="Agents" left={<IconButton label="Back" onClick={() => navigate("/")}><BackIcon /></IconButton>} />
       {loading ? <LoadingState /> : error ? (
-        <EmptyState title="Could not load agents" body={error} />
+        <EmptyState title="Could not load agents" body={error}>
+          <div className="empty-state-actions">
+            <button type="button" className="link-danger-button" onClick={() => client.disconnect().catch(() => {})}>
+              Forget Pairing
+            </button>
+          </div>
+        </EmptyState>
       ) : agents.length === 0 ? (
         <EmptyState title="No agents yet" body="Create agents in the desktop app." />
       ) : (

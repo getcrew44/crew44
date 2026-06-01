@@ -38,11 +38,6 @@ server {
     try_files $uri $uri/ /index.html;
   }
 
-  location = /sw.js {
-    add_header Cache-Control "no-cache";
-    try_files $uri =404;
-  }
-
   location = /manifest.webmanifest {
     add_header Cache-Control "public, max-age=3600";
     try_files $uri =404;

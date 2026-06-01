@@ -11,7 +11,7 @@ import PairMobileDialog, { ManageMobileDialog } from '../PairMobileDialog.jsx';
 
 describe('PairMobileDialog', () => {
   const pairingResult = {
-    qr_text: '{"type":"crew44-remote-pairing"}',
+    qr_text: 'https://mobileapp.crew44.io/#secret=%7B%22v%22%3A1%7D',
     offer: { expires_at: '2026-05-13T12:00:00.000Z' },
   };
 
@@ -31,25 +31,12 @@ describe('PairMobileDialog', () => {
     expect(await screen.findByTestId('mobile-pair-qr')).toBeInTheDocument();
   });
 
-  it('lets the relay URL be overridden from the pen edit action without persisting it locally', async () => {
-    const setItem = vi.fn();
-    Object.defineProperty(window, 'localStorage', {
-      configurable: true,
-      value: { getItem: vi.fn(), setItem },
-    });
+  it('does not expose relay editing controls', async () => {
     render(<PairMobileDialog onClose={() => {}} />);
 
     await waitFor(() => expect(createRemotePairing).toHaveBeenCalledTimes(1));
-    fireEvent.click(screen.getByRole('button', { name: /edit relay url/i }));
-    fireEvent.change(screen.getByLabelText('Relay URL'), {
-      target: { value: 'wss://relay.example.com/relay' },
-    });
-    fireEvent.click(screen.getByTestId('create-mobile-pairing'));
-
-    await waitFor(() => {
-      expect(createRemotePairing).toHaveBeenLastCalledWith('wss://relay.example.com/relay');
-    });
-    expect(setItem).not.toHaveBeenCalled();
+    expect(screen.queryByText('Relay URL')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /edit relay url/i })).not.toBeInTheDocument();
   });
 
   it('shows RPC errors from pairing creation', async () => {
@@ -57,6 +44,23 @@ describe('PairMobileDialog', () => {
     render(<PairMobileDialog onClose={() => {}} />);
 
     expect(await screen.findByRole('alert')).toHaveTextContent('relay_url is required');
+  });
+
+  it('renders phone-camera pairing guidance and copies the pair link', async () => {
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText: vi.fn().mockResolvedValue(undefined) },
+    });
+    render(<PairMobileDialog onClose={() => {}} />);
+
+    await screen.findByTestId('mobile-pair-qr');
+    expect(screen.getByText(/simply scan the QR above/i)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Copy link' }));
+
+    await waitFor(() => {
+      expect(navigator.clipboard.writeText).toHaveBeenCalledWith(pairingResult.qr_text);
+    });
   });
 });
 
@@ -78,6 +82,7 @@ describe('ManageMobileDialog', () => {
     expect(row).toHaveTextContent('Alex iPhone');
     expect(row).toHaveTextContent('Paired');
     expect(row).toHaveTextContent('Last active');
+    expect(screen.getByText('https://mobileapp.crew44.io/')).toBeInTheDocument();
   });
 
   it('omits last active when the backend has not recorded it', () => {

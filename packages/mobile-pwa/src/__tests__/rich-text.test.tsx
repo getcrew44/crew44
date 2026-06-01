@@ -31,6 +31,18 @@ describe("RichText", () => {
     expect(block).toContain("katex-display");
   });
 
+  it("preserves LaTeX backslashes inside table cells", () => {
+    const html = renderToStaticMarkup(<RichText text={[
+      "| Dist | PDF |",
+      "| --- | --- |",
+      "| Normal | $\\frac{1}{\\sigma\\sqrt{2\\pi}}$ |"
+    ].join("\n")} />);
+
+    expect(html).toContain("<table");
+    expect(html).toContain("katex");
+    expect(html).not.toContain("frac{1}{sigmasqrt");
+  });
+
   it("renders fenced code blocks", () => {
     const html = renderToStaticMarkup(<RichText text={"```ts\nconst value = 1;\n```"} />);
 

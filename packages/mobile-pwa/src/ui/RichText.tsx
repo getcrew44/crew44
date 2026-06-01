@@ -169,19 +169,20 @@ function splitTableRow(line: string): string[] | null {
 
   const cells: string[] = [];
   let cell = "";
-  let escaped = false;
   let inCode = false;
-  for (const char of value) {
-    if (escaped) {
-      cell += char;
-      escaped = false;
-      continue;
-    }
-    if (char === "\\") {
-      escaped = true;
-      continue;
-    }
+  for (let index = 0; index < value.length; index += 1) {
+    const char = value[index];
     if (char === "`") inCode = !inCode;
+    if (char === "\\" && !inCode) {
+      const next = value[index + 1];
+      if (next === "|" || next === "\\") {
+        cell += next;
+        index += 1;
+        continue;
+      }
+      cell += char;
+      continue;
+    }
     if (char === "|" && !inCode) {
       cells.push(cell.trim());
       cell = "";
