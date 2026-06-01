@@ -6,7 +6,6 @@ import { ChatPage } from "@/pages/ChatPage";
 import { HomePage } from "@/pages/HomePage";
 import { PairPage } from "@/pages/PairPage";
 import { ProjectPage } from "@/pages/ProjectPage";
-import { PwaInstallPromptController } from "@/pwa-install/PwaInstallPromptController";
 import { ConnectingState, Header, Screen } from "@/ui/Screen";
 
 function currentPath(): string {
@@ -83,10 +82,5 @@ export default function App() {
     }
   }
 
-  return (
-    <>
-      {content}
-      <PwaInstallPromptController />
-    </>
-  );
+  return content;
 }
