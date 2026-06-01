@@ -175,12 +175,11 @@ func dialDeviceOverRelay(t *testing.T, relayURL string, offer remote.PairingOffe
 }
 
 // eventuallyDialRelayClient dials the relay's client role and waits until
-// the daemon's control connection has registered so the server greets us
-// with "desktop_online" instead of "desktop_offline". The relay accepts
-// the client websocket even before control is in place — it just immediately
-// sends desktop_offline and closes — so polling on dial success alone races
-// with the daemon's relay-client goroutine in CI. We poll the first frame
-// and retry until we either see desktop_online or hit the deadline.
+// the daemon is fully ready for the session, which the relay now signals
+// by greeting the client with "desktop_online". Before control is connected
+// (or before daemon-data is ready), the relay responds with a non-online
+// status and closes the connection, so polling the first frame avoids
+// racing the daemon's relay-client goroutine in CI.
 //
 // On success the desktop_online greeting has been consumed, so callers
 // proceed directly to the noise handshake. The deadline is generous
@@ -196,7 +195,7 @@ func eventuallyDialRelayClient(t *testing.T, relayURL, serverID string) *websock
 			time.Sleep(25 * time.Millisecond)
 			continue
 		}
-		_ = conn.SetReadDeadline(time.Now().Add(500 * time.Millisecond))
+		_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
 		var greeting struct {
 			Type string `json:"type"`
 		}

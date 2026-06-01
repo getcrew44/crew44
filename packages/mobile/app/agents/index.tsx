@@ -1,6 +1,7 @@
 import React from "react";
 import { router } from "expo-router";
 import { FlatList, View } from "react-native";
+import { connectionIssueTitle } from "@/client/connectionIssue";
 import { useMobileClient } from "@/client/MobileClientProvider";
 import { Agent } from "@/api/types";
 import { DesktopOfflineState } from "@/ui/DesktopOfflineState";
@@ -38,7 +39,7 @@ export default function AgentsScreen() {
           left={<BackButton onPress={goBackOrHome} />}
         />
         <DesktopOfflineState
-          title={connectionIssue === "relay" ? "Relay connection issue" : "Can't connect to the Crew44 desktop"}
+          title={connectionIssueTitle(connectionIssue)}
           message={connectionError}
           onRetry={reconnect}
           onUnpair={disconnect}

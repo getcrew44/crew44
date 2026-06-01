@@ -1,7 +1,7 @@
 {
   "name": "crew44",
   "productName": "Crew44",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "description": "Crew44 — local-first AI crew runner",
   "author": {
     "name": "Crew44",
@@ -30,11 +30,16 @@
     "mobile:build:android": "npm --workspace=@crew44/mobile run build:android",
     "mobile:build:all": "npm --workspace=@crew44/mobile run build:all",
     "mobile:typecheck": "npm --workspace=@crew44/mobile run typecheck",
+    "mobile-pwa:start": "npm --workspace=@crew44/mobile-pwa run start --",
+    "mobile-pwa:build": "npm --workspace=@crew44/mobile-pwa run build",
+    "mobile-pwa:preview": "npm --workspace=@crew44/mobile-pwa run preview --",
+    "mobile-pwa:typecheck": "npm --workspace=@crew44/mobile-pwa run typecheck",
+    "test:mobile-pwa": "npm --workspace=@crew44/mobile-pwa run test",
     "test:web": "vitest run",
     "test:mobile": "npm --workspace=@crew44/mobile run test",
     "desktop:smoke:linux": "npm run build:daemon:linux && vite build && electron-builder --dir --linux --x64",
     "desktop:smoke:win": "npm run build:daemon:win && vite build && electron-builder --dir --win --x64",
-    "test": "cd daemon && go test ./... && cd .. && vitest run && npm run test:mobile",
+    "test": "cd daemon && go test ./... && cd .. && vitest run && npm run test:mobile-pwa && npm run test:mobile",
     "clean": "rm -rf bin dist release .electron-app crew44-server crew44-daemon"
   },
   "build": {
@@ -97,12 +102,6 @@
     "qrcode.react": "^4.2.0",
     "react": "19.1.0",
     "react-dom": "19.1.0"
-  },
-  "pnpm": {
-    "onlyBuiltDependencies": [
-      "electron",
-      "electron-winstaller"
-    ]
   },
   "devDependencies": {
     "@testing-library/jest-dom": "^6.9.1",

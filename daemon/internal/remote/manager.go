@@ -17,9 +17,21 @@ import (
 )
 
 const (
-	pairingTTL  = 5 * time.Minute
-	pairingType = "crew44-remote-pairing"
+	pairingTTL    = 5 * time.Minute
+	pairingType   = "crew44-remote-pairing"
+	mobilePairURL = "https://mobileapp.crew44.io/"
 )
+
+type qrPairingSecret struct {
+	Version       int       `json:"v"`
+	RelayURL      string    `json:"r"`
+	ServerID      string    `json:"s"`
+	DesktopName   string    `json:"n,omitempty"`
+	DaemonPubKey  string    `json:"k"`
+	PairingID     string    `json:"p"`
+	PairingSecret string    `json:"x"`
+	ExpiresAt     time.Time `json:"e"`
+}
 
 type Manager struct {
 	store    *Store
@@ -112,10 +124,20 @@ func (m *Manager) CreatePairing(_ context.Context, relayURL string) (any, error)
 		PairingSecret: newSecret(),
 		ExpiresAt:     now.Add(pairingTTL),
 	}
-	qr, err := json.Marshal(offer)
+	qrSecret, err := json.Marshal(qrPairingSecret{
+		Version:       offer.Version,
+		RelayURL:      offer.RelayURL,
+		ServerID:      offer.ServerID,
+		DesktopName:   offer.DesktopName,
+		DaemonPubKey:  offer.DaemonPubKey,
+		PairingID:     offer.PairingID,
+		PairingSecret: offer.PairingSecret,
+		ExpiresAt:     offer.ExpiresAt,
+	})
 	if err != nil {
 		return nil, err
 	}
+	qrText := mobilePairURL + "#secret=" + url.QueryEscape(string(qrSecret))
 
 	m.mu.Lock()
 	m.pruneExpiredPairingsLocked(now)
@@ -125,7 +147,7 @@ func (m *Manager) CreatePairing(_ context.Context, relayURL string) (any, error)
 	m.relay.Ensure(relayURL)
 	return map[string]any{
 		"offer":   offer,
-		"qr_text": string(qr),
+		"qr_text": qrText,
 	}, nil
 }
 

@@ -2,6 +2,7 @@ import React from "react";
 import { router } from "expo-router";
 import { Alert, FlatList, Pressable, StyleSheet, Text, View } from "react-native";
 import { Project } from "@/api/types";
+import { connectionIssueTitle } from "@/client/connectionIssue";
 import { useMobileClient } from "@/client/MobileClientProvider";
 import { ConnectingDesktopState, DesktopOfflineState } from "@/ui/DesktopOfflineState";
 import { EmptyState, Header, LoadingState, Row, Screen } from "@/ui/Screen";
@@ -47,18 +48,16 @@ export default function Index() {
     );
   }, [client.disconnect]);
 
-  const connectingLabel = client.status === "reconnecting"
-    ? "Reconnecting to relay..."
-    : client.status === "connecting"
-      ? "Connecting to the Crew44 desktop..."
-      : "Loading pairing...";
+  const connectingLabel = client.status === "connecting"
+    ? "Connecting to the Crew44 desktop..."
+    : "Loading pairing...";
 
   if (client.status === "error") {
     return (
       <Screen>
         <Header title="Crew44 Mobile" />
         <DesktopOfflineState
-          title={client.connectionIssue === "relay" ? "Relay connection issue" : "Can't connect to the Crew44 desktop"}
+          title={connectionIssueTitle(client.connectionIssue)}
           message={client.error}
           onRetry={client.reconnect}
           onUnpair={client.disconnect}

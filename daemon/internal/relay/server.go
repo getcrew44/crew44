@@ -17,6 +17,8 @@ const (
 	relayPingPeriod = 10 * time.Second
 )
 
+var relayPendingDataTimeout = 10 * time.Second
+
 type Server struct {
 	mu       sync.Mutex
 	servers  map[string]*serverHub
@@ -32,6 +34,10 @@ type serverHub struct {
 type pendingConn struct {
 	client *relayConn
 	daemon *relayConn
+	timer  *time.Timer
+
+	mu      sync.Mutex
+	settled bool
 }
 
 type relayConn struct {
@@ -126,11 +132,19 @@ func (s *Server) serveControl(serverID string, conn *relayConn) {
 
 	for {
 		if _, _, err := conn.ws.ReadMessage(); err != nil {
+			var pending []*pendingConn
 			s.mu.Lock()
 			if s.servers[serverID] == hub && hub.control == conn {
 				hub.control = nil
+				for connectionID, wait := range hub.pending {
+					delete(hub.pending, connectionID)
+					pending = append(pending, wait)
+				}
 			}
 			s.mu.Unlock()
+			for _, wait := range pending {
+				wait.finish("desktop_offline")
+			}
 			log.Printf("relay control closed server_id=%s remote=%s err=%v", serverID, conn.remoteAddr, err)
 			return
 		}
@@ -154,19 +168,16 @@ func (s *Server) serveClient(serverID string, conn *relayConn) {
 	}
 	hub.pending[connectionID] = pending
 	s.mu.Unlock()
+	timer := time.AfterFunc(relayPendingDataTimeout, func() {
+		s.expirePending(serverID, connectionID, pending)
+	})
+	pending.attachTimer(timer)
 	log.Printf("relay client queued server_id=%s connection_id=%s remote=%s", serverID, connectionID, conn.remoteAddr)
 
 	if hub.writeControl(map[string]any{"type": "client_connected", "connection_id": connectionID}) != nil {
 		s.removePending(serverID, connectionID)
 		log.Printf("relay client notify failed server_id=%s connection_id=%s remote=%s", serverID, connectionID, conn.remoteAddr)
-		_ = conn.writeJSON(map[string]any{"type": "desktop_offline"})
-		conn.close()
-		return
-	}
-	if err := conn.writeJSON(map[string]any{"type": "desktop_online"}); err != nil {
-		s.removePending(serverID, connectionID)
-		log.Printf("relay client status write failed server_id=%s connection_id=%s remote=%s err=%v", serverID, connectionID, conn.remoteAddr, err)
-		conn.close()
+		pending.finish("desktop_offline")
 		return
 	}
 }
@@ -183,7 +194,6 @@ func (s *Server) serveDaemonData(serverID, connectionID string, conn *relayConn)
 	pending := hub.pending[connectionID]
 	if pending != nil {
 		delete(hub.pending, connectionID)
-		pending.daemon = conn
 	}
 	s.mu.Unlock()
 	if pending == nil || pending.client == nil {
@@ -191,9 +201,32 @@ func (s *Server) serveDaemonData(serverID, connectionID string, conn *relayConn)
 		conn.close()
 		return
 	}
+	if !pending.beginBridge(conn) {
+		log.Printf("relay daemon-data expired server_id=%s connection_id=%s remote=%s", serverID, connectionID, conn.remoteAddr)
+		conn.close()
+		return
+	}
+	if err := pending.client.writeJSON(map[string]any{"type": "desktop_online"}); err != nil {
+		log.Printf("relay client status write failed server_id=%s connection_id=%s remote=%s err=%v", serverID, connectionID, pending.client.remoteAddr, err)
+		pending.client.close()
+		conn.close()
+		return
+	}
 	log.Printf("relay bridge open server_id=%s connection_id=%s client_remote=%s daemon_remote=%s", serverID, connectionID, pending.client.remoteAddr, conn.remoteAddr)
 	bridge(pending.client, pending.daemon)
 	log.Printf("relay bridge closed server_id=%s connection_id=%s", serverID, connectionID)
+}
+
+func (s *Server) expirePending(serverID, connectionID string, pending *pendingConn) {
+	s.mu.Lock()
+	hub := s.servers[serverID]
+	if hub == nil || hub.pending[connectionID] != pending {
+		s.mu.Unlock()
+		return
+	}
+	delete(hub.pending, connectionID)
+	s.mu.Unlock()
+	pending.finish("desktop_timeout")
 }
 
 func (s *Server) removePending(serverID, connectionID string) {
@@ -221,6 +254,54 @@ func (h *serverHub) writeControl(value any) error {
 		return errors.New("control not connected")
 	}
 	return h.control.writeJSON(value)
+}
+
+func (p *pendingConn) beginBridge(daemon *relayConn) bool {
+	p.mu.Lock()
+	if p.settled {
+		p.mu.Unlock()
+		return false
+	}
+	p.settled = true
+	timer := p.timer
+	p.timer = nil
+	p.daemon = daemon
+	p.mu.Unlock()
+	if timer != nil {
+		timer.Stop()
+	}
+	return true
+}
+
+func (p *pendingConn) attachTimer(timer *time.Timer) {
+	p.mu.Lock()
+	if p.settled {
+		p.mu.Unlock()
+		timer.Stop()
+		return
+	}
+	p.timer = timer
+	p.mu.Unlock()
+}
+
+func (p *pendingConn) finish(status string) {
+	p.mu.Lock()
+	if p.settled {
+		p.mu.Unlock()
+		return
+	}
+	p.settled = true
+	timer := p.timer
+	p.timer = nil
+	client := p.client
+	p.mu.Unlock()
+	if timer != nil {
+		timer.Stop()
+	}
+	if client != nil {
+		_ = client.writeJSON(map[string]any{"type": status})
+		client.close()
+	}
 }
 
 func bridge(a, b *relayConn) {

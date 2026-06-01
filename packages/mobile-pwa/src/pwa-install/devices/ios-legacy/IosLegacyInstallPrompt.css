@@ -1,0 +1,135 @@
+.ios-legacy-install-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 18px;
+  background: rgba(28, 26, 23, 0.48);
+}
+
+.ios-legacy-install-sheet {
+  position: relative;
+  width: min(100%, 350px);
+  border: 1px solid #e6dfcc;
+  border-radius: 8px;
+  background: #fcfbf7;
+  color: #1c1a17;
+  box-shadow: 0 22px 70px rgba(28, 26, 23, 0.26);
+  padding: 22px 18px 18px;
+  text-align: center;
+}
+
+.ios-legacy-install-sheet h2 {
+  margin: 10px 34px 6px;
+  font-size: 20px;
+  line-height: 1.2;
+}
+
+.ios-legacy-install-sheet p {
+  margin: 0 auto 15px;
+  max-width: 275px;
+  color: #5c544b;
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.ios-legacy-install-icon {
+  width: 62px;
+  height: 62px;
+  border-radius: 14px;
+  box-shadow: 0 0 0 1px rgba(28, 26, 23, 0.12);
+}
+
+.ios-legacy-phone {
+  height: 138px;
+  border: 1px solid #e6dfcc;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #fffef8;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.ios-legacy-page {
+  flex: 1;
+  margin: 12px;
+  border-radius: 8px;
+  background: linear-gradient(135deg, #f0ead8 0%, #d9e7de 100%);
+}
+
+.ios-legacy-toolbar {
+  height: 44px;
+  border-top: 1px solid #e6dfcc;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  padding: 0 18px;
+}
+
+.ios-legacy-toolbar > span:not(.ios-legacy-share) {
+  height: 5px;
+  border-radius: 5px;
+  background: #d8cfb8;
+}
+
+.ios-legacy-share,
+.ios-legacy-action-row span {
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  color: #1769d1;
+  background: #edf5ff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.ios-legacy-share svg,
+.ios-legacy-action-row svg,
+.pwa-install-close svg {
+  width: 20px;
+  height: 20px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.ios-legacy-action-row {
+  min-height: 48px;
+  border: 1px solid #e6dfcc;
+  border-radius: 8px;
+  background: #fffef8;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 8px 12px;
+  text-align: left;
+}
+
+.ios-legacy-action-row strong {
+  font-size: 15px;
+  line-height: 1.2;
+}
+
+.pwa-install-close {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  width: 32px;
+  height: 32px;
+  border: 1px solid #e6dfcc;
+  border-radius: 8px;
+  background: #fffef8;
+  color: #5c544b;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}

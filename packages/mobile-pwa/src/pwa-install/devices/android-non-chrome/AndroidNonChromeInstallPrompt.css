@@ -1,0 +1,130 @@
+.android-non-chrome-install-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 18px;
+  background: rgba(28, 26, 23, 0.48);
+}
+
+.android-non-chrome-install-sheet {
+  position: relative;
+  width: min(100%, 360px);
+  border: 1px solid #d7d0bd;
+  border-radius: 8px;
+  background: #fcfbf7;
+  color: #1c1a17;
+  box-shadow: 0 22px 70px rgba(28, 26, 23, 0.26);
+  padding: 22px 18px 18px;
+  text-align: center;
+}
+
+.android-non-chrome-install-sheet h2 {
+  margin: 10px 34px 6px;
+  font-size: 20px;
+  line-height: 1.2;
+}
+
+.android-non-chrome-install-sheet p {
+  margin: 0 auto 16px;
+  max-width: 285px;
+  color: #5c544b;
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.android-non-chrome-install-icon {
+  width: 62px;
+  height: 62px;
+  border-radius: 14px;
+  box-shadow: 0 0 0 1px rgba(28, 26, 23, 0.12);
+}
+
+.android-non-chrome-browser {
+  border: 1px solid #e6dfcc;
+  border-radius: 8px;
+  background: #fffef8;
+  overflow: hidden;
+}
+
+.android-non-chrome-bar {
+  min-height: 48px;
+  border-bottom: 1px solid #e6dfcc;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px 8px 14px;
+  color: #807972;
+  font-size: 13px;
+}
+
+.android-non-chrome-bar strong {
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  color: #20744a;
+  background: #edf8f1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.android-non-chrome-menu {
+  padding: 10px;
+  display: grid;
+  gap: 8px;
+}
+
+.android-non-chrome-menu div {
+  min-height: 44px;
+  border: 1px solid #e6dfcc;
+  border-radius: 8px;
+  background: #fcfbf7;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 11px;
+  text-align: left;
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.android-non-chrome-menu svg,
+.android-non-chrome-bar svg,
+.pwa-install-close svg {
+  width: 20px;
+  height: 20px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  flex-shrink: 0;
+}
+
+.android-non-chrome-bar circle {
+  fill: currentColor;
+  stroke: none;
+}
+
+.android-non-chrome-menu svg {
+  color: #20744a;
+}
+
+.pwa-install-close {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  width: 32px;
+  height: 32px;
+  border: 1px solid #e6dfcc;
+  border-radius: 8px;
+  background: #fffef8;
+  color: #5c544b;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
