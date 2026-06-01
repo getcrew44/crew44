@@ -2,6 +2,14 @@
 
 All notable changes to this project are documented here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.1] - 2026-06-01
+
+### Changed
+- Mobile PWA chat polish: tool rows now open from the full row, expanded tool calls show arguments in the header, multiline tool output keeps `pre` formatting, chat back returns to the project chat list, and the home menu no longer dims the page or shows blue text for `Agents`.
+
+### Fixed
+- Desktop chat switching no longer races composer draft hydration, so fresh input is not overwritten while changing chats and the stale-draft test stops flaking.
+
 ## [0.6.0] - 2026-05-27
 
 ### Added
