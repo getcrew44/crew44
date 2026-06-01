@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -122,10 +123,18 @@ func (a *App) InstallRecruitAgent(ctx context.Context, registryID string) (model
 	if err := os.MkdirAll(staged, 0o755); err != nil {
 		return model.AgentConfig{}, err
 	}
+	committed := false
 	// Guarantee staged + tmp recruited-skills are cleaned up on every
 	// failure path. CleanupAgentSourceTmp is a no-op once the staging
 	// dir has been renamed into source/.
-	defer a.store.CleanupAgentSourceTmp(agentID, installID)
+	defer func() {
+		a.store.CleanupAgentSourceTmp(agentID, installID)
+		if existing == nil && !committed {
+			if err := os.RemoveAll(a.store.AgentDir(agentID)); err != nil {
+				log.Printf("recruit: cleanup failed agent_dir=%q: %v", a.store.AgentDir(agentID), err)
+			}
+		}
+	}()
 
 	archivePath, err := a.recruit.FetchArchive(ctx, coord, tag, a.store.RecruitGithubCacheDir())
 	if err != nil {
@@ -192,6 +201,7 @@ func (a *App) InstallRecruitAgent(ctx context.Context, registryID string) (model
 	if err := a.store.CommitAgentInstall(finalAgent, installID); err != nil {
 		return model.AgentConfig{}, err
 	}
+	committed = true
 
 	// Drop any legacy global SkillRecord entries this repo created
 	// under the pre-payload installer. Best-effort: agent install is
@@ -199,7 +209,7 @@ func (a *App) InstallRecruitAgent(ctx context.Context, registryID string) (model
 	// the user-managed skills list (recoverable by hand) and must
 	// not undo a successful install.
 	if err := a.purgeLegacyGlobalRecruitedSkills(entry.RepoURL); err != nil {
-		return finalAgent, err
+		log.Printf("recruit: legacy skill cleanup failed repo_url=%q: %v", entry.RepoURL, err)
 	}
 	return finalAgent, nil
 }

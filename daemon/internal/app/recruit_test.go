@@ -679,6 +679,73 @@ func TestRecruitInstallFailureLeavesPreviousSourceIntact(t *testing.T) {
 	}
 }
 
+// A failed first-time install must not leave an empty agents/agent-<id>
+// directory behind, because ListAgents expects every agent dir to contain
+// config.json.
+func TestRecruitInstallFreshFailureDoesNotPoisonAgentList(t *testing.T) {
+	f := newFakeRegistry(t)
+	f.set("/registry/test/HEAD/agents.json", `{
+		"schema_version":"crew44.agent-registry.v1",
+		"agents":[{"id":"broken","name":"Broken","description":"d","repo_url":"https://github.com/x/broken"}]
+	}`)
+	manifest := `{
+		"schema_version":"crew44.agent.v1",
+		"name":"Broken","version":"1.0.0","description":"d",
+		"payload":{"include":["crew44-agent.json"]}
+	}`
+	f.set("/x/broken/HEAD/crew44-agent.json", manifest)
+	f.set("/x/broken/v1.0.0/crew44-agent.json", manifest)
+	f.publishTag("x", "broken", "v1.0.0")
+	srv := httptest.NewServer(f.handler())
+	defer srv.Close()
+	a := newRecruitTestApp(t, srv)
+
+	if _, err := a.InstallRecruitAgent(context.Background(), "broken"); err == nil {
+		t.Fatal("expected install to fail because AGENT.md is missing from payload")
+	}
+	if _, err := a.ListAgents(); err != nil {
+		t.Fatalf("failed install left agent store unreadable: %v", err)
+	}
+	if _, err := a.ListRecruitAgents(context.Background()); err != nil {
+		t.Fatalf("failed install broke recruit list installed-state check: %v", err)
+	}
+}
+
+// Legacy global skill cleanup is best-effort. If it fails after the new
+// payload-backed install has already committed, the install RPC should still
+// report success so the UI does not show a false failure.
+func TestRecruitInstallIgnoresLegacySkillCleanupFailureAfterCommit(t *testing.T) {
+	f := newFakeRegistry(t)
+	seedPatchAgent(f, "1.0.0")
+	srv := httptest.NewServer(f.handler())
+	defer srv.Close()
+	a := newRecruitTestApp(t, srv)
+
+	if err := a.store.SaveSkills([]model.SkillRecord{{
+		ID:     "legacy",
+		Name:   "legacy",
+		Source: &model.SkillSource{RepoURL: "https://github.com/hex/patch-agent", Path: "skills/legacy/SKILL.md", Version: "0.9.0"},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	registryPath := filepath.Join(a.store.Root(), "skills", "registry.json")
+	if err := os.Chmod(registryPath, 0o400); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chmod(registryPath, 0o600)
+
+	agent, err := a.InstallRecruitAgent(context.Background(), "patch")
+	if err != nil {
+		t.Fatalf("install should succeed even when legacy cleanup fails: %v", err)
+	}
+	if agent.Source == nil || agent.Source.Version != "1.0.0" {
+		t.Fatalf("install did not return committed agent: %+v", agent)
+	}
+	if _, err := os.Stat(filepath.Join(agent.Source.SourceDir, "AGENT.md")); err != nil {
+		t.Fatalf("committed source missing after cleanup failure: %v", err)
+	}
+}
+
 // Symlink entries inside the tarball must be rejected — never extracted.
 func TestRecruitInstallRejectsSymlinkEscape(t *testing.T) {
 	f := newFakeRegistry(t)

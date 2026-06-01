@@ -295,4 +295,3 @@ func validRegistryEntry(e *RegistryEntry) bool {
 		strings.TrimSpace(e.Description) != "" &&
 		strings.TrimSpace(e.RepoURL) != ""
 }
-
