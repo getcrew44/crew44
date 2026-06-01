@@ -10,6 +10,32 @@ import (
 	"github.com/getcrew44/crew44/daemon/internal/model"
 )
 
+// An agent dir left without a config.json (e.g. a crash during
+// CommitAgentInstall before the new config landed) must not brick the
+// whole listing — ListAgents skips it and still returns the healthy
+// agents.
+func TestListAgentsSkipsAgentDirWithoutConfig(t *testing.T) {
+	s, err := New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	good := model.AgentConfig{ID: "good", Name: "Good"}
+	if err := writeJSON(filepath.Join(s.AgentDir("good"), "config.json"), good); err != nil {
+		t.Fatal(err)
+	}
+	// A second agent dir with no config.json at all.
+	if err := os.MkdirAll(s.AgentDir("broken"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	agents, err := s.ListAgents()
+	if err != nil {
+		t.Fatalf("ListAgents must tolerate the broken dir, got err=%v", err)
+	}
+	if len(agents) != 1 || agents[0].ID != "good" {
+		t.Fatalf("expected only the good agent, got %+v", agents)
+	}
+}
+
 // CommitAgentInstall must produce source/, recruited-skills.json, and
 // config.json atomically. With no previous install, the staging
 // artifacts simply rename into place.

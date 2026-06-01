@@ -145,7 +145,15 @@ func ExtractFilteredPayload(archivePath, destDir string, resolved ResolvedPayloa
 		return nil, fmt.Errorf("recruit: open gzip: %w", err)
 	}
 	defer gz.Close()
-	tr := tar.NewReader(gz)
+	// Count every decompressed byte the tar reader pulls from gzip,
+	// including bytes drained from entries we skip (binaries, oversize
+	// files, excluded paths). Without this, a tarball whose entries are
+	// skipped after the per-file LimitReader could still force the tar
+	// reader to drain gigabytes of decompressed data past the
+	// extracted-payload cap — a decompression-bomb DoS bounded only by
+	// the gzip ratio of the 50 MiB download.
+	counter := &countingReader{r: gz}
+	tr := tar.NewReader(counter)
 
 	var totalBytes int64
 	var fileCount int
@@ -160,6 +168,13 @@ func ExtractFilteredPayload(archivePath, destDir string, resolved ResolvedPayloa
 		}
 		if err != nil {
 			return nil, fmt.Errorf("recruit: read tar: %w", err)
+		}
+		// tr.Next has now drained the previous entry from gzip, so the
+		// running decompressed-byte count is authoritative for everything
+		// read so far. Trip the cap here so skipped/oversize entries can't
+		// inflate decompression work past the budget.
+		if counter.n > MaxExtractedPayloadBytes {
+			return nil, fmt.Errorf("%w: decompressed %d bytes (limit %d)", ErrPayloadTooLarge, counter.n, MaxExtractedPayloadBytes)
 		}
 		// GitHub's git-archive output begins with a pax_global_header
 		// record (TypeXGlobalHeader) carrying the source commit id, and
@@ -272,6 +287,12 @@ func ExtractFilteredPayload(archivePath, destDir string, resolved ResolvedPayloa
 		}
 		written = append(written, relative)
 	}
+	// The final tr.Next returned io.EOF, which also drains the last
+	// entry; re-check the cap so a bomb hidden in the trailing entry is
+	// caught too.
+	if counter.n > MaxExtractedPayloadBytes {
+		return nil, fmt.Errorf("%w: decompressed %d bytes (limit %d)", ErrPayloadTooLarge, counter.n, MaxExtractedPayloadBytes)
+	}
 	if wrapper == "" {
 		return nil, fmt.Errorf("recruit: archive is empty")
 	}
@@ -325,6 +346,21 @@ func isBinaryContent(content []byte) bool {
 		}
 	}
 	return false
+}
+
+// countingReader tracks the cumulative number of bytes read from the
+// wrapped reader. Wrapping the gzip stream lets ExtractFilteredPayload
+// bound total decompressed output across every tar entry, including the
+// bytes tar.Reader.Next drains from entries the filter skips.
+type countingReader struct {
+	r io.Reader
+	n int64
+}
+
+func (c *countingReader) Read(p []byte) (int, error) {
+	n, err := c.r.Read(p)
+	c.n += int64(n)
+	return n, err
 }
 
 func ensureParentDirs(target, destDir string, created map[string]bool) error {

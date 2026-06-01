@@ -322,3 +322,55 @@ func TestExtractFilteredPayloadEnforcesFileCountLimit(t *testing.T) {
 		t.Fatalf("expected ErrPayloadTooManyFiles, got %v", err)
 	}
 }
+
+// A binary entry is skipped by the per-file filter, but tar.Reader.Next
+// still drains its full decompressed length from gzip. A highly
+// compressible binary blob far larger than MaxExtractedPayloadBytes must
+// trip the decompression cap rather than forcing unbounded work. Guards
+// the countingReader bound added for the zip-bomb finding.
+func TestExtractFilteredPayloadBoundsBinaryDecompression(t *testing.T) {
+	var buf bytes.Buffer
+	gz := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gz)
+	wrapper := "x-12345678"
+	if err := tw.WriteHeader(&tar.Header{Name: wrapper + "/", Typeflag: tar.TypeDir, Mode: 0o755}); err != nil {
+		t.Fatal(err)
+	}
+	// One binary entry (null bytes => classified binary, then skipped)
+	// whose decompressed size exceeds the extracted-payload cap. Stream
+	// zeros in chunks so the test never allocates the whole blob.
+	bombSize := int64(MaxExtractedPayloadBytes) + (1 << 20)
+	if err := tw.WriteHeader(&tar.Header{
+		Name:     wrapper + "/blob.bin",
+		Mode:     0o644,
+		Size:     bombSize,
+		Typeflag: tar.TypeReg,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	chunk := make([]byte, 1<<20) // 1 MiB of zeros, reused each write
+	for remaining := bombSize; remaining > 0; {
+		n := int64(len(chunk))
+		if n > remaining {
+			n = remaining
+		}
+		if _, err := tw.Write(chunk[:n]); err != nil {
+			t.Fatal(err)
+		}
+		remaining -= n
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := gz.Close(); err != nil {
+		t.Fatal(err)
+	}
+	archivePath := filepath.Join(t.TempDir(), "a.tar.gz")
+	if err := os.WriteFile(archivePath, buf.Bytes(), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := ExtractFilteredPayload(archivePath, t.TempDir(), ResolvedPayload{Include: []string{"**"}})
+	if !errors.Is(err, ErrPayloadTooLarge) {
+		t.Fatalf("expected ErrPayloadTooLarge, got %v", err)
+	}
+}
