@@ -4,20 +4,7 @@ import { createRemotePairing, deleteRemoteDevice } from './api.js';
 import { ghostBtn, primaryBtn, UI_FONT, MONO_FONT, Icon } from './components.jsx';
 
 export const DEFAULT_RELAY_URL = 'wss://relay.crew44.io/relay';
-
-const iconButton = {
-  width: 28,
-  height: 28,
-  border: '1px solid #E6DFCC',
-  background: '#FCFAF1',
-  color: '#5C544B',
-  borderRadius: 6,
-  padding: 0,
-  display: 'inline-flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-  cursor: 'pointer',
-};
+const MOBILE_APP_URL = 'https://mobileapp.crew44.io/';
 
 const iconButtonGhost = {
   width: 24,
@@ -63,7 +50,52 @@ function expiryState(pairing, now) {
   };
 }
 
-function ModalShell({ title, subtitle, onClose, children }) {
+function MobileAppLinkWithQr() {
+  const [open, setOpen] = React.useState(false);
+
+  return (
+    <span
+      style={{ position: 'relative', display: 'inline-flex' }}
+      onMouseEnter={() => setOpen(true)}
+      onMouseLeave={() => setOpen(false)}
+      onFocus={() => setOpen(true)}
+      onBlur={() => setOpen(false)}
+    >
+      <a
+        href={MOBILE_APP_URL}
+        target="_blank"
+        rel="noreferrer"
+        style={{ color: '#1C1A17', fontFamily: MONO_FONT, textDecoration: 'none' }}
+      >
+        {MOBILE_APP_URL}
+      </a>
+      {open && (
+        <span
+          role="tooltip"
+          style={{
+            position: 'absolute',
+            left: '50%',
+            bottom: 'calc(100% + 10px)',
+            transform: 'translateX(-50%)',
+            width: 148,
+            padding: 10,
+            border: '1px solid #E6DFCC',
+            borderRadius: 8,
+            background: '#FCFBF7',
+            boxShadow: '0 12px 34px rgba(28,26,23,0.18)',
+            zIndex: 2,
+          }}
+        >
+          <QRCodeSVG value={MOBILE_APP_URL} size={126} level="M" includeMargin />
+        </span>
+      )}
+    </span>
+  );
+}
+
+function ModalShell({ title, subtitle, onClose, children, width = 440, surfaceStyle = null }) {
+  const titleId = React.useId();
+
   React.useEffect(() => {
     const onKeyDown = (event) => {
       if (event.key === 'Escape') onClose();
@@ -93,14 +125,16 @@ function ModalShell({ title, subtitle, onClose, children }) {
       <div
         role="dialog"
         aria-modal="true"
-        aria-labelledby="mobile-dialog-title"
+        aria-labelledby={titleId}
         style={{
-          width: 'min(440px, 100%)',
+          width: `min(${width}px, 100%)`,
           background: '#FCFBF7',
           border: '1px solid #E6DFCC',
           borderRadius: 8,
           boxShadow: '0 20px 60px rgba(28,26,23,0.22)',
           padding: 20,
+          transition: 'transform 0.18s ease, opacity 0.18s ease',
+          ...surfaceStyle,
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
@@ -117,7 +151,7 @@ function ModalShell({ title, subtitle, onClose, children }) {
             <Icon name="phone" size={17} />
           </span>
           <div>
-            <div id="mobile-dialog-title" style={{ fontSize: 16, fontWeight: 650, color: '#1C1A17' }}>
+            <div id={titleId} style={{ fontSize: 16, fontWeight: 650, color: '#1C1A17' }}>
               {title}
             </div>
             <div style={{ fontSize: 12.5, color: '#807972', marginTop: 2 }}>
@@ -160,10 +194,26 @@ export function ManageMobileDialog({ devices = [], onClose, onChanged }) {
       title="Manage mobile"
       subtitle="Paired devices that can connect through the relay."
       onClose={onClose}
+      width={520}
     >
       {error && (
         <div role="alert" style={{ fontSize: 12.5, color: '#B8553E', marginBottom: 12 }}>
           {error}
+        </div>
+      )}
+
+      {items.length > 0 && (
+        <div style={{
+          border: '1px solid #ECE6D5',
+          borderRadius: 8,
+          background: '#FFFEF8',
+          padding: 12,
+          color: '#5C544B',
+          fontSize: 13,
+          lineHeight: 1.45,
+          marginBottom: 12,
+        }}>
+          To use Crew44 on your paired device, visit <MobileAppLinkWithQr /> with that device&apos;s browser.
         </div>
       )}
 
@@ -238,7 +288,7 @@ export default function PairMobileDialog({ onClose, onChanged }) {
   const [error, setError] = React.useState('');
   const [busy, setBusy] = React.useState(false);
   const [refreshHover, setRefreshHover] = React.useState(false);
-  const [copiedJson, setCopiedJson] = React.useState(false);
+  const [copiedLink, setCopiedLink] = React.useState(false);
   const [now, setNow] = React.useState(() => new Date());
   const createdRef = React.useRef(false);
   const copyResetTimerRef = React.useRef(null);
@@ -279,13 +329,13 @@ export default function PairMobileDialog({ onClose, onChanged }) {
   }, [pairing?.offer?.expires_at]);
 
   const expiry = expiryState(pairing, now);
-  const copyPairingJson = React.useCallback(async () => {
+  const copyPairingLink = React.useCallback(async () => {
     if (!pairing?.qr_text) return;
     try {
       await navigator.clipboard.writeText(pairing.qr_text);
-      setCopiedJson(true);
+      setCopiedLink(true);
       if (copyResetTimerRef.current) window.clearTimeout(copyResetTimerRef.current);
-      copyResetTimerRef.current = window.setTimeout(() => setCopiedJson(false), 1500);
+      copyResetTimerRef.current = window.setTimeout(() => setCopiedLink(false), 1500);
     } catch {}
   }, [pairing?.qr_text]);
 
@@ -296,14 +346,15 @@ export default function PairMobileDialog({ onClose, onChanged }) {
   return (
     <ModalShell
       title="Pair mobile device"
-      subtitle="Scan the QR code from the Crew44 mobile app."
+      subtitle="Scan the QR code with your phone camera."
       onClose={onClose}
+      width={520}
     >
-      <div style={{ marginBottom: 12 }}>
-        <div style={{ fontSize: 12.5, color: '#5C544B', marginBottom: 6 }}>
-          Relay URL
-        </div>
-        {editingRelay ? (
+      {editingRelay && (
+        <div style={{ marginBottom: 12 }}>
+          <div style={{ fontSize: 12.5, color: '#5C544B', marginBottom: 6 }}>
+            Relay URL
+          </div>
           <div style={{ display: 'flex', gap: 8 }}>
             <input
               aria-label="Relay URL"
@@ -340,35 +391,8 @@ export default function PairMobileDialog({ onClose, onChanged }) {
               Update QR
             </button>
           </div>
-        ) : (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <div style={{
-              flex: 1,
-              minWidth: 0,
-              fontFamily: MONO_FONT,
-              fontSize: 12,
-              color: '#5C544B',
-              background: '#FFFEF8',
-              border: '1px solid #ECE6D5',
-              borderRadius: 6,
-              padding: '8px 10px',
-              whiteSpace: 'nowrap',
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-            }}>
-              {relayUrl}
-            </div>
-            <button
-              type="button"
-              aria-label="Edit relay URL"
-              onClick={() => setEditingRelay(true)}
-              style={iconButton}
-            >
-              <Icon name="edit" size={14} />
-            </button>
-          </div>
-        )}
-      </div>
+        </div>
+      )}
 
       {error && (
         <div role="alert" style={{ fontSize: 12.5, color: '#B8553E', marginBottom: 12 }}>
@@ -380,7 +404,7 @@ export default function PairMobileDialog({ onClose, onChanged }) {
         display: 'flex',
         flexDirection: 'column',
         alignItems: 'center',
-        gap: 12,
+        gap: 8,
         padding: 16,
         border: '1px solid #ECE6D5',
         borderRadius: 8,
@@ -426,7 +450,7 @@ export default function PairMobileDialog({ onClose, onChanged }) {
                 </button>
               )}
             </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: -4 }}>
               <div style={{ fontFamily: MONO_FONT, color: '#807972', fontSize: 11.5 }}>
                 {expiry.label}
               </div>
@@ -450,6 +474,9 @@ export default function PairMobileDialog({ onClose, onChanged }) {
                 </button>
               )}
             </div>
+            <div style={{ color: '#5C544B', fontSize: 13, lineHeight: 1.45, textAlign: 'center', maxWidth: 340 }}>
+              To use Crew44 on your mobile device, simply scan the QR above with your phone&apos;s camera.
+            </div>
           </>
         ) : (
           <div style={{ color: '#807972', fontSize: 13 }}>
@@ -458,21 +485,21 @@ export default function PairMobileDialog({ onClose, onChanged }) {
         )}
       </div>
 
-      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
-        <button
-          type="button"
-          onClick={copyPairingJson}
-          disabled={!pairing?.qr_text}
-          style={{
-            ...ghostBtn,
-            opacity: pairing?.qr_text ? 1 : 0.55,
-            cursor: pairing?.qr_text ? 'pointer' : 'default',
-          }}
-        >
-          {copiedJson ? 'Copied' : 'Copy JSON'}
-        </button>
-        <button type="button" onClick={onClose} style={primaryBtn}>Close</button>
-      </div>
-    </ModalShell>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+          <button
+            type="button"
+            onClick={copyPairingLink}
+            disabled={!pairing?.qr_text}
+            style={{
+              ...ghostBtn,
+              opacity: pairing?.qr_text ? 1 : 0.55,
+              cursor: pairing?.qr_text ? 'pointer' : 'default',
+            }}
+          >
+            {copiedLink ? 'Copied' : 'Copy link'}
+          </button>
+          <button type="button" onClick={onClose} style={primaryBtn}>Close</button>
+        </div>
+      </ModalShell>
   );
 }
