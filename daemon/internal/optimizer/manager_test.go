@@ -83,7 +83,7 @@ func TestManager_AcceptRoutesByKind(t *testing.T) {
 		{ID: scanID + ":mu-1", MinerID: "mu-1", ScanID: scanID, Kind: KindMemoryUser, Priority: PriorityHigh, Title: "M",
 			Preview: Preview{Type: "memory", Text: "Prefer em-dashes."}},
 		{ID: scanID + ":mp-1", MinerID: "mp-1", ScanID: scanID, Kind: KindMemoryProject, Priority: PriorityHigh, Title: "P",
-			Preview: Preview{Type: "memory", ScopeID: "proj-123", Text: "Uses npm workspaces."}},
+			Preview: Preview{Type: "memory", ScopeID: "proj-123", Text: "Uses pnpm workspaces."}},
 		{ID: scanID + ":st-1", MinerID: "st-1", ScanID: scanID, Kind: KindStrategy, Priority: PriorityHigh, Title: "Strat",
 			Body: "investigate", Preview: Preview{Type: "plan", Lines: []string{"step 1", "step 2"}}},
 	}
@@ -121,7 +121,7 @@ func TestManager_AcceptRoutesByKind(t *testing.T) {
 	if mem.lastProjectID != "proj-123" {
 		t.Fatalf("want project id proj-123, got %q", mem.lastProjectID)
 	}
-	if mem.lastProjectEntry.Body != "Uses npm workspaces." {
+	if mem.lastProjectEntry.Body != "Uses pnpm workspaces." {
 		t.Fatalf("want project body set, got %q", mem.lastProjectEntry.Body)
 	}
 	if mem.lastProjectEntry.MinerID != "mp-1" {

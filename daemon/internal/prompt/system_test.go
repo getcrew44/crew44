@@ -25,10 +25,10 @@ func TestBuildSystemPromptExpandsTypedMemoryFiles(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(userDir, "em-dash-mu-1.md"), []byte("---\nname: em-dash-mu-1\ndescription: prefers em-dashes\n---\n\nPrefers em-dashes over semicolons.\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(projDir, "MEMORY.md"), []byte("# Memory Index\n\n- [Npm workspace](npm-mp-1.md) — keep package-lock in sync\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(projDir, "MEMORY.md"), []byte("# Memory Index\n\n- [Pnpm only](pnpm-mp-1.md) — never run npm install\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(projDir, "npm-mp-1.md"), []byte("---\nname: npm-mp-1\n---\n\nThis repo uses npm workspaces. Keep package-lock.json in sync with package.json.\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(projDir, "pnpm-mp-1.md"), []byte("---\nname: pnpm-mp-1\n---\n\nThis repo uses pnpm workspaces. Never run npm install at the repo root.\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -53,7 +53,7 @@ func TestBuildSystemPromptExpandsTypedMemoryFiles(t *testing.T) {
 	if !strings.Contains(got, "## Project Memory") {
 		t.Fatalf("expected ## Project Memory section\n%s", got)
 	}
-	if !strings.Contains(got, "npm workspaces") {
+	if !strings.Contains(got, "pnpm workspaces") {
 		t.Fatalf("expected project memory body inlined\n%s", got)
 	}
 

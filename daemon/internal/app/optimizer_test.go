@@ -353,9 +353,9 @@ func TestMemoryWriterWritesTypedFileAndIndex(t *testing.T) {
 	w := &memoryWriter{store: st}
 
 	entry := optimizer.MemoryEntry{
-		Title:       "Use npm workspaces",
-		Description: "keep package-lock in sync",
-		Body:        "This repo uses npm workspaces.",
+		Title:       "Prefer pnpm",
+		Description: "never run npm install",
+		Body:        "This repo uses pnpm workspaces.",
 		MinerID:     "mp-1",
 		ScanID:      "scan-1",
 		GeneratedAt: time.Date(2026, 5, 14, 13, 0, 0, 0, time.UTC),
@@ -367,7 +367,7 @@ func TestMemoryWriterWritesTypedFileAndIndex(t *testing.T) {
 	if indexFull {
 		t.Fatalf("first write should not overflow index")
 	}
-	want := filepath.Join(st.ProjectMemoryDir("abc123"), "use-npm-workspaces-scan-1-mp-1.md")
+	want := filepath.Join(st.ProjectMemoryDir("abc123"), "prefer-pnpm-scan-1-mp-1.md")
 	if bodyPath != want {
 		t.Fatalf("body path = %q, want %q", bodyPath, want)
 	}
@@ -380,7 +380,7 @@ func TestMemoryWriterWritesTypedFileAndIndex(t *testing.T) {
 	if !strings.HasPrefix(bodyStr, "---\n") {
 		t.Fatalf("body should start with YAML frontmatter:\n%s", bodyStr)
 	}
-	for _, want := range []string{"name: use-npm-workspaces-scan-1-mp-1", "source_scan: scan-1", "source_suggestion: scan-1:mp-1", "This repo uses npm workspaces."} {
+	for _, want := range []string{"name: prefer-pnpm-scan-1-mp-1", "source_scan: scan-1", "source_suggestion: scan-1:mp-1", "This repo uses pnpm workspaces."} {
 		if !strings.Contains(bodyStr, want) {
 			t.Fatalf("body missing %q:\n%s", want, bodyStr)
 		}
@@ -395,7 +395,7 @@ func TestMemoryWriterWritesTypedFileAndIndex(t *testing.T) {
 	if !strings.Contains(indexStr, "# Memory Index") {
 		t.Fatalf("first entry should seed header:\n%s", indexStr)
 	}
-	if !strings.Contains(indexStr, "- [Use npm workspaces](use-npm-workspaces-scan-1-mp-1.md) — keep package-lock in sync") {
+	if !strings.Contains(indexStr, "- [Prefer pnpm](prefer-pnpm-scan-1-mp-1.md) — never run npm install") {
 		t.Fatalf("index missing entry line:\n%s", indexStr)
 	}
 
