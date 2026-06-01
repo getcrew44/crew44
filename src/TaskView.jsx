@@ -2940,7 +2940,7 @@ function Composer({ onSend, isStreaming, onCancel, pendingSteers = [], onCancelS
     setScrollTop(ta.current.scrollTop);
   }, [val]);
 
-  React.useEffect(() => {
+  React.useLayoutEffect(() => {
     if (!composerDraftKey) {
       setDraftReadyKey('');
       return;
