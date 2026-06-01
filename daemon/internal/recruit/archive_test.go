@@ -26,10 +26,27 @@ type tarEntry struct {
 }
 
 func buildTarball(t *testing.T, wrapper string, entries []tarEntry) []byte {
+	return buildTarballWithGlobalHeader(t, wrapper, entries, false)
+}
+
+// buildTarballWithGlobalHeader mimics codeload, optionally prepending the
+// pax_global_header record that GitHub's git-archive output always emits
+// (carrying the source commit id). ExtractFilteredPayload must skip it
+// rather than treat it as a second top-level directory.
+func buildTarballWithGlobalHeader(t *testing.T, wrapper string, entries []tarEntry, withGlobalHeader bool) []byte {
 	t.Helper()
 	var buf bytes.Buffer
 	gz := gzip.NewWriter(&buf)
 	tw := tar.NewWriter(gz)
+	if withGlobalHeader {
+		if err := tw.WriteHeader(&tar.Header{
+			Name:       "pax_global_header",
+			Typeflag:   tar.TypeXGlobalHeader,
+			PAXRecords: map[string]string{"comment": "abcdef1234567890"},
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
 	// Always emit the wrapper directory entry first to mimic codeload.
 	if err := tw.WriteHeader(&tar.Header{Name: wrapper + "/", Typeflag: tar.TypeDir, Mode: 0o755}); err != nil {
 		t.Fatal(err)
@@ -161,6 +178,35 @@ func TestExtractFilteredPayloadAppliesIncludeExclude(t *testing.T) {
 		}
 		if _, err := os.Stat(filepath.Join(dest, p)); err == nil {
 			t.Errorf("file should not exist on disk: %s", p)
+		}
+	}
+}
+
+// Real GitHub codeload tarballs lead with a pax_global_header record;
+// it must be skipped, not mistaken for a top-level directory alongside
+// the {repo}-{tag}/ wrapper.
+func TestExtractFilteredPayloadSkipsPaxGlobalHeader(t *testing.T) {
+	entries := []tarEntry{
+		{name: "AGENT.md", body: "# A\n"},
+		{name: "skills/foo/SKILL.md", body: "# foo\n"},
+	}
+	tarBytes := buildTarballWithGlobalHeader(t, "karpathy-skills-agent-1.0.0", entries, true)
+	archivePath := filepath.Join(t.TempDir(), "a.tar.gz")
+	if err := os.WriteFile(archivePath, tarBytes, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	dest := t.TempDir()
+	written, err := ExtractFilteredPayload(archivePath, dest, ResolvedPayload{Include: []string{"**"}})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	got := map[string]bool{}
+	for _, p := range written {
+		got[p] = true
+	}
+	for _, p := range []string{"AGENT.md", "skills/foo/SKILL.md"} {
+		if !got[p] {
+			t.Errorf("missing %s in extracted payload", p)
 		}
 	}
 }

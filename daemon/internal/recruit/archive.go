@@ -161,6 +161,16 @@ func ExtractFilteredPayload(archivePath, destDir string, resolved ResolvedPayloa
 		if err != nil {
 			return nil, fmt.Errorf("recruit: read tar: %w", err)
 		}
+		// GitHub's git-archive output begins with a pax_global_header
+		// record (TypeXGlobalHeader) carrying the source commit id, and
+		// may emit per-entry TypeXHeader records too. Go's tar reader
+		// surfaces the global header verbatim rather than folding it into
+		// the next entry, so skip both before wrapper detection — left
+		// alone, "pax_global_header" is mistaken for the first top-level
+		// directory and trips the multiple-top-level-directory check.
+		if hdr.Typeflag == tar.TypeXGlobalHeader || hdr.Typeflag == tar.TypeXHeader {
+			continue
+		}
 		name := filepath.ToSlash(filepath.Clean(hdr.Name))
 		if name == "." || name == "" {
 			continue

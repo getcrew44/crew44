@@ -106,6 +106,18 @@ function tokenizeInline(text) {
       }
     }
 
+    if (text.startsWith('http://', i) || text.startsWith('https://', i)) {
+      const rest = text.slice(i);
+      const match = rest.match(/^https?:\/\/[^\s<]+[^\s<.,:;!?)'"]/);
+      if (match) {
+        flushPlain(i);
+        tokens.push({ kind: 'link', value: match[0] });
+        i += match[0].length;
+        plainStart = i;
+        continue;
+      }
+    }
+
     if (text.startsWith('**', i)) {
       const close = text.indexOf('**', i + 2);
       if (close !== -1) {
@@ -214,6 +226,15 @@ function renderInline(text, keyPrefix = '', searchQuery = '', getSearchMatchInde
       <em key={key} style={{ fontStyle: 'italic' }}>
         {renderSearchHighlights(p.value, searchQuery, `${key}-`, getSearchMatchIndex, activeSearchMatchIndex)}
       </em>
+    );
+    if (p.kind === 'link') return (
+      <a
+        key={key}
+        href={p.value}
+        target="_blank"
+        rel="noopener noreferrer"
+        style={{ color: '#C4644A', textDecoration: 'underline' }}
+      >{renderSearchHighlights(p.value, searchQuery, `${key}-`, getSearchMatchIndex, activeSearchMatchIndex)}</a>
     );
     if (p.kind === 'math') return <MathNode key={key} value={p.value} displayMode={p.displayMode} />;
     if (p.kind === 'ref') return (

@@ -4,6 +4,7 @@ import {
   getRecruitAgent,
   installRecruitAgent,
 } from './api.js';
+import { RichText } from './RichText.jsx';
 
 const UI_FONT = '-apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif';
 const MONO = '"JetBrains Mono", ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace';
@@ -390,8 +391,8 @@ function Detail({ entry, detail, loading, error, busy, onInstall, onBack, onRelo
           {detail && (
             <>
               <Section label="About">
-                <div style={{ fontSize: 13.5, color: '#3A352E', lineHeight: 1.65, whiteSpace: 'pre-wrap' }}>
-                  {detail.agent_body || manifest?.description || entry.description}
+                <div style={{ fontSize: 13.5, color: '#3A352E', lineHeight: 1.65 }}>
+                  <RichText text={detail.agent_body || manifest?.description || entry.description} />
                 </div>
               </Section>
 
@@ -412,11 +413,16 @@ function Detail({ entry, detail, loading, error, busy, onInstall, onBack, onRelo
               {manifest?.upstream?.repo_url && (
                 <Section label="Based on">
                   <div style={{ fontSize: 13, color: '#1C1A17', lineHeight: 1.5 }}>
-                    <code style={{
-                      fontFamily: MONO, fontSize: 12, color: '#5C544B',
-                      background: '#F0EAD8', padding: '2px 7px', borderRadius: 4,
-                      wordBreak: 'break-all',
-                    }}>{manifest.upstream.repo_url}</code>
+                    <a
+                      href={manifest.upstream.repo_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      style={{
+                        fontFamily: MONO, fontSize: 12, color: '#5C544B',
+                        background: '#F0EAD8', padding: '2px 7px', borderRadius: 4,
+                        wordBreak: 'break-all', textDecoration: 'none',
+                      }}
+                    >{manifest.upstream.repo_url}</a>
                     {manifest.upstream.commit && (
                       <span style={{ color: '#807972', marginLeft: 8, fontSize: 12 }}>
                         @ {manifest.upstream.commit.slice(0, 8)}
@@ -431,18 +437,8 @@ function Detail({ entry, detail, loading, error, busy, onInstall, onBack, onRelo
                 </Section>
               )}
 
-              {(manifest?.source_type || manifest?.upstream || manifest?.payload) && (
-                <Section label="Source payload">
-                  <div style={{ fontSize: 12.5, color: '#5C544B', lineHeight: 1.6 }}>
-                    On install, the repo payload is copied into <code style={{
-                      fontFamily: MONO, fontSize: 11.5,
-                    }}>~/.crew44/agents/agent-&lt;id&gt;/source/</code> so the runtime can read INSTRUCTIONS.md, declared skills, and other reference files locally.
-                  </div>
-                </Section>
-              )}
-
               {runtimeName && (
-                <Section label="Designed for">
+                <Section label="Recommended runtime">
                   <div style={{ fontSize: 13, color: '#1C1A17' }}>{runtimeName}</div>
                 </Section>
               )}
