@@ -1,0 +1,81 @@
+appId: com.crew44.desktop
+productName: Crew44
+copyright: Copyright © 2026 Crew44
+asar: true
+directories:
+  output: release
+  buildResources: electron/build
+files:
+  - package.json
+  - electron/**/*
+  - dist/**/*
+  - "!**/.DS_Store"
+  - "!**/*.map"
+extraResources:
+  - from: bin/
+    to: bin/
+    filter:
+      - crew44-daemon*
+publish:
+  provider: github
+  owner: getcrew44
+  repo: crew44
+  releaseType: release
+mac:
+  category: public.app-category.developer-tools
+  icon: electron/assets/crew44.icns
+  target:
+    - dmg
+    - zip
+  artifactName: Crew44-${version}-mac-${arch}.${ext}
+  hardenedRuntime: true
+  notarize: true
+  gatekeeperAssess: false
+  strictVerify: false
+  entitlements: electron/build/entitlements.mac.plist
+  entitlementsInherit: electron/build/entitlements.mac.plist
+  electronLanguages:
+    - en
+    - en_GB
+    - zh_CN
+    - zh_TW
+dmg:
+  artifactName: Crew44-${version}-mac-${arch}.${ext}
+  background: background.png
+  icon: electron/assets/crew44.icns
+  title: "${productName} ${version}"
+  iconSize: 96
+  iconTextSize: 14
+  window:
+    x: 160
+    y: 120
+    width: 793
+    height: 496
+  contents:
+    - x: 220
+      y: 296
+      type: file
+    - x: 573
+      y: 296
+      type: link
+      path: /Applications
+win:
+  icon: electron/assets/crew44.ico
+  artifactName: Crew44-Setup-${version}-${arch}.${ext}
+  target:
+    - target: nsis
+      arch:
+        - x64
+        - arm64
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  shortcutName: Crew44
+linux:
+  category: Development
+  artifactName: Crew44-${version}-linux-${arch}.${ext}
+  target:
+    - AppImage
+    - deb
+npmRebuild: false

@@ -8,10 +8,15 @@ const path = require('path');
 
 const repoRoot = path.resolve(__dirname, '..', '..');
 const target = process.argv[2];
+const targetArch = process.argv[3];
 const goosByTarget = { mac: 'darwin', win: 'windows', linux: 'linux' };
 const goos = target ? goosByTarget[target] : null;
 if (target && !goos) {
   console.error(`Unknown target "${target}". Expected one of: mac, win, linux.`);
+  process.exit(1);
+}
+if (targetArch && !['amd64', 'arm64'].includes(targetArch)) {
+  console.error(`Unknown GOARCH "${targetArch}". Expected one of: amd64, arm64.`);
   process.exit(1);
 }
 
@@ -26,7 +31,7 @@ fs.mkdirSync(outDir, { recursive: true });
 const env = { ...process.env };
 if (goos) {
   env.GOOS = goos;
-  env.GOARCH = process.env.GOARCH || 'amd64';
+  env.GOARCH = targetArch || process.env.GOARCH || 'amd64';
   env.CGO_ENABLED = '0';
 }
 

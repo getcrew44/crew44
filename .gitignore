@@ -71,3 +71,6 @@ docs/
 
 # Local scratch
 /tmp/
+
+# Local signing / notarization credentials
+/electron/cred/
