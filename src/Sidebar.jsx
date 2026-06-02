@@ -770,6 +770,11 @@ export default function Sidebar({ projects, currentChatId, route, setRoute, onPi
           onClick={() => setRoute('agents')}
           testId="nav-agents"
         />
+        <NavItem icon="recruit" label="Recruit"
+          active={route === 'recruit'}
+          onClick={() => setRoute('recruit')}
+          testId="nav-recruit"
+        />
         <NavItem icon="phone" label={hasMobileDevice ? 'Manage Mobile' : 'Pair Mobile'} active={false} onClick={onPairMobile} testId="nav-pair-mobile" />
         <NavItem icon="auto"   label="Auto optimization" active={route === 'auto'}   onClick={() => setRoute('auto')} testId="nav-auto" />
       </div>

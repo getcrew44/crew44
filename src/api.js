@@ -304,3 +304,18 @@ export async function getOptimizerScan(id) {
 export async function purgeOptimizerScans() {
   return rpc.call('optimizer.scans.purge');
 }
+
+// ---------- Recruit ----------
+
+export async function listRecruitAgents() {
+  const data = await rpc.call('recruit.agents.list');
+  return data.items || [];
+}
+
+export async function getRecruitAgent(id) {
+  return rpc.call('recruit.agents.get', { id });
+}
+
+export async function installRecruitAgent(id) {
+  return rpc.call('recruit.agents.install', { id });
+}

@@ -152,8 +152,18 @@ func (s *Store) ListAgents() ([]model.AgentConfig, error) {
 			continue
 		}
 		var agent model.AgentConfig
-		if err := readJSON(filepath.Join(base, entry.Name(), "config.json"), &agent); err != nil {
-			return nil, err
+		configPath := filepath.Join(base, entry.Name(), "config.json")
+		if err := readJSON(configPath, &agent); err != nil {
+			// An agent dir without a readable config.json is an
+			// incomplete or interrupted install (e.g. a crash during
+			// CommitAgentInstall before the new config landed). Skip it
+			// rather than failing the entire listing — one bad dir must
+			// not hide every other agent from the UI.
+			if errors.Is(err, os.ErrNotExist) {
+				continue
+			}
+			fmt.Fprintf(os.Stderr, "store: skipping agent dir %q with unreadable config: %v\n", entry.Name(), err)
+			continue
 		}
 		agents = append(agents, agent)
 	}
@@ -186,6 +196,9 @@ func (s *Store) SaveAgent(agent model.AgentConfig) error {
 func (s *Store) DeleteAgent(id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	// RemoveAll under the agent dir also clears recruited-skills.json,
+	// source/, and source.prev/, so the source-tree cleanup helpers
+	// don't need a separate call from DeleteAgent.
 	if err := os.RemoveAll(filepath.Join(s.root, "agents", "agent-"+id)); err != nil {
 		return err
 	}
@@ -870,7 +883,8 @@ func upsertChatRecord(records []model.ChatRecord, next model.ChatRecord) []model
 }
 
 func writeJSON(path string, value any) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
 	data, err := json.MarshalIndent(value, "", "  ")
@@ -878,7 +892,34 @@ func writeJSON(path string, value any) error {
 		return err
 	}
 	data = append(data, '\n')
-	return os.WriteFile(path, data, 0o644)
+	// Write to a sibling temp file then rename so a crash mid-write can
+	// never leave a truncated config.json behind. A partial config bricks
+	// the agent dir (ListAgents would fail to unmarshal it); the rename is
+	// atomic on the same filesystem, so readers see either the old file or
+	// the complete new one.
+	tmp, err := os.CreateTemp(dir, ".tmp-"+filepath.Base(path)+"-*")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		os.Remove(tmpName)
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		os.Remove(tmpName)
+		return err
+	}
+	if err := os.Chmod(tmpName, 0o644); err != nil {
+		os.Remove(tmpName)
+		return err
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		os.Remove(tmpName)
+		return err
+	}
+	return nil
 }
 
 func readJSON(path string, out any) error {

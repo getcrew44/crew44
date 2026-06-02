@@ -21,28 +21,66 @@ type RuntimeRecord struct {
 }
 
 type AgentConfig struct {
-	ID          string    `json:"id"`
-	Name        string    `json:"name"`
-	Description string    `json:"description"`
-	Instruction string    `json:"instruction"`
-	RuntimeID   string    `json:"runtime_id"`
-	Model       string    `json:"model"`
-	SkillIDs    []string  `json:"skill_ids"`
-	PresetID    string    `json:"preset_id,omitempty"`
-	PresetKey   string    `json:"preset_key,omitempty"`
-	ArchivedAt  time.Time `json:"archived_at,omitempty"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	ID          string       `json:"id"`
+	Name        string       `json:"name"`
+	Description string       `json:"description"`
+	Instruction string       `json:"instruction"`
+	RuntimeID   string       `json:"runtime_id"`
+	Model       string       `json:"model"`
+	SkillIDs    []string     `json:"skill_ids"`
+	PresetID    string       `json:"preset_id,omitempty"`
+	PresetKey   string       `json:"preset_key,omitempty"`
+	Source      *AgentSource `json:"source,omitempty"`
+	ArchivedAt  time.Time    `json:"archived_at,omitempty"`
+	CreatedAt   time.Time    `json:"created_at"`
+	UpdatedAt   time.Time    `json:"updated_at"`
+}
+
+// AgentSource identifies the upstream registry entry a recruited agent
+// was installed from. Idempotency key for re-install is RepoURL.
+//
+// SourceDir is the absolute path to the installed repo payload under
+// ~/.crew44/agents/agent-<id>/source. Runtime injection resolves
+// agent-private recruited skill paths against this directory and
+// exposes it to runtimes as CREW44_AGENT_SOURCE_DIR.
+type AgentSource struct {
+	RegistryID  string    `json:"registry_id,omitempty"`
+	RepoURL     string    `json:"repo_url"`
+	Version     string    `json:"version"`
+	InstalledAt time.Time `json:"installed_at"`
+	SourceDir   string    `json:"source_dir,omitempty"`
+}
+
+// RecruitedSkill is one entry in an installed agent's private
+// recruited-skills.json. It indexes the manifest-declared agent-private
+// skills and points each one at a file inside this same installed
+// agent's source/ directory. Recruited skills are not promoted to
+// global SkillRecord entries; the SourcePath field is the authoritative
+// SKILL.md path on disk.
+type RecruitedSkill struct {
+	Name       string `json:"name"`
+	Path       string `json:"path"`
+	SourcePath string `json:"source_path"`
+	Version    string `json:"version,omitempty"`
 }
 
 type SkillRecord struct {
-	ID         string    `json:"id"`
-	Name       string    `json:"name"`
-	Path       string    `json:"path"`
-	PresetID   string    `json:"preset_id,omitempty"`
-	PresetKey  string    `json:"preset_key,omitempty"`
-	UpdatedAt  time.Time `json:"updated_at"`
-	ArchivedAt time.Time `json:"archived_at,omitempty"`
+	ID         string       `json:"id"`
+	Name       string       `json:"name"`
+	Path       string       `json:"path"`
+	PresetID   string       `json:"preset_id,omitempty"`
+	PresetKey  string       `json:"preset_key,omitempty"`
+	Source     *SkillSource `json:"source,omitempty"`
+	UpdatedAt  time.Time    `json:"updated_at"`
+	ArchivedAt time.Time    `json:"archived_at,omitempty"`
+}
+
+// SkillSource identifies the recruited agent repo and in-repo path a
+// recruited skill came from. Dedupe key on install is (RepoURL, Path).
+type SkillSource struct {
+	RepoURL string `json:"repo_url"`
+	Path    string `json:"path"`
+	Version string `json:"version"`
 }
 
 // PresetMapping records the user copies created from a preset definition.
@@ -69,11 +107,11 @@ type ProjectIndexEntry struct {
 }
 
 type ProjectRecord struct {
-	ID           string    `json:"id"`
-	Name         string    `json:"name"`
-	Workdir      string    `json:"workdir"`
-	MainAgentID  string    `json:"main_agent_id"`
-	SystemHidden bool      `json:"system_hidden,omitempty"`
+	ID           string `json:"id"`
+	Name         string `json:"name"`
+	Workdir      string `json:"workdir"`
+	MainAgentID  string `json:"main_agent_id"`
+	SystemHidden bool   `json:"system_hidden,omitempty"`
 	// UseWorktreeDefault is the default state of the New Task worktree toggle
 	// for chats created under this project. Ignored for non-git workdirs.
 	UseWorktreeDefault bool      `json:"use_worktree_default,omitempty"`
@@ -119,9 +157,9 @@ type PendingSteerState struct {
 }
 
 type ChatRecord struct {
-	ID                     string             `json:"id"`
-	ProjectID              string             `json:"project_id"`
-	Title                  string             `json:"title"`
+	ID        string `json:"id"`
+	ProjectID string `json:"project_id"`
+	Title     string `json:"title"`
 	// TitleSetByUser is true when the user explicitly renamed this chat.
 	// Locks the title against automatic summarization so a manual rename
 	// always wins over the LLM-derived title.
@@ -136,10 +174,10 @@ type ChatRecord struct {
 	Stream                 ChatStreamState    `json:"stream"`
 	// Worktree is set when the chat runs in an isolated git worktree. Nil
 	// chats (legacy or worktree-disabled) fall back to ProjectRecord.Workdir.
-	Worktree               *WorktreeBinding   `json:"worktree,omitempty"`
-	CreatedAt              time.Time          `json:"created_at"`
-	UpdatedAt              time.Time          `json:"updated_at"`
-	ArchivedAt             time.Time          `json:"archived_at,omitempty"`
+	Worktree   *WorktreeBinding `json:"worktree,omitempty"`
+	CreatedAt  time.Time        `json:"created_at"`
+	UpdatedAt  time.Time        `json:"updated_at"`
+	ArchivedAt time.Time        `json:"archived_at,omitempty"`
 }
 
 type EventType string

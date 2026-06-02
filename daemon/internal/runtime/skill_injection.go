@@ -25,6 +25,24 @@ type preparedSkillEnvironment struct {
 }
 
 func prepareSkillEnvironment(request RunRequest) (preparedSkillEnvironment, error) {
+	prepared, err := prepareSkillEnvironmentCore(request)
+	if err != nil {
+		return prepared, err
+	}
+	if dir := strings.TrimSpace(request.AgentSourceDir); dir != "" {
+		if prepared.Env == nil {
+			prepared.Env = map[string]string{}
+		}
+		// CREW44_AGENT_SOURCE_DIR points at this agent's installed
+		// repo payload (model.AgentSource.SourceDir). Runtime prompts
+		// use it to resolve upstream/, docs/, and other reference
+		// material the recruit installer copied alongside SKILL.md.
+		prepared.Env["CREW44_AGENT_SOURCE_DIR"] = dir
+	}
+	return prepared, nil
+}
+
+func prepareSkillEnvironmentCore(request RunRequest) (preparedSkillEnvironment, error) {
 	// Callers that want neither skill injection nor runtime isolation (for
 	// example the chat title summarizer, which runs in parallel with the
 	// main chat run and must not race it on the shared claude-config/skills

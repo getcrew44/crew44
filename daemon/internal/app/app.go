@@ -18,6 +18,7 @@ import (
 	"github.com/getcrew44/crew44/daemon/internal/model"
 	"github.com/getcrew44/crew44/daemon/internal/optimizer"
 	"github.com/getcrew44/crew44/daemon/internal/presets"
+	"github.com/getcrew44/crew44/daemon/internal/recruit"
 	"github.com/getcrew44/crew44/daemon/internal/runtime"
 	"github.com/getcrew44/crew44/daemon/internal/store"
 )
@@ -27,6 +28,10 @@ type Config struct {
 	RuntimeScanDir string
 	Scanner        runtime.Scanner
 	Engine         runtime.Engine
+	// Recruit overrides the default registry client. Nil = use production
+	// defaults (raw.githubusercontent.com / getcrew44/agent-registry).
+	// Tests inject an httptest-backed client through this field.
+	Recruit *recruit.Client
 }
 
 type App struct {
@@ -46,6 +51,10 @@ type App struct {
 	// Optimizer subsystem; wired in initOptimizer after bootstrap.
 	optimizer          *optimizer.Manager
 	optimizerScheduler *optimizer.Scheduler
+
+	// recruit fetches the agent registry and per-repo manifests. Lazily
+	// initialized to production defaults if Config.Recruit is nil.
+	recruit *recruit.Client
 }
 
 func New(cfg Config) (*App, error) {
@@ -56,6 +65,10 @@ func New(cfg Config) (*App, error) {
 	if err := os.MkdirAll(cfg.RuntimeScanDir, 0o755); err != nil {
 		return nil, err
 	}
+	recruitClient := cfg.Recruit
+	if recruitClient == nil {
+		recruitClient = recruit.NewClient(recruit.Config{})
+	}
 	app := &App{
 		store:          st,
 		runtimeScanDir: cfg.RuntimeScanDir,
@@ -63,6 +76,7 @@ func New(cfg Config) (*App, error) {
 		engine:         firstEngine(cfg.Engine),
 		broker:         broker.New[model.Event](),
 		runs:           make(map[string]*chatRunController),
+		recruit:        recruitClient,
 	}
 	if err := app.bootstrapDefaultState(); err != nil {
 		return nil, err
@@ -726,6 +740,40 @@ func (a *App) resolveAgentSkills(skillIDs []string) ([]runtime.SkillContext, err
 			ctx.Content = "# " + record.Name + "\n"
 		}
 		out = append(out, ctx)
+	}
+	return out, nil
+}
+
+// resolveRunSkills returns the full set of SkillContexts a chat run
+// should inject into the runtime: global skills referenced by
+// AgentConfig.SkillIDs plus the agent-private recruited skills under
+// the installed agent's recruited-skills.json. The merged slice
+// preserves SkillIDs order followed by recruited entries in manifest
+// order so the runtime's "first match wins" behavior stays predictable.
+//
+// A recruited skill whose SourcePath is missing on disk is a hard error:
+// the install rotation guarantees source/ is intact, so a missing file
+// after a successful install means the user (or some other process)
+// damaged the installed payload.
+func (a *App) resolveRunSkills(agent model.AgentConfig) ([]runtime.SkillContext, error) {
+	out, err := a.resolveAgentSkills(agent.SkillIDs)
+	if err != nil {
+		return nil, err
+	}
+	recruited, err := a.store.LoadRecruitedSkills(agent.ID)
+	if err != nil {
+		return nil, err
+	}
+	for _, entry := range recruited {
+		body, err := os.ReadFile(entry.SourcePath)
+		if err != nil {
+			return nil, fmt.Errorf("installed agent source is incomplete: %s: %w", entry.SourcePath, err)
+		}
+		out = append(out, runtime.SkillContext{
+			ID:      "recruited:" + entry.Path,
+			Name:    entry.Name,
+			Content: string(body),
+		})
 	}
 	return out, nil
 }
