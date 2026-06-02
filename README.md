@@ -163,8 +163,8 @@ See the JSON-RPC method list and skill-injection walkthrough in [`docs/`](docs/)
 
 ## License
 
-[MIT](LICENSE) © 2026 Mindive Labs
+[MIT](LICENSE) © 2026
 
 <div align="center">
-<sub>Built for developers who'd rather lead a crew than babysit a single agent.</sub>
+<sub>Orchestrating teams of specialist agents in one workspace.</sub>
 </div>
