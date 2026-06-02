@@ -2,8 +2,6 @@ name: Desktop Release
 
 on:
   push:
-    branches:
-      - electron-builder-migration
     tags:
       - "v*.*.*"
   workflow_dispatch:
@@ -55,12 +53,9 @@ jobs:
         run: |
           set -euo pipefail
 
-          if [[ "${GITHUB_EVENT_NAME}" == "push" && "${GITHUB_REF_TYPE}" == "tag" ]]; then
+          if [[ "${GITHUB_EVENT_NAME}" == "push" ]]; then
             platform="all"
             should_publish="true"
-          elif [[ "${GITHUB_EVENT_NAME}" == "push" ]]; then
-            platform="all"
-            should_publish="false"
           else
             platform="${{ github.event.inputs.platform }}"
             if [[ "${{ github.event.inputs.publish }}" == "true" ]]; then
