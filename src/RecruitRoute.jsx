@@ -52,6 +52,14 @@ function DownloadIcon({ size = 12 }) {
   );
 }
 
+function GithubIcon({ size = 12 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="currentColor">
+      <path d="M8 .2a8 8 0 00-2.53 15.59c.4.07.55-.17.55-.38l-.01-1.34c-2.23.49-2.7-1.07-2.7-1.07-.36-.93-.89-1.18-.89-1.18-.73-.5.05-.49.05-.49.8.06 1.23.83 1.23.83.72 1.23 1.88.87 2.34.67.07-.52.28-.87.5-1.07-1.78-.2-3.64-.89-3.64-3.96 0-.87.31-1.59.83-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.22 2.2.82a7.6 7.6 0 014 0c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.52.56.83 1.28.83 2.15 0 3.08-1.87 3.76-3.65 3.96.29.25.54.73.54 1.48l-.01 2.2c0 .21.15.46.55.38A8 8 0 008 .2z"/>
+    </svg>
+  );
+}
+
 function CheckIcon({ size = 12 }) {
   return (
     <svg width={size} height={size} viewBox="0 0 12 12" fill="none">
@@ -120,6 +128,36 @@ function InstallButton({ installed, busy, onClick, label = 'Add to crew' }) {
   );
 }
 
+// Icon-only link to the source repo. Kept out of the metadata stats line so
+// it reads as an action, not a stat. Stops propagation so it doesn't open the
+// detail view.
+function GithubLinkButton({ url, size = 28 }) {
+  const [hover, setHover] = React.useState(false);
+  return (
+    <a
+      href={url}
+      target="_blank"
+      rel="noopener noreferrer"
+      title="View source on GitHub"
+      aria-label="View source on GitHub"
+      onClick={(e) => e.stopPropagation()}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      data-testid="recruit-row-github"
+      style={{
+        width: size, height: size, borderRadius: 7,
+        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+        border: '1px solid ' + (hover ? '#D8CFB8' : '#ECE6D5'),
+        background: hover ? '#F4EEDD' : 'transparent',
+        color: hover ? '#1C1A17' : '#807972',
+        transition: 'background 0.12s, border-color 0.12s, color 0.12s',
+      }}
+    >
+      <GithubIcon size={15}/>
+    </a>
+  );
+}
+
 function Row({ entry, busy, onOpen, onInstall }) {
   const [hover, setHover] = React.useState(false);
   return (
@@ -181,7 +219,10 @@ function Row({ entry, busy, onOpen, onInstall }) {
           )}
         </div>
       </div>
-      <InstallButton installed={entry.installed} busy={busy} onClick={onInstall}/>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        {entry.repo_url && <GithubLinkButton url={entry.repo_url}/>}
+        <InstallButton installed={entry.installed} busy={busy} onClick={onInstall}/>
+      </div>
     </div>
   );
 }
@@ -302,12 +343,6 @@ function Browse({ items, loading, error, busyId, onReload, onOpen, onInstall, qu
             )
           }
         </div>
-
-        {!loading && !error && (
-          <div style={{ marginTop: 16, fontSize: 12, color: '#A89F92', textAlign: 'center' }}>
-            {filtered.length} of {items.length} agents
-          </div>
-        )}
       </div>
     </div>
   );

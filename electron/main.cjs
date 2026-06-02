@@ -231,6 +231,30 @@ function createWindow() {
     mainWindow.show();
   });
 
+  // Open external links (target="_blank") in the user's default browser
+  // instead of a built-in Electron window — so a session already logged in
+  // to GitHub etc. is reused. Only http(s) is allowed out.
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (/^https?:\/\//i.test(url)) {
+      shell.openExternal(url);
+    }
+    return { action: 'deny' };
+  });
+
+  // Guard against in-place navigation away from the app (e.g. a plain link
+  // with no target): route external origins to the default browser and keep
+  // the app put. Same-origin navigation (incl. the dev server) is untouched.
+  mainWindow.webContents.on('will-navigate', (event, url) => {
+    let appOrigin = null;
+    try { appOrigin = new URL(mainWindow.webContents.getURL()).origin; } catch {}
+    let target = null;
+    try { target = new URL(url); } catch {}
+    if (target && /^https?:$/i.test(target.protocol) && target.origin !== appOrigin) {
+      event.preventDefault();
+      shell.openExternal(url);
+    }
+  });
+
   if (isDev) {
     mainWindow.loadURL(process.env.CREW44_RENDERER_URL);
   } else {
