@@ -1,0 +1,262 @@
+name: Desktop Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to build, for example v0.6.2"
+        required: true
+        type: string
+      platform:
+        description: "Desktop platform to build"
+        required: true
+        default: all
+        type: choice
+        options:
+          - all
+          - macos
+          - linux
+          - windows
+      publish:
+        description: "Upload artifacts to the GitHub Release"
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  contents: write
+  packages: read
+
+concurrency:
+  group: desktop-release-${{ github.event_name == 'push' && github.ref_name || github.event.inputs.tag }}
+  cancel-in-progress: true
+
+jobs:
+  release-meta:
+    name: Resolve release metadata
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.meta.outputs.tag }}
+      version: ${{ steps.meta.outputs.version }}
+      platform: ${{ steps.meta.outputs.platform }}
+      should_publish: ${{ steps.meta.outputs.should_publish }}
+    steps:
+      - name: Resolve tag and version
+        id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ "${GITHUB_EVENT_NAME}" == "push" ]]; then
+            tag="${GITHUB_REF_NAME}"
+            platform="all"
+            should_publish="true"
+          else
+            tag="${{ github.event.inputs.tag }}"
+            platform="${{ github.event.inputs.platform }}"
+            if [[ "${{ github.event.inputs.publish }}" == "true" ]]; then
+              should_publish="true"
+            else
+              should_publish="false"
+            fi
+          fi
+
+          if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::Release tag must look like vX.Y.Z or vX.Y.Z-suffix; got '$tag'."
+            exit 1
+          fi
+
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "version=${tag#v}" >> "$GITHUB_OUTPUT"
+          echo "platform=$platform" >> "$GITHUB_OUTPUT"
+          echo "should_publish=$should_publish" >> "$GITHUB_OUTPUT"
+
+  create-release:
+    name: Create GitHub release
+    needs: release-meta
+    if: needs.release-meta.outputs.should_publish == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ensure GitHub release exists
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${{ needs.release-meta.outputs.tag }}"
+          if gh release view "$tag" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+            echo "Release $tag already exists."
+          else
+            gh release create "$tag" --repo "${{ github.repository }}" --title "$tag" --generate-notes
+          fi
+
+  publish-macos:
+    name: Publish macOS (${{ matrix.arch }})
+    needs: [release-meta, create-release]
+    if: |
+      always() &&
+      (needs.create-release.result == 'success' || needs.create-release.result == 'skipped') &&
+      (needs.release-meta.outputs.platform == 'all' || needs.release-meta.outputs.platform == 'macos')
+    runs-on: macos-15
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x64, arm64]
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          ref: ${{ needs.release-meta.outputs.tag }}
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: daemon/go.mod
+          cache-dependency-path: daemon/go.sum
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Set desktop package version
+        run: node electron/scripts/set-desktop-version.cjs "${{ needs.release-meta.outputs.version }}"
+
+      - name: Build desktop release
+        env:
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+        run: npm run build:desktop -- --mac --${{ matrix.arch }} --publish never
+
+      - name: Upload desktop artifacts to release
+        if: needs.release-meta.outputs.should_publish == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          files=()
+          while IFS= read -r -d '' f; do
+            files+=("$f")
+          done < <(find release -maxdepth 1 -type f -print0 | sort -z)
+          if (( ${#files[@]} == 0 )); then
+            echo "::error::No release artifacts found in release"
+            exit 1
+          fi
+          gh release upload "${{ needs.release-meta.outputs.tag }}" "${files[@]}" --clobber --repo "${{ github.repository }}"
+
+  publish-linux:
+    name: Publish Linux
+    needs: [release-meta, create-release]
+    if: |
+      always() &&
+      (needs.create-release.result == 'success' || needs.create-release.result == 'skipped') &&
+      (needs.release-meta.outputs.platform == 'all' || needs.release-meta.outputs.platform == 'linux')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          ref: ${{ needs.release-meta.outputs.tag }}
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: daemon/go.mod
+          cache-dependency-path: daemon/go.sum
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Set desktop package version
+        run: node electron/scripts/set-desktop-version.cjs "${{ needs.release-meta.outputs.version }}"
+
+      - name: Build desktop release
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+        run: npm run build:desktop -- --linux --x64 --publish never
+
+      - name: Upload desktop artifacts to release
+        if: needs.release-meta.outputs.should_publish == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          files=()
+          while IFS= read -r -d '' f; do
+            files+=("$f")
+          done < <(find release -maxdepth 1 -type f -print0 | sort -z)
+          if (( ${#files[@]} == 0 )); then
+            echo "::error::No release artifacts found in release"
+            exit 1
+          fi
+          gh release upload "${{ needs.release-meta.outputs.tag }}" "${files[@]}" --clobber --repo "${{ github.repository }}"
+
+  publish-windows:
+    name: Publish Windows (${{ matrix.arch }})
+    needs: [release-meta, create-release]
+    if: |
+      always() &&
+      (needs.create-release.result == 'success' || needs.create-release.result == 'skipped') &&
+      (needs.release-meta.outputs.platform == 'all' || needs.release-meta.outputs.platform == 'windows')
+    runs-on: windows-2025-vs2026
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x64, arm64]
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          ref: ${{ needs.release-meta.outputs.tag }}
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: daemon/go.mod
+          cache-dependency-path: daemon/go.sum
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Set desktop package version
+        run: node electron/scripts/set-desktop-version.cjs "${{ needs.release-meta.outputs.version }}"
+
+      - name: Build desktop release
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+        run: npm run build:desktop -- --win --${{ matrix.arch }} --publish never
+
+      - name: Upload desktop artifacts to release
+        if: needs.release-meta.outputs.should_publish == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          files=()
+          while IFS= read -r -d '' f; do
+            files+=("$f")
+          done < <(find release -maxdepth 1 -type f -print0 | sort -z)
+          if (( ${#files[@]} == 0 )); then
+            echo "::error::No release artifacts found in release"
+            exit 1
+          fi
+          gh release upload "${{ needs.release-meta.outputs.tag }}" "${files[@]}" --clobber --repo "${{ github.repository }}"

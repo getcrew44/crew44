@@ -18,10 +18,11 @@
     "build:daemon:mac": "node electron/scripts/build-daemon.cjs mac",
     "build:daemon:win": "node electron/scripts/build-daemon.cjs win",
     "build:daemon:linux": "node electron/scripts/build-daemon.cjs linux",
-    "dist:mac": "npm run build:daemon:mac && vite build && electron-builder --dir --mac -c.mac.identity=null && node electron/scripts/dist-mac.cjs",
-    "dist:mac:unsigned": "npm run build:daemon:mac && vite build && electron-builder --dir --mac -c.mac.identity=null && node electron/scripts/dist-mac.cjs --skip-sign",
-    "dist:win": "npm run build:daemon:win && vite build && electron-builder --win",
-    "dist:linux": "npm run build:daemon:linux && vite build && electron-builder --linux",
+    "build:desktop": "node electron/scripts/build-desktop.cjs",
+    "dist:mac": "npm run build:desktop -- --mac --arm64 --publish never",
+    "dist:mac:unsigned": "npm run build:desktop -- --mac --arm64 --publish never -c.mac.identity=null -c.mac.notarize=false -c.mac.hardenedRuntime=false",
+    "dist:win": "npm run build:desktop -- --win --x64 --publish never",
+    "dist:linux": "npm run build:desktop -- --linux --x64 --publish never",
     "web:dev": "node daemon/scripts/web-dev.cjs",
     "mobile:start": "npm --workspace=@crew44/mobile run start --",
     "mobile:android": "npm --workspace=@crew44/mobile run android --",
@@ -37,65 +38,10 @@
     "test:mobile-pwa": "npm --workspace=@crew44/mobile-pwa run test",
     "test:web": "vitest run",
     "test:mobile": "npm --workspace=@crew44/mobile run test",
-    "desktop:smoke:linux": "npm run build:daemon:linux && vite build && electron-builder --dir --linux --x64",
-    "desktop:smoke:win": "npm run build:daemon:win && vite build && electron-builder --dir --win --x64",
+    "desktop:smoke:linux": "npm run build:desktop -- --linux --x64 --dir --publish never",
+    "desktop:smoke:win": "npm run build:desktop -- --win --x64 --dir --publish never",
     "test": "cd daemon && go test ./... && cd .. && vitest run && npm run test:mobile-pwa && npm run test:mobile",
     "clean": "rm -rf bin dist release .electron-app crew44-server crew44-daemon"
-  },
-  "build": {
-    "appId": "com.crew44.desktop",
-    "productName": "Crew44",
-    "copyright": "Copyright © 2026 Crew44",
-    "asar": true,
-    "directories": {
-      "output": "release",
-      "buildResources": "electron/build"
-    },
-    "files": [
-      "package.json",
-      "electron/**/*",
-      "dist/**/*",
-      "!**/.DS_Store",
-      "!**/*.map"
-    ],
-    "extraResources": [
-      {
-        "from": "bin/",
-        "to": "bin/",
-        "filter": [
-          "crew44-daemon*"
-        ]
-      }
-    ],
-    "mac": {
-      "category": "public.app-category.developer-tools",
-      "icon": "electron/assets/crew44.icns"
-    },
-    "win": {
-      "icon": "electron/assets/crew44.ico",
-      "target": [
-        {
-          "target": "nsis",
-          "arch": [
-            "x64"
-          ]
-        }
-      ]
-    },
-    "nsis": {
-      "oneClick": false,
-      "perMachine": false,
-      "allowToChangeInstallationDirectory": true,
-      "artifactName": "${productName}-Setup-${version}-${arch}.${ext}",
-      "shortcutName": "Crew44"
-    },
-    "linux": {
-      "category": "Development",
-      "target": [
-        "AppImage",
-        "deb"
-      ]
-    }
   },
   "dependencies": {
     "katex": "^0.17.0",
