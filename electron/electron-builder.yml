@@ -30,8 +30,15 @@ mac:
   artifactName: Crew44-${version}-mac-${arch}.${ext}
   hardenedRuntime: true
   notarize: true
+  gatekeeperAssess: false
+  strictVerify: false
   entitlements: electron/build/entitlements.mac.plist
   entitlementsInherit: electron/build/entitlements.mac.plist
+  electronLanguages:
+    - en
+    - en_GB
+    - zh_CN
+    - zh_TW
 dmg:
   artifactName: Crew44-${version}-mac-${arch}.${ext}
   background: background.png
