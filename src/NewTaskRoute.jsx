@@ -714,10 +714,17 @@ export default function NewTaskRoute({ projects, agents, skills = [], onNewTask,
             />
             </div>
           </div>
+          {/* Two flex groups: the left chips wrap among themselves when the
+              view is narrow, while the send controls stay pinned to the right
+              instead of dropping to a stray second line. */}
           <div style={{
             display: 'flex', alignItems: 'center', gap: 8, marginTop: 8,
-            paddingTop: 12, borderTop: '1px solid #ECE6D5', flexWrap: 'wrap',
+            paddingTop: 12, borderTop: '1px solid #ECE6D5',
           }}>
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
+              flex: 1, minWidth: 0,
+            }}>
             {canAttach && (
               <button
                 type="button"
@@ -768,23 +775,26 @@ export default function NewTaskRoute({ projects, agents, skills = [], onNewTask,
             )}
 
             <GoalModeChip enabled={goalMode} onToggle={() => setGoalMode(v => !v)} />
+            </div>
 
-            <div style={{ flex: 1 }} />
-            <SendShortcutMenu mode={sendShortcutMode} onChange={setSendShortcutMode} direction="down" />
-            <button
-              data-testid="start-crew-button"
-              onClick={startCrew}
-              disabled={!canStart}
-              style={{
-                ...chip,
-                background: canStart ? '#1C1A17' : '#F0EAD8',
-                color: canStart ? '#FCFBF7' : '#A89F92',
-                border: '1px solid ' + (canStart ? '#1C1A17' : '#E6DFCC'),
-                fontWeight: 500, padding: '6px 14px',
-              }}
-            >
-              {submitting ? 'Starting…' : goalMode ? 'Set goal →' : 'Start →'}
-            </button>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0, marginLeft: 'auto' }}>
+              <SendShortcutMenu mode={sendShortcutMode} onChange={setSendShortcutMode} direction="down" />
+              <button
+                data-testid="start-crew-button"
+                onClick={startCrew}
+                disabled={!canStart}
+                style={{
+                  ...chip,
+                  background: canStart ? '#1C1A17' : '#F0EAD8',
+                  color: canStart ? '#FCFBF7' : '#A89F92',
+                  border: '1px solid ' + (canStart ? '#1C1A17' : '#E6DFCC'),
+                  fontWeight: 500, padding: '6px 14px',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {submitting ? 'Starting…' : goalMode ? 'Set goal →' : 'Start →'}
+              </button>
+            </div>
           </div>
           {gitInfo?.is_git_repo && useWorktree && (
             <WorktreeDetail
