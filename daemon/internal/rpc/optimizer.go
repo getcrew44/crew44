@@ -30,9 +30,9 @@ func (s *Server) optimizerScanRun(ctx context.Context, _ Peer, _ json.RawMessage
 
 func (s *Server) optimizerSuggestionsAct(_ context.Context, _ Peer, params json.RawMessage) (any, error) {
 	var body struct {
-		ID            string              `json:"id"`
-		Action        string              `json:"action"`
-		EditedPreview *optimizer.Preview  `json:"edited_preview,omitempty"`
+		ID            string             `json:"id"`
+		Action        string             `json:"action"`
+		EditedPreview *optimizer.Preview `json:"edited_preview,omitempty"`
 	}
 	if err := decodeParams(params, &body); err != nil {
 		return nil, err
