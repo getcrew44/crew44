@@ -9,6 +9,7 @@ import { dataTransferHasFiles } from './dragDrop.js';
 import { primeAudioContext } from './audio.js';
 import { textareaCaretPoint } from './textareaCaret.js';
 import { SendShortcutMenu, shouldSendFromEnterKey, useSendShortcutMode } from './sendShortcut.jsx';
+import { GoalModeChip, GoalModeDetail } from './GoalMode.jsx';
 import {
   clearComposerDraft,
   newTaskDraftChatId,
@@ -310,6 +311,9 @@ export default function NewTaskRoute({ projects, agents, skills = [], onNewTask,
   const [gitInfo, setGitInfo] = React.useState(null);
   const [useWorktree, setUseWorktree] = React.useState(false);
   const [baseRef, setBaseRef] = React.useState('');
+  // Goal mode: the lead scopes the goal with clarifying questions, locks
+  // verifiable criteria, and the crew iterates until every check passes.
+  const [goalMode, setGoalMode] = React.useState(false);
   // The user's standing worktree choice, carried across project switches.
   // null until seeded from the first project's saved default; after that it
   // follows explicit toggles rather than resetting to each project's default.
@@ -543,11 +547,12 @@ export default function NewTaskRoute({ projects, agents, skills = [], onNewTask,
       let chat = createdChatRef.current;
       if (!chat) {
         const wantsWorktree = Boolean(info?.is_git_repo) && useWorktree;
-        const worktreeOpts = info?.is_git_repo ? { useWorktree, baseRef: base } : {};
+        const createOpts = info?.is_git_repo ? { useWorktree, baseRef: base } : {};
+        if (goalMode) createOpts.goalMode = true;
         // Hand the daemon the pre-allocated ID so the created worktree lands on
         // the exact crew/<id8> branch we previewed above.
-        if (wantsWorktree) worktreeOpts.id = draftChatId;
-        chat = await api.createChat(projectId, titleSource, agentId, worktreeOpts);
+        if (wantsWorktree) createOpts.id = draftChatId;
+        chat = await api.createChat(projectId, titleSource, agentId, createOpts);
         createdChatRef.current = chat;
       }
       await api.postMessage(chat.id, text, chat.main_agent_id, attachments);
@@ -694,7 +699,9 @@ export default function NewTaskRoute({ projects, agents, skills = [], onNewTask,
               }}
               onDrop={handleDrop}
               disabled={submitting}
-              placeholder="Describe a task. The lead agent will plan it and assign subtasks."
+              placeholder={goalMode
+                ? 'Describe the goal. The lead agent will scope it with you, then the crew iterates until it verifies.'
+                : 'Describe a task. The lead agent will plan it and assign subtasks.'}
               rows={1}
               style={{
                 ...NEW_TASK_INPUT_TEXT_STYLE,
@@ -760,6 +767,8 @@ export default function NewTaskRoute({ projects, agents, skills = [], onNewTask,
               <WorktreeChip enabled={useWorktree} onToggle={onToggleWorktree} />
             )}
 
+            <GoalModeChip enabled={goalMode} onToggle={() => setGoalMode(v => !v)} />
+
             <div style={{ flex: 1 }} />
             <SendShortcutMenu mode={sendShortcutMode} onChange={setSendShortcutMode} direction="down" />
             <button
@@ -774,7 +783,7 @@ export default function NewTaskRoute({ projects, agents, skills = [], onNewTask,
                 fontWeight: 500, padding: '6px 14px',
               }}
             >
-              {submitting ? 'Starting…' : 'Start →'}
+              {submitting ? 'Starting…' : goalMode ? 'Set goal →' : 'Start →'}
             </button>
           </div>
           {gitInfo?.is_git_repo && useWorktree && (
@@ -785,6 +794,7 @@ export default function NewTaskRoute({ projects, agents, skills = [], onNewTask,
               onChangeBase={setBaseRef}
             />
           )}
+          {goalMode && <GoalModeDetail />}
         </div>
 
         <div style={{ marginTop: 28, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
