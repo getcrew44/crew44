@@ -31,10 +31,12 @@ type SystemPromptInput struct {
 	SummaryPath             string
 	ChatSessionDir          string // ~/.crew44/chats/chat-<id>; agents write handover scratch files here so they are scoped to this chat
 	HandoverNote            string
-	UserMemoryDir           string // ~/.crew44/memory; reader expands MEMORY.md + per-entry files
-	ProjectMemoryDir        string // ~/.crew44/projects/<id>/memory
-	LegacyUserMemoryPath    string // ~/.crew44/USER.md; used when UserMemoryDir has no MEMORY.md yet
-	LegacyProjectMemoryPath string // ~/.crew44/projects/<id>/MEMORY.md; legacy single-file fallback
+	Goal                    *model.GoalState // nil = not a goal chat; no Goal Mode section emitted
+	IsGoalLead              bool             // current agent is the chat's main agent (owns goal markers)
+	UserMemoryDir           string           // ~/.crew44/memory; reader expands MEMORY.md + per-entry files
+	ProjectMemoryDir        string           // ~/.crew44/projects/<id>/memory
+	LegacyUserMemoryPath    string           // ~/.crew44/USER.md; used when UserMemoryDir has no MEMORY.md yet
+	LegacyProjectMemoryPath string           // ~/.crew44/projects/<id>/MEMORY.md; legacy single-file fallback
 }
 
 func BuildSystemPrompt(input SystemPromptInput) string {
@@ -44,6 +46,9 @@ func BuildSystemPrompt(input SystemPromptInput) string {
 	writeSection(&b, "Agent Instructions", input.Agent.Instruction)
 	if note := strings.TrimSpace(input.HandoverNote); note != "" {
 		writeSection(&b, "Handover Task", handoverTask(note))
+	}
+	if input.Goal != nil {
+		writeSection(&b, "Goal Mode", goalModeSection(input.Goal, input.IsGoalLead))
 	}
 	if summary := summaryReference(input.SummaryPath); summary != "" {
 		writeSection(&b, "Conversation Summary", summary)

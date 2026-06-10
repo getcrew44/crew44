@@ -257,12 +257,16 @@ func (a *App) runChat(ctx context.Context, controller *chatRunController, chatID
 	currentTurnID := turnID
 	currentPrompt := prompt
 	currentHandoverNote := ""
+	var goalRun *goalRunState
 
 	for {
 		chat, err := a.store.GetChat(chatID)
 		if err != nil {
 			a.finishChatWithError(chatID, err.Error())
 			return
+		}
+		if chat.Goal != nil && goalRun == nil {
+			goalRun = &goalRunState{}
 		}
 		agent, err := a.store.GetAgent(currentAgentID)
 		if err != nil {
@@ -298,6 +302,8 @@ func (a *App) runChat(ctx context.Context, controller *chatRunController, chatID
 			SummaryPath:             a.store.SummaryPath(chatID),
 			ChatSessionDir:          a.store.ChatSessionDir(chatID),
 			HandoverNote:            currentHandoverNote,
+			Goal:                    chat.Goal,
+			IsGoalLead:              currentAgentID == chat.MainAgentID,
 			UserMemoryDir:           a.store.UserMemoryDir(),
 			ProjectMemoryDir:        a.store.ProjectMemoryDir(project.ID),
 			LegacyUserMemoryPath:    a.store.UserMemoryPath(),
@@ -352,6 +358,10 @@ func (a *App) runChat(ctx context.Context, controller *chatRunController, chatID
 			}
 			if streamEvent.Message != nil && streamEvent.Message.Role == model.MessageRoleAssistant {
 				cleaned, handoverTargets := model.ExtractAgentHandoverMarkers(streamEvent.Message.Content)
+				var goalMarkers []model.GoalMarker
+				if goalRun != nil {
+					cleaned, goalMarkers = model.ExtractGoalMarkers(cleaned)
+				}
 				lastAssistant = cleaned
 				triggerSteer := cleaned != "" && a.hasPendingSteer(chatID, controller)
 				if !triggerSteer {
@@ -376,9 +386,14 @@ func (a *App) runChat(ctx context.Context, controller *chatRunController, chatID
 							return err
 						}
 					}
+					if len(goalMarkers) > 0 {
+						if err := a.processGoalMarkers(chatID, currentTurnID, currentAgentID, agent.Name, goalMarkers, goalRun); err != nil {
+							return err
+						}
+					}
 				}
 				if cleaned == "" {
-					if len(handoverTargets) == 0 {
+					if len(handoverTargets) == 0 && len(goalMarkers) == 0 {
 						a.finishChatWithErrorPayload(chatID, currentTurnID, currentAgentID, model.ErrorPayload{
 							Subtype: "message",
 							Code:    "empty_assistant_output",
@@ -451,6 +466,34 @@ func (a *App) runChat(ctx context.Context, controller *chatRunController, chatID
 		}
 
 		if pendingHandoverAgent.ID == "" {
+			// Goal gate continuation: a pending handover always wins, so this
+			// is only evaluated once the handover chain has fully unwound and
+			// the run would otherwise end.
+			if nextPrompt, ok := a.nextGoalTurnPrompt(ctx, controller, chatID, currentTurnID, currentAgentID, agent.Name, goalRun); ok {
+				if currentAgentID != chat.MainAgentID {
+					if events, err := a.store.ListEvents(chatID, 0); err == nil {
+						_ = a.store.WriteSummary(chatID, model.BuildChatSummary(events))
+					}
+				}
+				nextTurnID := id.New()
+				chat.ActiveTurnID = nextTurnID
+				chat.CurrentAgentID = chat.MainAgentID
+				chat.UpdatedAt = time.Now().UTC()
+				chat.Stream = model.ChatStreamState{
+					Status:    "streaming",
+					AgentID:   chat.MainAgentID,
+					StartedAt: time.Now().UTC(),
+				}
+				if err := a.store.SaveChat(chat); err != nil {
+					a.finishChatWithError(chatID, err.Error())
+					return
+				}
+				currentAgentID = chat.MainAgentID
+				currentPrompt = nextPrompt
+				currentHandoverNote = ""
+				currentTurnID = nextTurnID
+				continue
+			}
 			break
 		}
 		if _, errorPayload := a.validateHandoverTarget(pendingHandoverAgent.ID, currentAgentID); errorPayload != nil {
