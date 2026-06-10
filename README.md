@@ -159,8 +159,6 @@ new WebSocket("ws://127.0.0.1:8080/rpc", [
 ])
 ```
 
-See the JSON-RPC method list and skill-injection walkthrough in [`docs/`](docs/).
-
 ## License
 
 [MIT](LICENSE) © 2026
