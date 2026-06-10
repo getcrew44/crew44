@@ -68,7 +68,7 @@ describe('NewTaskRoute', () => {
     expect(screen.getByText('Second Project')).toBeInTheDocument();
   });
 
-  it('renders project and lead controls as ghost chips', () => {
+  it('renders the project control as a ghost chip with no lead picker', () => {
     render(
       <NewTaskRoute
         projects={projects}
@@ -79,16 +79,13 @@ describe('NewTaskRoute', () => {
     );
 
     const projectButton = screen.getByRole('button', { name: /Project First Project/i });
-    const leadButton = screen.getByRole('button', { name: /Lead Aria/i });
 
     expect(projectButton).toHaveStyle({
       background: 'transparent',
     });
-    expect(leadButton).toHaveStyle({
-      background: 'transparent',
-    });
     expect(projectButton.style.border).toBe('1px solid transparent');
-    expect(leadButton.style.border).toBe('1px solid transparent');
+    // The lead is always the Partner agent — there is no picker for it.
+    expect(screen.queryByRole('button', { name: /Lead/i })).not.toBeInTheDocument();
   });
 
   it('restores the new-chat text draft for the selected project', () => {
@@ -150,7 +147,41 @@ describe('NewTaskRoute', () => {
     expect(screen.getByTestId('new-task-input')).toHaveValue('global new task draft');
   });
 
-  it('does not persist the default lead as a new-task draft', async () => {
+  it('always leads with the Partner agent when the default crew is present', async () => {
+    const crew = [
+      { id: 'a1', name: 'Aria' },
+      { id: 'a-partner', name: 'Partner', preset_id: 'default-crew', preset_key: 'partner' },
+    ];
+    render(
+      <NewTaskRoute projects={projects} agents={crew} onNewTask={() => {}} initialProjectId="p1" />
+    );
+
+    fireEvent.change(screen.getByTestId('new-task-input'), {
+      target: { value: 'ship the thing' },
+    });
+    fireEvent.click(screen.getByTestId('start-crew-button'));
+
+    await waitFor(() => {
+      expect(api.createChat).toHaveBeenCalledWith('p1', 'ship the thing', 'a-partner', expect.anything());
+    });
+  });
+
+  it('falls back to the first agent when no Partner exists', async () => {
+    render(
+      <NewTaskRoute projects={projects} agents={agents} onNewTask={() => {}} initialProjectId="p1" />
+    );
+
+    fireEvent.change(screen.getByTestId('new-task-input'), {
+      target: { value: 'ship the thing' },
+    });
+    fireEvent.click(screen.getByTestId('start-crew-button'));
+
+    await waitFor(() => {
+      expect(api.createChat).toHaveBeenCalledWith('p1', 'ship the thing', 'a1', expect.anything());
+    });
+  });
+
+  it('never persists a lead in the new-task draft', async () => {
     render(
       <NewTaskRoute
         projects={projects}
@@ -164,16 +195,13 @@ describe('NewTaskRoute', () => {
       expect(window.localStorage.getItem('crew44-composer-draft:v1::__global_new_task')).toBeNull();
     });
 
-    fireEvent.click(screen.getByText('Aria'));
-    fireEvent.click(await screen.findByText('Bryn'));
-    await waitFor(() => {
-      expect(window.localStorage.getItem('crew44-composer-draft:v1::__global_new_task')).toContain('"targetAgentId":"a2"');
+    fireEvent.change(screen.getByTestId('new-task-input'), {
+      target: { value: 'draft with text' },
     });
-
-    fireEvent.click(screen.getByText('Bryn'));
-    fireEvent.click(await screen.findByText('Aria'));
     await waitFor(() => {
-      expect(window.localStorage.getItem('crew44-composer-draft:v1::__global_new_task')).toBeNull();
+      const stored = JSON.parse(window.localStorage.getItem('crew44-composer-draft:v1::__global_new_task'));
+      expect(stored.text).toBe('draft with text');
+      expect(stored.targetAgentId).toBeFalsy();
     });
   });
 

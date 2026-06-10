@@ -301,7 +301,6 @@ export default function NewTaskRoute({ projects, agents, skills = [], onNewTask,
   const [activeSuggestion, setActiveSuggestion] = React.useState(0);
   const [mentionPoint, setMentionPoint] = React.useState(null);
   const [selectedProjectId, setSelectedProjectId] = React.useState(initialStoredProjectId || '');
-  const [selectedAgentId, setSelectedAgentId] = React.useState(initialDraft.targetAgentId || '');
   const [submitting, setSubmitting] = React.useState(false);
   const [error, setError] = React.useState(null);
   const [scrollTop, setScrollTop] = React.useState(0);
@@ -328,15 +327,20 @@ export default function NewTaskRoute({ projects, agents, skills = [], onNewTask,
   const listboxRef = React.useRef(null);
   const selectedProjectExists = projects.some(project => project.id === selectedProjectId);
   const canAttach = attachmentsSupported();
-  const defaultAgentId = agents[0]?.id || '';
   const selectedProject = projects.find(project => project.id === selectedProjectId);
   const hasWorkdir = Boolean(selectedProject?.workdir);
-  const selectedAgent = agents.find(agent => agent.id === selectedAgentId);
+  // The lead is always the Partner agent (the default-crew strategic
+  // partner); there is no lead picker. Falls back to the first agent for
+  // setups without the default crew.
+  const leadAgent = React.useMemo(
+    () => agents.find(a => a.preset_id === 'default-crew' && a.preset_key === 'partner') || agents[0] || null,
+    [agents],
+  );
   const agentSkills = React.useMemo(() => {
-    if (!selectedAgent?.skill_ids?.length) return [];
-    const allowed = new Set(selectedAgent.skill_ids);
+    if (!leadAgent?.skill_ids?.length) return [];
+    const allowed = new Set(leadAgent.skill_ids);
     return (skills || []).filter(skill => allowed.has(skill.id));
-  }, [selectedAgent, skills]);
+  }, [leadAgent, skills]);
 
   // Apply initialProjectId when it changes (e.g. clicking new chat on a project)
   React.useEffect(() => {
@@ -354,10 +358,6 @@ export default function NewTaskRoute({ projects, agents, skills = [], onNewTask,
     if (selectedProjectExists) writeLastNewChatProjectId(selectedProjectId);
     else if (!selectedProjectId) writeLastNewChatProjectId('');
   }, [selectedProjectExists, selectedProjectId]);
-
-  React.useEffect(() => {
-    if (agents.length > 0 && !selectedAgentId) setSelectedAgentId(agents[0].id);
-  }, [agents, selectedAgentId]);
 
   // Probe the selected project's git state to drive the worktree controls.
   // The toggle reflects the user's standing choice (seeded once from the first
@@ -398,14 +398,10 @@ export default function NewTaskRoute({ projects, agents, skills = [], onNewTask,
   };
 
   React.useEffect(() => {
-    writeComposerDraft('', draftStorageChatId, {
-      text: val,
-      targetAgentId: selectedAgentId && selectedAgentId !== defaultAgentId ? selectedAgentId : '',
-    });
-  }, [defaultAgentId, draftStorageChatId, selectedAgentId, val]);
+    writeComposerDraft('', draftStorageChatId, { text: val });
+  }, [draftStorageChatId, val]);
 
   const projectItems = projects.map(p => ({ id: p.id, label: p.name }));
-  const agentItems = agents.map(a => ({ id: a.id, label: a.name }));
   const activeToken = React.useMemo(() => suggestionBounds(val, cursor), [val, cursor]);
 
   React.useEffect(() => {
@@ -519,7 +515,7 @@ export default function NewTaskRoute({ projects, agents, skills = [], onNewTask,
     if ((!text && attachments.length === 0) || submitting) return;
 
     const projectId = selectedProjectExists ? selectedProjectId : '';
-    const agentId = selectedAgentId || agents[0]?.id;
+    const agentId = leadAgent?.id;
 
     if (!projectId || !agentId) {
       setError('Select a project and ensure at least one agent exists.');
@@ -594,7 +590,7 @@ export default function NewTaskRoute({ projects, agents, skills = [], onNewTask,
     }
   };
 
-  const canStart = (val.trim() || attachments.length > 0) && !submitting && selectedProjectExists && selectedAgentId;
+  const canStart = (val.trim() || attachments.length > 0) && !submitting && selectedProjectExists && Boolean(leadAgent);
   const mentionMenuLeft = mentionPoint && inputRef.current
     ? Math.min(Math.max(0, mentionPoint.left - 8), Math.max(0, inputRef.current.clientWidth - MENTION_MENU_WIDTH))
     : 0;
@@ -758,16 +754,6 @@ export default function NewTaskRoute({ projects, agents, skills = [], onNewTask,
                   onClick={() => { close(); onExistingFolder?.(); }}
                 />
               )}
-            />
-
-            <CustomPicker
-              icon={<AgentIcon size={13} />}
-              label="Lead"
-              placeholder="Pick a lead"
-              value={selectedAgentId}
-              items={agentItems}
-              onChange={setSelectedAgentId}
-              variant="ghost"
             />
 
             {gitInfo?.is_git_repo && (
