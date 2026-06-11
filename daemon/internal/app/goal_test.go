@@ -22,7 +22,14 @@ type goalEngine struct {
 	replies      []string
 	prompts      []string
 	instructions []string
+	agents       []model.AgentConfig
+	resumes      []string
+	requests     []runtime.RunRequest
 	onRun        func(call int) // optional hook, runs before the reply is emitted
+	// onEmitted runs after the reply has been emitted but before Run returns
+	// — i.e. mid-stream, in the window between the turn's last content and
+	// the run goroutine's end-of-turn saves.
+	onEmitted func(call int)
 }
 
 func (e *goalEngine) Run(ctx context.Context, request runtime.RunRequest, emit func(runtime.StreamEvent) error) (runtime.RunResult, error) {
@@ -33,6 +40,9 @@ func (e *goalEngine) Run(ctx context.Context, request runtime.RunRequest, emit f
 	call := len(e.prompts)
 	e.prompts = append(e.prompts, request.Prompt)
 	e.instructions = append(e.instructions, request.Agent.Instruction)
+	e.agents = append(e.agents, request.Agent)
+	e.resumes = append(e.resumes, request.ResumeSessionID)
+	e.requests = append(e.requests, request)
 	var reply string
 	if len(e.replies) > 0 {
 		reply = e.replies[0]
@@ -41,6 +51,7 @@ func (e *goalEngine) Run(ctx context.Context, request runtime.RunRequest, emit f
 		reply = "no scripted reply left"
 	}
 	hook := e.onRun
+	emittedHook := e.onEmitted
 	e.mu.Unlock()
 	if hook != nil {
 		hook(call)
@@ -56,6 +67,9 @@ func (e *goalEngine) Run(ctx context.Context, request runtime.RunRequest, emit f
 		},
 	}); err != nil {
 		return runtime.RunResult{}, err
+	}
+	if emittedHook != nil {
+		emittedHook(call)
 	}
 	return runtime.RunResult{SessionID: "goal-session"}, nil
 }
@@ -82,6 +96,33 @@ func (e *goalEngine) instruction(i int) string {
 		return ""
 	}
 	return e.instructions[i]
+}
+
+func (e *goalEngine) agent(i int) model.AgentConfig {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if i >= len(e.agents) {
+		return model.AgentConfig{}
+	}
+	return e.agents[i]
+}
+
+func (e *goalEngine) resume(i int) string {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if i >= len(e.resumes) {
+		return ""
+	}
+	return e.resumes[i]
+}
+
+func (e *goalEngine) request(i int) runtime.RunRequest {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if i >= len(e.requests) {
+		return runtime.RunRequest{}
+	}
+	return e.requests[i]
 }
 
 func newGoalTestApp(t *testing.T, engine runtime.Engine) *App {
@@ -155,6 +196,20 @@ func waitForIdle(t *testing.T, a *App, chatID string) model.ChatRecord {
 	return model.ChatRecord{}
 }
 
+// currentClarifySeq reads the chat's pending clarify round seq — AnswerGoal
+// requires it so answers bind to the round they answer.
+func currentClarifySeq(t *testing.T, a *App, chatID string) int64 {
+	t.Helper()
+	chat, err := a.store.GetChat(chatID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if chat.Goal == nil {
+		return 0
+	}
+	return chat.Goal.ClarifySeq
+}
+
 func goalEventsOfType(t *testing.T, a *App, chatID string, eventType model.EventType) []model.Event {
 	t.Helper()
 	events, err := a.store.ListEvents(chatID, 0)
@@ -180,6 +235,10 @@ func goalErrorEvents(t *testing.T, a *App, chatID, code string) []model.Event {
 	}
 	return out
 }
+
+const goalReady = "<CREW44_GOAL_READY>\n" +
+	"{\"summary\": \"Everything checks out.\"}\n" +
+	"</CREW44_GOAL_READY>"
 
 const goalVerifyAllPass = "<CREW44_GOAL_VERIFY>\n" +
 	"{\"summary\": \"All green.\", \"results\": [\n" +
@@ -309,9 +368,10 @@ func TestAnswerGoalValidation(t *testing.T) {
 		{"chips question missing option", []GoalAnswerInput{{QuestionID: "q1", Text: "prose"}}, ErrBadRequest},
 		{"chips unanswered", []GoalAnswerInput{{QuestionID: "q2", Text: "nothing"}}, ErrBadRequest},
 	}
+	seq := currentClarifySeq(t, a, chat.ID)
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if _, err := a.AnswerGoal(chat.ID, tc.answers); !errors.Is(err, tc.wantErr) {
+			if _, err := a.AnswerGoal(chat.ID, seq, tc.answers); !errors.Is(err, tc.wantErr) {
 				t.Fatalf("err = %v, want %v", err, tc.wantErr)
 			}
 		})
@@ -326,7 +386,7 @@ func TestAnswerGoalValidation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := a.AnswerGoal(plain.ID, nil); !errors.Is(err, ErrConflict) {
+	if _, err := a.AnswerGoal(plain.ID, 0, nil); !errors.Is(err, ErrConflict) {
 		t.Fatalf("non-goal chat err = %v, want conflict", err)
 	}
 }
@@ -356,7 +416,7 @@ func TestAnswerGoalLocksGoal(t *testing.T) {
 	waitForIdle(t, a, chat.ID)
 
 	option0 := 0
-	if _, err := a.AnswerGoal(chat.ID, []GoalAnswerInput{
+	if _, err := a.AnswerGoal(chat.ID, currentClarifySeq(t, a, chat.ID), []GoalAnswerInput{
 		{QuestionID: "q1", Option: &option0},
 		{QuestionID: "q2", Text: "don't touch CI config"},
 	}); err != nil {
@@ -409,8 +469,10 @@ func TestGoalLockKicksOffWorkTurn(t *testing.T) {
 			"  {\"id\": \"c2\", \"text\": \"No .only left behind\", \"verify\": \"grep gate\"}\n" +
 			"]}\n" +
 			"</CREW44_GOAL_LOCK>",
-		// Turn 2 (daemon kickoff): the crew works and the gate opens.
-		"done\n" + goalVerifyAllPass,
+		// Turn 2 (daemon kickoff): the crew works and declares ready.
+		"done\n" + goalReady,
+		// Turn 3 (isolated verifier): the gate opens.
+		goalVerifyAllPass,
 	}}
 	a := newGoalTestApp(t, engine)
 	agentID := firstAgentID(t, a)
@@ -422,16 +484,20 @@ func TestGoalLockKicksOffWorkTurn(t *testing.T) {
 	got := waitForIdle(t, a, chat.ID)
 
 	// The lock must not strand the run idle: the daemon starts the first
-	// work turn itself.
-	if engine.promptCount() != 2 {
-		t.Fatalf("engine runs = %d, want 2 (lock turn + kickoff turn)", engine.promptCount())
+	// work turn itself, and the ready declaration hands off to the verifier.
+	if engine.promptCount() != 3 {
+		t.Fatalf("engine runs = %d, want 3 (lock turn + kickoff turn + verifier turn)", engine.promptCount())
 	}
 	if !strings.Contains(engine.prompt(1), "goal is locked") || !strings.Contains(engine.prompt(1), "Green on 20 consecutive runs") {
 		t.Fatalf("kickoff prompt = %q", engine.prompt(1))
 	}
-	// The kickoff turn ran under the running-phase system prompt.
-	if !strings.Contains(engine.instruction(1), "CREW44_GOAL_VERIFY") {
-		t.Fatal("kickoff turn missing running-phase verify instructions")
+	// The kickoff turn ran under the running-phase system prompt: ready
+	// protocol only, never the verify marker.
+	if !strings.Contains(engine.instruction(1), "CREW44_GOAL_READY") {
+		t.Fatal("kickoff turn missing running-phase ready instructions")
+	}
+	if !strings.Contains(engine.prompt(2), "Run the verification gate now") {
+		t.Fatalf("verifier prompt = %q", engine.prompt(2))
 	}
 	if got.Goal.Phase != model.GoalPhaseAwaitingSignoff {
 		t.Fatalf("phase = %q, want awaiting_signoff", got.Goal.Phase)
@@ -440,8 +506,10 @@ func TestGoalLockKicksOffWorkTurn(t *testing.T) {
 
 func TestGoalVerifyFailAutoContinuesUntilPass(t *testing.T) {
 	engine := &goalEngine{replies: []string{
-		"attempt one\n" + goalVerifyC1Fails,
-		"fixed it\n" + goalVerifyAllPass,
+		"attempt one\n" + goalReady, // lead declares ready
+		goalVerifyC1Fails,           // verifier holds the gate
+		"fixed it\n" + goalReady,    // lead continuation declares ready again
+		goalVerifyAllPass,           // verifier opens the gate
 	}}
 	a := newGoalTestApp(t, engine)
 	agentID := firstAgentID(t, a)
@@ -459,6 +527,9 @@ func TestGoalVerifyFailAutoContinuesUntilPass(t *testing.T) {
 	if got.Goal.Attempt != 2 {
 		t.Fatalf("attempt = %d, want 2", got.Goal.Attempt)
 	}
+	if engine.promptCount() != 4 {
+		t.Fatalf("engine runs = %d, want 4 (lead, verifier, lead, verifier)", engine.promptCount())
+	}
 	verifyEvents := goalEventsOfType(t, a, chat.ID, model.EventTypeGoalVerify)
 	if len(verifyEvents) != 2 {
 		t.Fatalf("verify events = %d, want 2", len(verifyEvents))
@@ -469,25 +540,93 @@ func TestGoalVerifyFailAutoContinuesUntilPass(t *testing.T) {
 	if verifyEvents[0].GoalVerify.Attempt != 1 || verifyEvents[1].GoalVerify.Attempt != 2 {
 		t.Fatalf("attempts = %d, %d", verifyEvents[0].GoalVerify.Attempt, verifyEvents[1].GoalVerify.Attempt)
 	}
+	// Verification is attributed to the anonymous verifier, never the lead.
+	for _, event := range verifyEvents {
+		if event.ActorAgentID != model.GoalVerifierAgentID || event.ActorAgentName != model.GoalVerifierAgentName {
+			t.Fatalf("verify actor = %q/%q, want verifier", event.ActorAgentID, event.ActorAgentName)
+		}
+	}
 	doneEvents := goalEventsOfType(t, a, chat.ID, model.EventTypeGoalDone)
 	if len(doneEvents) != 1 || doneEvents[0].GoalDone.Attempts != 2 || doneEvents[0].GoalDone.CriteriaTotal != 2 {
 		t.Fatalf("done events = %+v", doneEvents)
 	}
 	// The continuation turn carried the held-gate prompt naming the failure.
-	if !strings.Contains(engine.prompt(1), "Goal gate held") || !strings.Contains(engine.prompt(1), "Green on 20 consecutive runs") {
-		t.Fatalf("continuation prompt = %q", engine.prompt(1))
+	if !strings.Contains(engine.prompt(2), "Goal gate held") || !strings.Contains(engine.prompt(2), "Green on 20 consecutive runs") {
+		t.Fatalf("continuation prompt = %q", engine.prompt(2))
 	}
-	// And the running-phase system prompt carried the criteria.
-	if !strings.Contains(engine.instruction(0), "CREW44_GOAL_VERIFY") || !strings.Contains(engine.instruction(0), "Green on 20 consecutive runs") {
-		t.Fatal("running system prompt missing verify instructions or criteria")
+	// And the running-phase system prompt carried the criteria and the ready
+	// protocol — not the verify marker, which belongs to the verifier.
+	if !strings.Contains(engine.instruction(0), "CREW44_GOAL_READY") || !strings.Contains(engine.instruction(0), "Green on 20 consecutive runs") {
+		t.Fatal("running system prompt missing ready instructions or criteria")
+	}
+	if strings.Contains(engine.instruction(0), "never emit CREW44_GOAL_VERIFY") == false {
+		t.Fatal("running system prompt must forbid the verify marker")
+	}
+}
+
+func TestGoalVerifierTurnIsIsolatedAndAnonymous(t *testing.T) {
+	engine := &goalEngine{replies: []string{
+		"all set\n" + goalReady,
+		goalVerifyAllPass,
+	}}
+	a := newGoalTestApp(t, engine)
+	agentID := firstAgentID(t, a)
+	chat := newGoalChat(t, a, agentID)
+	lockGoalState(t, a, chat.ID, twoGoalCriteria()...)
+
+	if _, err := a.PostMessage(chat.ID, "go", agentID, nil); err != nil {
+		t.Fatal(err)
+	}
+	got := waitForIdle(t, a, chat.ID)
+
+	if engine.promptCount() != 2 {
+		t.Fatalf("engine runs = %d, want 2 (lead + verifier)", engine.promptCount())
+	}
+	verifier := engine.agent(1)
+	if verifier.ID != model.GoalVerifierAgentID || verifier.Name != model.GoalVerifierAgentName {
+		t.Fatalf("verifier agent = %q/%q, want anonymous verifier", verifier.ID, verifier.Name)
+	}
+	// Fresh session: the verifier never resumes the crew's runtime session.
+	if engine.resume(1) != "" {
+		t.Fatalf("verifier resume session = %q, want empty", engine.resume(1))
+	}
+	instruction := engine.instruction(1)
+	if !strings.Contains(instruction, "Goal Verification") || !strings.Contains(instruction, "CREW44_GOAL_VERIFY") {
+		t.Fatal("verifier system prompt missing verification instructions")
+	}
+	if strings.Contains(instruction, "Handover Output Protocol") || strings.Contains(instruction, "Available Agents For Handover") {
+		t.Fatal("verifier system prompt must not carry handover sections")
+	}
+	if strings.Contains(instruction, "Conversation Summary") {
+		t.Fatal("verifier system prompt must not reference the conversation summary")
+	}
+	// The verifier leaves no trace on chat-level agent state: the lead's
+	// session stays resumable and the verifier never becomes a participant
+	// or message target.
+	if got.LastRuntimeSession.AgentID != agentID {
+		t.Fatalf("last runtime session agent = %q, want lead", got.LastRuntimeSession.AgentID)
+	}
+	if got.CurrentAgentID != agentID {
+		t.Fatalf("current agent = %q, want lead", got.CurrentAgentID)
+	}
+	for _, participant := range got.ParticipantAgentIDs {
+		if participant == model.GoalVerifierAgentID {
+			t.Fatal("verifier leaked into participant agent ids")
+		}
+	}
+	if got.Goal.Phase != model.GoalPhaseAwaitingSignoff {
+		t.Fatalf("phase = %q, want awaiting_signoff", got.Goal.Phase)
 	}
 }
 
 func TestGoalAttemptCapStopsLoop(t *testing.T) {
 	engine := &goalEngine{replies: []string{
-		"a\n" + goalVerifyC1Fails,
-		"b\n" + goalVerifyC1Fails,
-		"c\n" + goalVerifyC1Fails,
+		"a\n" + goalReady,
+		goalVerifyC1Fails,
+		"b\n" + goalReady,
+		goalVerifyC1Fails,
+		"c\n" + goalReady,
+		goalVerifyC1Fails,
 	}}
 	a := newGoalTestApp(t, engine)
 	agentID := firstAgentID(t, a)
@@ -507,9 +646,10 @@ func TestGoalAttemptCapStopsLoop(t *testing.T) {
 	}
 	got := waitForIdle(t, a, chat.ID)
 
-	// Initial turn + two auto-continues, then the cap holds.
-	if engine.promptCount() != 3 {
-		t.Fatalf("engine runs = %d, want 3", engine.promptCount())
+	// Initial turn + two auto-continues, each followed by a verifier turn,
+	// then the cap holds.
+	if engine.promptCount() != 6 {
+		t.Fatalf("engine runs = %d, want 6", engine.promptCount())
 	}
 	if got.Goal.Phase != model.GoalPhaseRunning {
 		t.Fatalf("phase = %q, want running (gate still held)", got.Goal.Phase)
@@ -527,7 +667,7 @@ func TestGoalAttemptCapStopsLoop(t *testing.T) {
 
 	// A fresh user message re-arms the budget.
 	engine.mu.Lock()
-	engine.replies = append(engine.replies, "d\n"+goalVerifyAllPass)
+	engine.replies = append(engine.replies, "d\n"+goalReady, goalVerifyAllPass)
 	engine.mu.Unlock()
 	if _, err := a.PostMessage(chat.ID, "keep going", agentID, nil); err != nil {
 		t.Fatal(err)
@@ -538,12 +678,16 @@ func TestGoalAttemptCapStopsLoop(t *testing.T) {
 	}
 }
 
+const goalVerifyPartial = "partial\n<CREW44_GOAL_VERIFY>\n{\"results\": [{\"id\": \"c1\", \"status\": \"pass\"}]}\n</CREW44_GOAL_VERIFY>"
+
 func TestGoalVerifyIncompleteHoldsGate(t *testing.T) {
 	engine := &goalEngine{replies: []string{
-		// Covers only c1; c2 is left unverified — the gate must hold even
-		// though every reported result passed.
-		"partial\n<CREW44_GOAL_VERIFY>\n{\"results\": [{\"id\": \"c1\", \"status\": \"pass\"}]}\n</CREW44_GOAL_VERIFY>",
-		"still partial\n<CREW44_GOAL_VERIFY>\n{\"results\": [{\"id\": \"c1\", \"status\": \"pass\"}]}\n</CREW44_GOAL_VERIFY>",
+		// The verifier covers only c1; c2 is left unverified — the gate must
+		// hold even though every reported result passed.
+		"ready\n" + goalReady,
+		goalVerifyPartial,
+		"ready again\n" + goalReady,
+		goalVerifyPartial,
 	}}
 	a := newGoalTestApp(t, engine)
 	agentID := firstAgentID(t, a)
@@ -656,8 +800,9 @@ func TestGoalWrongPhaseMarkerIgnored(t *testing.T) {
 
 func TestGoalMalformedMarkerGetsOneCorrectiveTurn(t *testing.T) {
 	engine := &goalEngine{replies: []string{
-		"oops\n<CREW44_GOAL_VERIFY>\n{not json\n</CREW44_GOAL_VERIFY>",
-		"fixed\n" + goalVerifyAllPass,
+		"oops\n<CREW44_GOAL_READY>\n{not json\n</CREW44_GOAL_READY>",
+		"fixed\n" + goalReady,
+		goalVerifyAllPass,
 	}}
 	a := newGoalTestApp(t, engine)
 	agentID := firstAgentID(t, a)
@@ -672,18 +817,18 @@ func TestGoalMalformedMarkerGetsOneCorrectiveTurn(t *testing.T) {
 	if len(goalErrorEvents(t, a, chat.ID, "goal_marker_invalid")) != 1 {
 		t.Fatal("want one goal_marker_invalid error event")
 	}
-	if !strings.Contains(engine.prompt(1), "malformed") {
+	if !strings.Contains(engine.prompt(1), "malformed") || !strings.Contains(engine.prompt(1), "CREW44_GOAL_READY") {
 		t.Fatalf("corrective prompt = %q", engine.prompt(1))
 	}
 	if got.Goal.Phase != model.GoalPhaseAwaitingSignoff {
-		t.Fatalf("phase = %q, want awaiting_signoff after corrected verify", got.Goal.Phase)
+		t.Fatalf("phase = %q, want awaiting_signoff after corrected ready + verify", got.Goal.Phase)
 	}
 }
 
 func TestGoalMalformedMarkerTwiceStopsIdle(t *testing.T) {
 	engine := &goalEngine{replies: []string{
-		"oops\n<CREW44_GOAL_VERIFY>\n{not json\n</CREW44_GOAL_VERIFY>",
-		"oops again\n<CREW44_GOAL_VERIFY>\n{still not json\n</CREW44_GOAL_VERIFY>",
+		"oops\n<CREW44_GOAL_READY>\n{not json\n</CREW44_GOAL_READY>",
+		"oops again\n<CREW44_GOAL_READY>\n{still not json\n</CREW44_GOAL_READY>",
 	}}
 	a := newGoalTestApp(t, engine)
 	agentID := firstAgentID(t, a)
@@ -706,10 +851,123 @@ func TestGoalMalformedMarkerTwiceStopsIdle(t *testing.T) {
 	}
 }
 
+func TestGoalLeadVerifyMarkerIgnored(t *testing.T) {
+	// The screenshot bug: the lead tries to run the gate itself. The marker
+	// is ignored — verification belongs to the isolated verifier turn.
+	engine := &goalEngine{replies: []string{
+		"verified it myself\n" + goalVerifyAllPass,
+	}}
+	a := newGoalTestApp(t, engine)
+	agentID := firstAgentID(t, a)
+	chat := newGoalChat(t, a, agentID)
+	lockGoalState(t, a, chat.ID, twoGoalCriteria()...)
+
+	if _, err := a.PostMessage(chat.ID, "go", agentID, nil); err != nil {
+		t.Fatal(err)
+	}
+	got := waitForIdle(t, a, chat.ID)
+
+	if got.Goal.Phase != model.GoalPhaseRunning {
+		t.Fatalf("phase = %q, want running (lead verify ignored)", got.Goal.Phase)
+	}
+	if got.Goal.Attempt != 0 {
+		t.Fatalf("attempt = %d, want 0", got.Goal.Attempt)
+	}
+	if len(goalEventsOfType(t, a, chat.ID, model.EventTypeGoalVerify)) != 0 {
+		t.Fatal("lead verify must not produce a goal_verify event")
+	}
+	ignored := goalErrorEvents(t, a, chat.ID, "goal_marker_ignored")
+	if len(ignored) != 1 || !strings.Contains(ignored[0].Error.Message, "CREW44_GOAL_READY") {
+		t.Fatalf("ignored events = %+v, want one pointing at the ready protocol", ignored)
+	}
+	// A malformed lead verify is equally not the verifier's problem: same
+	// ignore path, no corrective re-emit of a marker the lead doesn't own.
+	engine.mu.Lock()
+	engine.replies = append(engine.replies, "broken\n<CREW44_GOAL_VERIFY>\n{not json\n</CREW44_GOAL_VERIFY>")
+	engine.mu.Unlock()
+	if _, err := a.PostMessage(chat.ID, "try again", agentID, nil); err != nil {
+		t.Fatal(err)
+	}
+	waitForIdle(t, a, chat.ID)
+	if len(goalErrorEvents(t, a, chat.ID, "goal_marker_invalid")) != 0 {
+		t.Fatal("malformed lead verify must not be treated as correctable")
+	}
+	if len(goalErrorEvents(t, a, chat.ID, "goal_marker_ignored")) != 2 {
+		t.Fatal("want two goal_marker_ignored error events")
+	}
+}
+
+func TestGoalVerifierMalformedVerifyGetsOneCorrectiveTurn(t *testing.T) {
+	engine := &goalEngine{replies: []string{
+		"done\n" + goalReady,
+		"checks ran\n<CREW44_GOAL_VERIFY>\n{not json\n</CREW44_GOAL_VERIFY>",
+		"fixed\n" + goalVerifyAllPass,
+	}}
+	a := newGoalTestApp(t, engine)
+	agentID := firstAgentID(t, a)
+	chat := newGoalChat(t, a, agentID)
+	lockGoalState(t, a, chat.ID, twoGoalCriteria()...)
+
+	if _, err := a.PostMessage(chat.ID, "go", agentID, nil); err != nil {
+		t.Fatal(err)
+	}
+	got := waitForIdle(t, a, chat.ID)
+
+	if engine.promptCount() != 3 {
+		t.Fatalf("engine runs = %d, want 3 (lead, verifier, verifier retry)", engine.promptCount())
+	}
+	if len(goalErrorEvents(t, a, chat.ID, "goal_marker_invalid")) != 1 {
+		t.Fatal("want one goal_marker_invalid error event")
+	}
+	// The corrective turn goes back to the verifier, not the lead.
+	if engine.agent(2).ID != model.GoalVerifierAgentID {
+		t.Fatalf("corrective turn agent = %q, want verifier", engine.agent(2).ID)
+	}
+	if !strings.Contains(engine.prompt(2), "malformed") {
+		t.Fatalf("corrective prompt = %q", engine.prompt(2))
+	}
+	if got.Goal.Phase != model.GoalPhaseAwaitingSignoff {
+		t.Fatalf("phase = %q, want awaiting_signoff", got.Goal.Phase)
+	}
+}
+
+func TestGoalVerifierNoMarkerRetriesThenStops(t *testing.T) {
+	engine := &goalEngine{replies: []string{
+		"done\n" + goalReady,
+		"ran the checks, forgot to report",
+		"still no marker",
+	}}
+	a := newGoalTestApp(t, engine)
+	agentID := firstAgentID(t, a)
+	chat := newGoalChat(t, a, agentID)
+	lockGoalState(t, a, chat.ID, twoGoalCriteria()...)
+
+	if _, err := a.PostMessage(chat.ID, "go", agentID, nil); err != nil {
+		t.Fatal(err)
+	}
+	got := waitForIdle(t, a, chat.ID)
+
+	if engine.promptCount() != 3 {
+		t.Fatalf("engine runs = %d, want 3 (lead, verifier, verifier retry)", engine.promptCount())
+	}
+	if engine.agent(2).ID != model.GoalVerifierAgentID {
+		t.Fatalf("retry turn agent = %q, want verifier", engine.agent(2).ID)
+	}
+	if len(goalErrorEvents(t, a, chat.ID, "goal_verify_missing")) != 1 {
+		t.Fatal("want one goal_verify_missing error event")
+	}
+	if got.Goal.Phase != model.GoalPhaseRunning {
+		t.Fatalf("phase = %q, want running (gate never ran)", got.Goal.Phase)
+	}
+	if got.Stream.Status != "idle" {
+		t.Fatalf("stream = %q, want idle", got.Stream.Status)
+	}
+}
+
 func TestGoalPendingSteerSuppressesAutoContinue(t *testing.T) {
 	steerQueued := make(chan struct{})
 	engine := &goalEngine{replies: []string{
-		"attempt\n" + goalVerifyC1Fails,
+		"attempt\n" + goalReady,
 		"steered reply",
 	}}
 	engine.onRun = func(call int) {
@@ -732,11 +990,11 @@ func TestGoalPendingSteerSuppressesAutoContinue(t *testing.T) {
 	close(steerQueued)
 	got := waitForIdle(t, a, chat.ID)
 
-	// The failed gate must not auto-continue past the queued steer: the
-	// steer restart consumes it instead.
+	// The ready declaration must not start a verifier turn past the queued
+	// steer: the steer restart consumes it instead.
 	for i := 0; i < engine.promptCount(); i++ {
-		if strings.Contains(engine.prompt(i), "Goal gate held") {
-			t.Fatalf("auto-continue fired despite pending steer: %q", engine.prompt(i))
+		if strings.Contains(engine.prompt(i), "Run the verification gate now") {
+			t.Fatalf("verifier turn fired despite pending steer: %q", engine.prompt(i))
 		}
 	}
 	if engine.promptCount() != 2 {
@@ -910,7 +1168,8 @@ func TestSignoffGoalAccept(t *testing.T) {
 
 func TestSignoffGoalSendBack(t *testing.T) {
 	engine := &goalEngine{replies: []string{
-		"rework done\n" + goalVerifyAllPass,
+		"rework done\n" + goalReady,
+		goalVerifyAllPass,
 	}}
 	a := newGoalTestApp(t, engine)
 	agentID := firstAgentID(t, a)
@@ -967,13 +1226,18 @@ func TestGoalHandoverWinsOverGateContinuation(t *testing.T) {
 		t.Fatal(err)
 	}
 	engine := &goalEngine{replies: []string{
-		// Lead: verify fails AND hands over in the same message.
-		"verify failed, delegating\n" + goalVerifyC1Fails + "\n" +
+		// Lead: declares ready AND hands over in the same message.
+		"ready, delegating cleanup\n" + goalReady + "\n" +
 			"<CREW44_AGENT_HANDOVER agent_id=\"" + specialist.ID + "\">fix the flake</CREW44_AGENT_HANDOVER>",
 		// Specialist works, hands back nothing — turn just ends.
 		"specialist done",
-		// Gate continuation returns to the lead, which now passes.
-		"all green\n" + goalVerifyAllPass,
+		// The verifier only runs after the handover chain unwinds; it holds
+		// the gate.
+		goalVerifyC1Fails,
+		// Gate continuation returns to the lead, which declares ready again.
+		"all green\n" + goalReady,
+		// The verifier opens the gate.
+		goalVerifyAllPass,
 	}}
 	// Swap the engine in (App was built with an empty one for CreateAgent).
 	a.engine = engine
@@ -986,16 +1250,19 @@ func TestGoalHandoverWinsOverGateContinuation(t *testing.T) {
 	}
 	got := waitForIdle(t, a, chat.ID)
 
-	if engine.promptCount() != 3 {
-		t.Fatalf("engine runs = %d, want 3 (lead, specialist, lead continuation)", engine.promptCount())
+	if engine.promptCount() != 5 {
+		t.Fatalf("engine runs = %d, want 5 (lead, specialist, verifier, lead continuation, verifier)", engine.promptCount())
 	}
-	// The handover advanced first; the gate continuation only fired after
-	// the chain unwound, targeting the lead.
+	// The handover advanced first; the verifier turn only fired after the
+	// chain unwound, and the gate continuation targeted the lead.
 	if !strings.Contains(engine.prompt(1), "handover") && !strings.Contains(engine.prompt(1), "Continue from the previous agent") {
 		t.Fatalf("specialist prompt = %q", engine.prompt(1))
 	}
-	if !strings.Contains(engine.prompt(2), "Goal gate held") {
-		t.Fatalf("continuation prompt = %q", engine.prompt(2))
+	if engine.agent(2).ID != model.GoalVerifierAgentID {
+		t.Fatalf("turn 3 agent = %q, want verifier", engine.agent(2).ID)
+	}
+	if !strings.Contains(engine.prompt(3), "Goal gate held") {
+		t.Fatalf("continuation prompt = %q", engine.prompt(3))
 	}
 	if got.Goal.Phase != model.GoalPhaseAwaitingSignoff {
 		t.Fatalf("phase = %q, want awaiting_signoff", got.Goal.Phase)

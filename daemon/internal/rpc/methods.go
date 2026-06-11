@@ -562,13 +562,20 @@ func (s *Server) chatsCreate(_ context.Context, _ Peer, params json.RawMessage) 
 
 func (s *Server) chatsGoalAnswer(_ context.Context, _ Peer, params json.RawMessage) (any, error) {
 	var body struct {
-		ID      string                `json:"id"`
-		Answers []app.GoalAnswerInput `json:"answers"`
+		ID string `json:"id"`
+		// ClarifySeq is required: it pins the answers to the clarify round
+		// they were written against, so answers for a superseded round
+		// conflict instead of resolving against the wrong questions.
+		ClarifySeq *int64                `json:"clarify_seq"`
+		Answers    []app.GoalAnswerInput `json:"answers"`
 	}
 	if err := decodeParams(params, &body); err != nil {
 		return nil, err
 	}
-	return s.app.AnswerGoal(body.ID, body.Answers)
+	if body.ClarifySeq == nil {
+		return nil, app.ErrBadRequest
+	}
+	return s.app.AnswerGoal(body.ID, *body.ClarifySeq, body.Answers)
 }
 
 func (s *Server) chatsGoalCriteriaUpdate(_ context.Context, _ Peer, params json.RawMessage) (any, error) {

@@ -1,6 +1,7 @@
 package model
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -102,6 +103,39 @@ func TestExtractGoalMarkersVerify(t *testing.T) {
 	v := markers[0].Verify
 	if v.Summary == "" || len(v.Results) != 2 || v.Results[0].Status != "fail" || v.Results[1].Status != "pass" {
 		t.Fatalf("verify = %+v", v)
+	}
+}
+
+func TestExtractGoalMarkersReady(t *testing.T) {
+	content := "All criteria look met.\n" +
+		"<CREW44_GOAL_READY>\n" +
+		"{\"summary\": \"  Roadmap written and every check passes locally.  \"}\n" +
+		"</CREW44_GOAL_READY>"
+
+	cleaned, markers := ExtractGoalMarkers(content)
+	if cleaned != "All criteria look met." {
+		t.Fatalf("cleaned = %q", cleaned)
+	}
+	if len(markers) != 1 || markers[0].Err != nil || markers[0].Ready == nil {
+		t.Fatalf("markers = %+v", markers)
+	}
+	if markers[0].Kind != GoalMarkerReady {
+		t.Fatalf("kind = %q", markers[0].Kind)
+	}
+	if markers[0].Ready.Summary != "Roadmap written and every check passes locally." {
+		t.Fatalf("summary = %q, want trimmed", markers[0].Ready.Summary)
+	}
+
+	// An empty body object is a valid ready declaration.
+	_, markers = ExtractGoalMarkers("<CREW44_GOAL_READY>\n{}\n</CREW44_GOAL_READY>")
+	if len(markers) != 1 || markers[0].Err != nil || markers[0].Ready == nil {
+		t.Fatalf("empty-body markers = %+v", markers)
+	}
+
+	// Malformed JSON comes back with Err set, block stripped.
+	cleaned, markers = ExtractGoalMarkers("<CREW44_GOAL_READY>\nnot json\n</CREW44_GOAL_READY>")
+	if cleaned != "" || len(markers) != 1 || markers[0].Err == nil {
+		t.Fatalf("malformed ready: cleaned = %q markers = %+v", cleaned, markers)
 	}
 }
 
@@ -212,5 +246,176 @@ func TestStripGoalMarkersNoMarkers(t *testing.T) {
 	cleaned, markers := ExtractGoalMarkers(content)
 	if cleaned != content || len(markers) != 0 {
 		t.Fatalf("cleaned = %q markers = %+v", cleaned, markers)
+	}
+}
+
+// A marker quoted inside another marker's body is consistently inert: it is
+// neither parsed (it must never execute invisibly) nor double-stripped.
+func TestExtractGoalMarkersNestedBlockInert(t *testing.T) {
+	content := "<CREW44_GOAL_LOCK>\n" +
+		"{\"statement\": \"s\", \"criteria\": [\n" +
+		"<CREW44_GOAL_READY>\n" +
+		"{\"summary\": \"sneaky quoted ready\"}\n" +
+		"</CREW44_GOAL_READY>\n" +
+		"]}\n" +
+		"</CREW44_GOAL_LOCK>"
+	cleaned, markers := ExtractGoalMarkers(content)
+	if len(markers) != 1 {
+		t.Fatalf("markers = %+v, want 1 (nested ready never parsed)", markers)
+	}
+	if markers[0].Kind != GoalMarkerLock || markers[0].Err == nil {
+		t.Fatalf("marker = %+v, want the malformed host lock only", markers[0])
+	}
+	if cleaned != "" {
+		t.Fatalf("cleaned = %q, want empty (host block stripped exactly once)", cleaned)
+	}
+}
+
+// Interleaved overlapping blocks (tag-in-tag garbage) collapse into the first
+// block's strip range: the overlapping block is not parsed and its closing
+// tag never dangles in the cleaned output.
+func TestExtractGoalMarkersInterleavedOverlapStripsClean(t *testing.T) {
+	content := "intro\n" +
+		"<CREW44_GOAL_LOCK>\n" +
+		"{\n" +
+		"<CREW44_GOAL_READY>\n" +
+		"{}\n" +
+		"</CREW44_GOAL_LOCK>\n" +
+		"{}\n" +
+		"</CREW44_GOAL_READY>\n" +
+		"tail"
+	cleaned, markers := ExtractGoalMarkers(content)
+	if len(markers) != 1 || markers[0].Kind != GoalMarkerLock || markers[0].Err == nil {
+		t.Fatalf("markers = %+v, want one malformed lock", markers)
+	}
+	if strings.Contains(cleaned, "CREW44_GOAL") {
+		t.Fatalf("dangling tag in cleaned output: %q", cleaned)
+	}
+	if !strings.Contains(cleaned, "intro") || !strings.Contains(cleaned, "tail") {
+		t.Fatalf("cleaned = %q", cleaned)
+	}
+}
+
+// Markers inside markdown fenced code regions are quotes: neither parsed nor
+// stripped, for backtick fences, tilde fences, and fences with info strings.
+func TestExtractGoalMarkersFencedBlocksAreInert(t *testing.T) {
+	fenced := "Look at this example:\n```\n<CREW44_GOAL_READY>\n{\"summary\": \"quoted\"}\n</CREW44_GOAL_READY>\n```\nNot a command."
+	cleaned, markers := ExtractGoalMarkers(fenced)
+	if len(markers) != 0 {
+		t.Fatalf("backtick-fenced marker parsed: %+v", markers)
+	}
+	if cleaned != fenced {
+		t.Fatalf("backtick-fenced marker stripped: %q", cleaned)
+	}
+
+	tilde := "~~~\n<CREW44_GOAL_READY>\n{}\n</CREW44_GOAL_READY>\n~~~"
+	cleaned, markers = ExtractGoalMarkers(tilde)
+	if len(markers) != 0 {
+		t.Fatalf("tilde-fenced marker parsed: %+v", markers)
+	}
+	if cleaned != tilde {
+		t.Fatalf("tilde-fenced marker stripped: %q", cleaned)
+	}
+
+	info := "```json\n<CREW44_GOAL_READY>\n{}\n</CREW44_GOAL_READY>\n```"
+	if _, markers := ExtractGoalMarkers(info); len(markers) != 0 {
+		t.Fatalf("info-string fenced marker parsed: %+v", markers)
+	}
+}
+
+// A marker after a properly closed fence is live; the fenced example before
+// it stays quoted in the cleaned output.
+func TestExtractGoalMarkersAfterClosedFenceParses(t *testing.T) {
+	content := "```text\n<CREW44_GOAL_READY>\n{\"summary\": \"example\"}\n</CREW44_GOAL_READY>\n```\nNow for real:\n" +
+		"<CREW44_GOAL_READY>\n{\"summary\": \"live\"}\n</CREW44_GOAL_READY>"
+	cleaned, markers := ExtractGoalMarkers(content)
+	if len(markers) != 1 || markers[0].Err != nil || markers[0].Ready == nil {
+		t.Fatalf("markers = %+v, want exactly the live marker", markers)
+	}
+	if markers[0].Ready.Summary != "live" {
+		t.Fatalf("summary = %q, want the unfenced marker's", markers[0].Ready.Summary)
+	}
+	if !strings.Contains(cleaned, "```text") || !strings.Contains(cleaned, "example") {
+		t.Fatalf("fenced example should survive stripping: %q", cleaned)
+	}
+	if strings.Contains(cleaned, "live") {
+		t.Fatalf("live marker not stripped: %q", cleaned)
+	}
+}
+
+// Pinned behavior: an unclosed fence runs to the end of the message, so a
+// half-quoted marker never executes and the content is left untouched.
+func TestExtractGoalMarkersUnclosedFenceSwallowsMarker(t *testing.T) {
+	content := "```\n<CREW44_GOAL_READY>\n{\"summary\": \"half quoted\"}\n</CREW44_GOAL_READY>"
+	cleaned, markers := ExtractGoalMarkers(content)
+	if len(markers) != 0 {
+		t.Fatalf("marker inside unclosed fence parsed: %+v", markers)
+	}
+	if cleaned != content {
+		t.Fatalf("cleaned = %q, want untouched", cleaned)
+	}
+}
+
+// CRLF round trip: a block whose closing tag line is CRLF-terminated (text
+// follows it) must still extract and strip — `$` alone does not match before
+// \r, so this pins the \r?$ in the closing tag pattern.
+func TestExtractGoalMarkersCRLFRoundTrip(t *testing.T) {
+	content := "All set.\r\n<CREW44_GOAL_READY>\r\n{\"summary\": \"done\"}\r\n</CREW44_GOAL_READY>\r\nNext steps below.\r\n"
+	cleaned, markers := ExtractGoalMarkers(content)
+	if len(markers) != 1 || markers[0].Err != nil || markers[0].Ready == nil {
+		t.Fatalf("markers = %+v, want one ready", markers)
+	}
+	if markers[0].Ready.Summary != "done" {
+		t.Fatalf("summary = %q", markers[0].Ready.Summary)
+	}
+	if strings.Contains(cleaned, "CREW44_GOAL_READY") {
+		t.Fatalf("marker not stripped: %q", cleaned)
+	}
+	if !strings.Contains(cleaned, "All set.") || !strings.Contains(cleaned, "Next steps below.") {
+		t.Fatalf("cleaned = %q", cleaned)
+	}
+	if stripped := StripGoalMarkers(content); strings.Contains(stripped, "CREW44_GOAL_READY") {
+		t.Fatalf("StripGoalMarkers leaked the tag: %q", stripped)
+	}
+}
+
+// Clarify prose fields (intro, question text, options, placeholder) collapse
+// newlines and truncate at their caps instead of rejecting.
+func TestExtractGoalMarkersClarifyFieldCaps(t *testing.T) {
+	longIntro := strings.Repeat("i", GoalMaxClarifyIntroLen+100)
+	longQ := "Line one\nLine two " + strings.Repeat("q", GoalMaxClarifyQuestionLen+100)
+	longOption := strings.Repeat("o", GoalMaxClarifyOptionLen+50)
+	longPlaceholder := strings.Repeat("p", GoalMaxClarifyPlaceholderLen+50)
+	body := fmt.Sprintf(
+		`{"intro": %q, "questions": [{"q": %q, "type": "chips", "options": [%q, "b"]}, {"q": "Free-form?", "type": "text", "placeholder": %q}]}`,
+		longIntro, longQ, longOption, longPlaceholder)
+	content := "<CREW44_GOAL_CLARIFY>\n" + body + "\n</CREW44_GOAL_CLARIFY>"
+
+	_, markers := ExtractGoalMarkers(content)
+	if len(markers) != 1 || markers[0].Err != nil || markers[0].Clarify == nil {
+		t.Fatalf("markers = %+v, want one valid clarify (caps truncate, never reject)", markers)
+	}
+	payload := markers[0].Clarify
+	if len(payload.Intro) != GoalMaxClarifyIntroLen {
+		t.Fatalf("intro len = %d, want %d", len(payload.Intro), GoalMaxClarifyIntroLen)
+	}
+	q1 := payload.Questions[0]
+	if strings.Contains(q1.Q, "\n") {
+		t.Fatalf("question newline not collapsed: %q", q1.Q)
+	}
+	if !strings.HasPrefix(q1.Q, "Line one Line two ") {
+		t.Fatalf("question = %q, want newline collapsed to a space", q1.Q)
+	}
+	if len(q1.Q) != GoalMaxClarifyQuestionLen {
+		t.Fatalf("question len = %d, want %d", len(q1.Q), GoalMaxClarifyQuestionLen)
+	}
+	if len(q1.Options[0]) != GoalMaxClarifyOptionLen {
+		t.Fatalf("option len = %d, want %d", len(q1.Options[0]), GoalMaxClarifyOptionLen)
+	}
+	if q1.Options[1] != "b" {
+		t.Fatalf("short option mangled: %q", q1.Options[1])
+	}
+	if len(payload.Questions[1].Placeholder) != GoalMaxClarifyPlaceholderLen {
+		t.Fatalf("placeholder len = %d, want %d", len(payload.Questions[1].Placeholder), GoalMaxClarifyPlaceholderLen)
 	}
 }
