@@ -2,6 +2,23 @@
 
 All notable changes to this project are documented here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0] - 2026-06-11
+
+### Added
+- **Goal mode — give the crew a verifiable goal instead of a one-shot task.** Flip the Goal toggle when starting a task and the chat stays open until the goal demonstrably holds:
+  - **Scoping.** The lead agent asks a short round of clarifying questions (tap-to-answer chips or free text), then locks the goal into a checklist of objectively checkable criteria. Locking starts the work immediately.
+  - **Live goal card.** A pinned card tracks every criterion's status. You can edit, add, or remove criteria at any time — changing the checklist under an open gate re-arms verification.
+  - **Independent verification gate.** When the crew declares the goal ready, a dedicated anonymous verifier re-checks every criterion in an isolated turn — fresh session, no conversation history, restricted capabilities — so the crew never grades its own work. Criteria the verifier doesn't cover stay unverified and hold the gate.
+  - **Auto-continue loop.** A held gate sends the crew straight back to work with the failed criteria attached, up to 5 automatic attempts per run; any message from you re-arms the budget.
+  - **Sign-off.** When every criterion verifies, accept to close the task — or send it back with notes, which resets the checklist and re-arms the gate. The crew can also re-declare readiness after follow-up work, re-running verification.
+- The new-task composer now always leads with the Partner agent; the lead picker is gone.
+
+### Changed
+- Assistant-emitted protocol markers are now ignored inside Markdown code fences and nested blocks, are bounded in size, and survive CRLF output — quoting a marker can never trigger it.
+
+### Fixed
+- Send controls stay pinned to the right when the new-task toolbar wraps on narrow windows.
+
 ## [0.7.0] - 2026-06-01
 
 ### Added
