@@ -140,4 +140,3 @@ func displayRuntimeName(provider string) string {
 		return strings.Title(provider)
 	}
 }
-

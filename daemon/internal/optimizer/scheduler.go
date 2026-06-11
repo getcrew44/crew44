@@ -17,7 +17,7 @@ type Clock interface {
 
 type realClock struct{}
 
-func (realClock) Now() time.Time                                  { return time.Now() }
+func (realClock) Now() time.Time                                   { return time.Now() }
 func (realClock) LoadLocation(name string) (*time.Location, error) { return time.LoadLocation(name) }
 
 // Scheduler ticks every minute and fires a scan whenever the configured

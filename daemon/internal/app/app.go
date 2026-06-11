@@ -1045,16 +1045,36 @@ func (a *App) resolveWorkdir(projectID, chatID string) (string, error) {
 	return strings.TrimSpace(chatWorkdir(chat, project)), nil
 }
 
-// CreateChat creates a chat under a project. useWorktree is tri-state: nil
-// falls back to the project default, otherwise it's an explicit request. When
-// a worktree is wanted but the workdir isn't a git repo, an explicit request
-// is rejected while a default-derived one silently falls back to no worktree.
-//
-// chatIDOverride lets a caller pre-allocate the chat's ID — the new-task UI
-// supplies one so it can preview the exact worktree branch (crew/<id8>) before
-// the chat exists. Ignored unless it is a single, syntactically safe value;
-// otherwise a fresh ID is minted.
+// ChatCreateOptions carries the optional New Task toggles for chat creation.
+// UseWorktree is tri-state: nil falls back to the project default. ID lets a
+// caller pre-allocate the chat's ID — the new-task UI supplies one so it can
+// preview the exact worktree branch (crew/<id8>) before the chat exists.
+// GoalMode seeds the chat in Goal mode (docs/goal-0610.md): the lead agent
+// scopes the goal first and the crew iterates until every criterion verifies.
+type ChatCreateOptions struct {
+	UseWorktree *bool
+	BaseRef     string
+	GoalMode    bool
+	ID          string
+}
+
+// CreateChat creates a chat under a project. Kept for existing callers; new
+// option-bearing callers use CreateChatWithOptions.
 func (a *App) CreateChat(projectID, title, mainAgentID string, useWorktree *bool, baseRef string, chatIDOverride ...string) (model.ChatRecord, error) {
+	opts := ChatCreateOptions{UseWorktree: useWorktree, BaseRef: baseRef}
+	if len(chatIDOverride) > 0 {
+		opts.ID = chatIDOverride[0]
+	}
+	return a.CreateChatWithOptions(projectID, title, mainAgentID, opts)
+}
+
+// CreateChatWithOptions creates a chat under a project. When a worktree is
+// wanted but the workdir isn't a git repo, an explicit request is rejected
+// while a default-derived one silently falls back to no worktree. The ID
+// override is ignored unless it is a syntactically safe, unused value.
+func (a *App) CreateChatWithOptions(projectID, title, mainAgentID string, opts ChatCreateOptions) (model.ChatRecord, error) {
+	useWorktree := opts.UseWorktree
+	baseRef := opts.BaseRef
 	project, err := a.store.GetProject(projectID)
 	if err != nil {
 		return model.ChatRecord{}, a.mapError(err)
@@ -1072,14 +1092,14 @@ func (a *App) CreateChat(projectID, title, mainAgentID string, useWorktree *bool
 		want = *useWorktree
 	}
 	chatID := id.New()
-	if len(chatIDOverride) > 0 && safeChatID(chatIDOverride[0]) {
+	if safeChatID(opts.ID) {
 		// store.SaveChat upserts by ID (and would even move the chat across
 		// projects), so honoring an ID that already belongs to a chat would
 		// silently overwrite that record and orphan any worktree it held.
 		// Only take the client-supplied ID when it's actually free; on a
 		// collision keep the freshly minted one rather than clobber.
-		if _, err := a.store.GetChat(chatIDOverride[0]); err != nil {
-			chatID = chatIDOverride[0]
+		if _, err := a.store.GetChat(opts.ID); err != nil {
+			chatID = opts.ID
 		}
 	}
 	var binding *model.WorktreeBinding
@@ -1096,6 +1116,15 @@ func (a *App) CreateChat(projectID, title, mainAgentID string, useWorktree *bool
 	}
 
 	now := time.Now().UTC()
+	var goal *model.GoalState
+	if opts.GoalMode {
+		goal = &model.GoalState{
+			Phase:      model.GoalPhaseScoping,
+			AttemptCap: model.GoalDefaultAttemptCap,
+			CreatedAt:  now,
+			UpdatedAt:  now,
+		}
+	}
 	record := model.ChatRecord{
 		ID:                  chatID,
 		ProjectID:           project.ID,
@@ -1105,6 +1134,7 @@ func (a *App) CreateChat(projectID, title, mainAgentID string, useWorktree *bool
 		ParticipantAgentIDs: []string{mainAgentID},
 		Status:              "active",
 		Worktree:            binding,
+		Goal:                goal,
 		Stream: model.ChatStreamState{
 			Status: "idle",
 		},
@@ -1219,6 +1249,9 @@ func (a *App) GetChat(id string) (model.ChatRecord, error) {
 }
 
 func (a *App) UpdateChat(chat model.ChatRecord) (model.ChatRecord, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
 	current, err := a.store.GetChat(chat.ID)
 	if err != nil {
 		return model.ChatRecord{}, a.mapError(err)

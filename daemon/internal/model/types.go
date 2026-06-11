@@ -174,10 +174,13 @@ type ChatRecord struct {
 	Stream                 ChatStreamState    `json:"stream"`
 	// Worktree is set when the chat runs in an isolated git worktree. Nil
 	// chats (legacy or worktree-disabled) fall back to ProjectRecord.Workdir.
-	Worktree   *WorktreeBinding `json:"worktree,omitempty"`
-	CreatedAt  time.Time        `json:"created_at"`
-	UpdatedAt  time.Time        `json:"updated_at"`
-	ArchivedAt time.Time        `json:"archived_at,omitempty"`
+	Worktree *WorktreeBinding `json:"worktree,omitempty"`
+	// Goal is set when the chat runs in Goal mode. Nil chats behave exactly
+	// as before; every goal-mode code path is gated on this pointer.
+	Goal       *GoalState `json:"goal,omitempty"`
+	CreatedAt  time.Time  `json:"created_at"`
+	UpdatedAt  time.Time  `json:"updated_at"`
+	ArchivedAt time.Time  `json:"archived_at,omitempty"`
 }
 
 type EventType string
@@ -190,6 +193,11 @@ const (
 	EventTypeRuntimeSession EventType = "runtime_session"
 	EventTypeHandover       EventType = "handover"
 	EventTypeError          EventType = "error"
+	EventTypeGoalClarify    EventType = "goal_clarify"
+	EventTypeGoalLock       EventType = "goal_lock"
+	EventTypeGoalVerify     EventType = "goal_verify"
+	EventTypeGoalDone       EventType = "goal_done"
+	EventTypeGoalSignoff    EventType = "goal_signoff"
 )
 
 type MessageRole string
@@ -213,6 +221,11 @@ type Event struct {
 	RuntimeSession *RuntimeSessionPayload `json:"runtime_session,omitempty"`
 	Handover       *HandoverPayload       `json:"handover,omitempty"`
 	Error          *ErrorPayload          `json:"error,omitempty"`
+	GoalClarify    *GoalClarifyPayload    `json:"goal_clarify,omitempty"`
+	GoalLock       *GoalLockPayload       `json:"goal_lock,omitempty"`
+	GoalVerify     *GoalVerifyPayload     `json:"goal_verify,omitempty"`
+	GoalDone       *GoalDonePayload       `json:"goal_done,omitempty"`
+	GoalSignoff    *GoalSignoffPayload    `json:"goal_signoff,omitempty"`
 }
 
 type MessagePayload struct {

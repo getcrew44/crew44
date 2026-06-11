@@ -31,10 +31,13 @@ type SystemPromptInput struct {
 	SummaryPath             string
 	ChatSessionDir          string // ~/.crew44/chats/chat-<id>; agents write handover scratch files here so they are scoped to this chat
 	HandoverNote            string
-	UserMemoryDir           string // ~/.crew44/memory; reader expands MEMORY.md + per-entry files
-	ProjectMemoryDir        string // ~/.crew44/projects/<id>/memory
-	LegacyUserMemoryPath    string // ~/.crew44/USER.md; used when UserMemoryDir has no MEMORY.md yet
-	LegacyProjectMemoryPath string // ~/.crew44/projects/<id>/MEMORY.md; legacy single-file fallback
+	Goal                    *model.GoalState // nil = not a goal chat; no Goal Mode section emitted
+	IsGoalLead              bool             // current agent is the chat's main agent (owns clarify/lock/ready markers)
+	IsGoalVerifier          bool             // isolated verifier turn: verifier instructions only, no handover sections
+	UserMemoryDir           string           // ~/.crew44/memory; reader expands MEMORY.md + per-entry files
+	ProjectMemoryDir        string           // ~/.crew44/projects/<id>/memory
+	LegacyUserMemoryPath    string           // ~/.crew44/USER.md; used when UserMemoryDir has no MEMORY.md yet
+	LegacyProjectMemoryPath string           // ~/.crew44/projects/<id>/MEMORY.md; legacy single-file fallback
 }
 
 func BuildSystemPrompt(input SystemPromptInput) string {
@@ -45,6 +48,13 @@ func BuildSystemPrompt(input SystemPromptInput) string {
 	if note := strings.TrimSpace(input.HandoverNote); note != "" {
 		writeSection(&b, "Handover Task", handoverTask(note))
 	}
+	if input.Goal != nil {
+		if input.IsGoalVerifier {
+			writeSection(&b, "Goal Verification", goalVerifierInstructions(input.Goal))
+		} else {
+			writeSection(&b, "Goal Mode", goalModeSection(input.Goal, input.IsGoalLead))
+		}
+	}
 	if summary := summaryReference(input.SummaryPath); summary != "" {
 		writeSection(&b, "Conversation Summary", summary)
 	}
@@ -53,8 +63,12 @@ func BuildSystemPrompt(input SystemPromptInput) string {
 	if skills := skillSummary(input.Runtime.Provider, input.Skills); skills != "" {
 		writeSection(&b, "Available Skills", skills)
 	}
-	writeSection(&b, "Available Agents For Handover", availableAgents(input.Agent.ID, input.AvailableAgents, input.ChatSessionDir))
-	writeSection(&b, "Handover Output Protocol", handoverProtocol())
+	// The verifier is a one-off check turn: it never routes work onward, so
+	// the handover sections would only invite illegal markers.
+	if !input.IsGoalVerifier {
+		writeSection(&b, "Available Agents For Handover", availableAgents(input.Agent.ID, input.AvailableAgents, input.ChatSessionDir))
+		writeSection(&b, "Handover Output Protocol", handoverProtocol())
+	}
 	return strings.TrimSpace(b.String())
 }
 

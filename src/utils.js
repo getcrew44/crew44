@@ -90,6 +90,28 @@ export const HUMAN_USER = {
   initial: 'Y',
 };
 
+// The daemon-synthesized anonymous verifier that runs the goal gate in an
+// isolated turn. Never a stored agent, so it resolves to a fixed identity
+// in the goal-mode gold instead of falling through to "Deleted agent".
+// NOTE: id/name/color must stay in sync with the GoalVerifier* constants in
+// daemon/internal/model/goal.go and with the G palette gold (G.gold) in
+// GoalMode.jsx — change one and you must change the others.
+export const GOAL_VERIFIER = {
+  id: 'goal-verifier',
+  name: 'Verifier',
+  kind: 'agent',
+  role: 'verification gate',
+  color: '#7A6420',
+  initial: 'V',
+};
+
+// The default-crew strategic partner — the permanent lead agent. Shared
+// predicate for the New Task lead-pick fallback (NewTaskRoute) and the
+// delete guard (CrewRoute).
+export function isPartnerAgent(agent) {
+  return !!agent && agent.preset_id === 'default-crew' && agent.preset_key === 'partner';
+}
+
 // Session-local memory of every agent we have seen this run. Lets us still
 // label messages from agents that have since been deleted from the live list.
 // Not persisted — a hard reload starts empty.
@@ -115,6 +137,7 @@ export function __resetSeenAgentsCacheForTests() {
 export function resolveAuthor(authorId, agentsMap) {
   if (!authorId) return null;
   if (authorId === '__human__') return HUMAN_USER;
+  if (authorId === GOAL_VERIFIER.id) return GOAL_VERIFIER;
   const known = agentsMap?.[authorId];
   if (known) return known;
   const remembered = seenAgentsCache.get(authorId);
@@ -259,6 +282,65 @@ export function mapBackendEvent(event) {
       agent_name: event.error?.agent_name || '',
       target_agent_id: event.error?.target_agent_id || '',
       target_agent_name: event.error?.target_agent_name || '',
+      _seq: event.seq,
+    };
+  }
+  if (event.type === 'goal_clarify') {
+    return {
+      kind: 'goal_clarify',
+      author: event.actor_agent_id,
+      time: ts,
+      tsISO,
+      intro: event.goal_clarify?.intro || '',
+      questions: event.goal_clarify?.questions || [],
+      _seq: event.seq,
+    };
+  }
+  if (event.type === 'goal_lock') {
+    return {
+      kind: 'goal_lock',
+      author: event.actor_agent_id,
+      time: ts,
+      tsISO,
+      statement: event.goal_lock?.statement || '',
+      criteria: event.goal_lock?.criteria || [],
+      _seq: event.seq,
+    };
+  }
+  if (event.type === 'goal_verify') {
+    return {
+      kind: 'goal_verify',
+      author: event.actor_agent_id,
+      time: ts,
+      tsISO,
+      attempt: event.goal_verify?.attempt || 0,
+      overall: event.goal_verify?.overall || 'failed',
+      rows: event.goal_verify?.rows || [],
+      outcome: event.goal_verify?.outcome || '',
+      _seq: event.seq,
+    };
+  }
+  if (event.type === 'goal_done') {
+    return {
+      kind: 'goal_done',
+      author: event.actor_agent_id,
+      time: ts,
+      tsISO,
+      statement: event.goal_done?.statement || '',
+      criteriaTotal: event.goal_done?.criteria_total || 0,
+      attempts: event.goal_done?.attempts || 0,
+      elapsedSeconds: event.goal_done?.elapsed_seconds || 0,
+      _seq: event.seq,
+    };
+  }
+  if (event.type === 'goal_signoff') {
+    return {
+      kind: 'goal_signoff',
+      author: event.actor_agent_id,
+      time: ts,
+      tsISO,
+      action: event.goal_signoff?.action || '',
+      notes: event.goal_signoff?.notes || '',
       _seq: event.seq,
     };
   }

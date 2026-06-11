@@ -9,6 +9,8 @@ import { dataTransferHasFiles } from './dragDrop.js';
 import { primeAudioContext } from './audio.js';
 import { textareaCaretPoint } from './textareaCaret.js';
 import { SendShortcutMenu, shouldSendFromEnterKey, useSendShortcutMode } from './sendShortcut.jsx';
+import { GoalModeChip, GoalModeDetail } from './GoalMode.jsx';
+import { isPartnerAgent } from './utils.js';
 import {
   clearComposerDraft,
   newTaskDraftChatId,
@@ -300,7 +302,6 @@ export default function NewTaskRoute({ projects, agents, skills = [], onNewTask,
   const [activeSuggestion, setActiveSuggestion] = React.useState(0);
   const [mentionPoint, setMentionPoint] = React.useState(null);
   const [selectedProjectId, setSelectedProjectId] = React.useState(initialStoredProjectId || '');
-  const [selectedAgentId, setSelectedAgentId] = React.useState(initialDraft.targetAgentId || '');
   const [submitting, setSubmitting] = React.useState(false);
   const [error, setError] = React.useState(null);
   const [scrollTop, setScrollTop] = React.useState(0);
@@ -310,6 +311,9 @@ export default function NewTaskRoute({ projects, agents, skills = [], onNewTask,
   const [gitInfo, setGitInfo] = React.useState(null);
   const [useWorktree, setUseWorktree] = React.useState(false);
   const [baseRef, setBaseRef] = React.useState('');
+  // Goal mode: the lead scopes the goal with clarifying questions, locks
+  // verifiable criteria, and the crew iterates until every check passes.
+  const [goalMode, setGoalMode] = React.useState(false);
   // The user's standing worktree choice, carried across project switches.
   // null until seeded from the first project's saved default; after that it
   // follows explicit toggles rather than resetting to each project's default.
@@ -324,15 +328,20 @@ export default function NewTaskRoute({ projects, agents, skills = [], onNewTask,
   const listboxRef = React.useRef(null);
   const selectedProjectExists = projects.some(project => project.id === selectedProjectId);
   const canAttach = attachmentsSupported();
-  const defaultAgentId = agents[0]?.id || '';
   const selectedProject = projects.find(project => project.id === selectedProjectId);
   const hasWorkdir = Boolean(selectedProject?.workdir);
-  const selectedAgent = agents.find(agent => agent.id === selectedAgentId);
+  // The lead is always the Partner agent (the default-crew strategic
+  // partner); there is no lead picker. Falls back to the first agent for
+  // setups without the default crew.
+  const leadAgent = React.useMemo(
+    () => agents.find(isPartnerAgent) || agents[0] || null,
+    [agents],
+  );
   const agentSkills = React.useMemo(() => {
-    if (!selectedAgent?.skill_ids?.length) return [];
-    const allowed = new Set(selectedAgent.skill_ids);
+    if (!leadAgent?.skill_ids?.length) return [];
+    const allowed = new Set(leadAgent.skill_ids);
     return (skills || []).filter(skill => allowed.has(skill.id));
-  }, [selectedAgent, skills]);
+  }, [leadAgent, skills]);
 
   // Apply initialProjectId when it changes (e.g. clicking new chat on a project)
   React.useEffect(() => {
@@ -350,10 +359,6 @@ export default function NewTaskRoute({ projects, agents, skills = [], onNewTask,
     if (selectedProjectExists) writeLastNewChatProjectId(selectedProjectId);
     else if (!selectedProjectId) writeLastNewChatProjectId('');
   }, [selectedProjectExists, selectedProjectId]);
-
-  React.useEffect(() => {
-    if (agents.length > 0 && !selectedAgentId) setSelectedAgentId(agents[0].id);
-  }, [agents, selectedAgentId]);
 
   // Probe the selected project's git state to drive the worktree controls.
   // The toggle reflects the user's standing choice (seeded once from the first
@@ -394,14 +399,10 @@ export default function NewTaskRoute({ projects, agents, skills = [], onNewTask,
   };
 
   React.useEffect(() => {
-    writeComposerDraft('', draftStorageChatId, {
-      text: val,
-      targetAgentId: selectedAgentId && selectedAgentId !== defaultAgentId ? selectedAgentId : '',
-    });
-  }, [defaultAgentId, draftStorageChatId, selectedAgentId, val]);
+    writeComposerDraft('', draftStorageChatId, { text: val });
+  }, [draftStorageChatId, val]);
 
   const projectItems = projects.map(p => ({ id: p.id, label: p.name }));
-  const agentItems = agents.map(a => ({ id: a.id, label: a.name }));
   const activeToken = React.useMemo(() => suggestionBounds(val, cursor), [val, cursor]);
 
   React.useEffect(() => {
@@ -515,7 +516,7 @@ export default function NewTaskRoute({ projects, agents, skills = [], onNewTask,
     if ((!text && attachments.length === 0) || submitting) return;
 
     const projectId = selectedProjectExists ? selectedProjectId : '';
-    const agentId = selectedAgentId || agents[0]?.id;
+    const agentId = leadAgent?.id;
 
     if (!projectId || !agentId) {
       setError('Select a project and ensure at least one agent exists.');
@@ -543,11 +544,12 @@ export default function NewTaskRoute({ projects, agents, skills = [], onNewTask,
       let chat = createdChatRef.current;
       if (!chat) {
         const wantsWorktree = Boolean(info?.is_git_repo) && useWorktree;
-        const worktreeOpts = info?.is_git_repo ? { useWorktree, baseRef: base } : {};
+        const createOpts = info?.is_git_repo ? { useWorktree, baseRef: base } : {};
+        if (goalMode) createOpts.goalMode = true;
         // Hand the daemon the pre-allocated ID so the created worktree lands on
         // the exact crew/<id8> branch we previewed above.
-        if (wantsWorktree) worktreeOpts.id = draftChatId;
-        chat = await api.createChat(projectId, titleSource, agentId, worktreeOpts);
+        if (wantsWorktree) createOpts.id = draftChatId;
+        chat = await api.createChat(projectId, titleSource, agentId, createOpts);
         createdChatRef.current = chat;
       }
       await api.postMessage(chat.id, text, chat.main_agent_id, attachments);
@@ -589,7 +591,7 @@ export default function NewTaskRoute({ projects, agents, skills = [], onNewTask,
     }
   };
 
-  const canStart = (val.trim() || attachments.length > 0) && !submitting && selectedProjectExists && selectedAgentId;
+  const canStart = (val.trim() || attachments.length > 0) && !submitting && selectedProjectExists && Boolean(leadAgent);
   const mentionMenuLeft = mentionPoint && inputRef.current
     ? Math.min(Math.max(0, mentionPoint.left - 8), Math.max(0, inputRef.current.clientWidth - MENTION_MENU_WIDTH))
     : 0;
@@ -694,7 +696,9 @@ export default function NewTaskRoute({ projects, agents, skills = [], onNewTask,
               }}
               onDrop={handleDrop}
               disabled={submitting}
-              placeholder="Describe a task. The lead agent will plan it and assign subtasks."
+              placeholder={goalMode
+                ? 'Describe the goal. The lead agent will scope it with you, then the crew iterates until it verifies.'
+                : 'Describe a task. The lead agent will plan it and assign subtasks.'}
               rows={1}
               style={{
                 ...NEW_TASK_INPUT_TEXT_STYLE,
@@ -707,10 +711,17 @@ export default function NewTaskRoute({ projects, agents, skills = [], onNewTask,
             />
             </div>
           </div>
+          {/* Two flex groups: the left chips wrap among themselves when the
+              view is narrow, while the send controls stay pinned to the right
+              instead of dropping to a stray second line. */}
           <div style={{
             display: 'flex', alignItems: 'center', gap: 8, marginTop: 8,
-            paddingTop: 12, borderTop: '1px solid #ECE6D5', flexWrap: 'wrap',
+            paddingTop: 12, borderTop: '1px solid #ECE6D5',
           }}>
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
+              flex: 1, minWidth: 0,
+            }}>
             {canAttach && (
               <button
                 type="button"
@@ -746,36 +757,31 @@ export default function NewTaskRoute({ projects, agents, skills = [], onNewTask,
               )}
             />
 
-            <CustomPicker
-              icon={<AgentIcon size={13} />}
-              label="Lead"
-              placeholder="Pick a lead"
-              value={selectedAgentId}
-              items={agentItems}
-              onChange={setSelectedAgentId}
-              variant="ghost"
-            />
-
             {gitInfo?.is_git_repo && (
               <WorktreeChip enabled={useWorktree} onToggle={onToggleWorktree} />
             )}
 
-            <div style={{ flex: 1 }} />
-            <SendShortcutMenu mode={sendShortcutMode} onChange={setSendShortcutMode} direction="down" />
-            <button
-              data-testid="start-crew-button"
-              onClick={startCrew}
-              disabled={!canStart}
-              style={{
-                ...chip,
-                background: canStart ? '#1C1A17' : '#F0EAD8',
-                color: canStart ? '#FCFBF7' : '#A89F92',
-                border: '1px solid ' + (canStart ? '#1C1A17' : '#E6DFCC'),
-                fontWeight: 500, padding: '6px 14px',
-              }}
-            >
-              {submitting ? 'Starting…' : 'Start →'}
-            </button>
+            <GoalModeChip enabled={goalMode} onToggle={() => setGoalMode(v => !v)} />
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0, marginLeft: 'auto' }}>
+              <SendShortcutMenu mode={sendShortcutMode} onChange={setSendShortcutMode} direction="down" />
+              <button
+                data-testid="start-crew-button"
+                onClick={startCrew}
+                disabled={!canStart}
+                style={{
+                  ...chip,
+                  background: canStart ? '#1C1A17' : '#F0EAD8',
+                  color: canStart ? '#FCFBF7' : '#A89F92',
+                  border: '1px solid ' + (canStart ? '#1C1A17' : '#E6DFCC'),
+                  fontWeight: 500, padding: '6px 14px',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {submitting ? 'Starting…' : goalMode ? 'Set goal →' : 'Start →'}
+              </button>
+            </div>
           </div>
           {gitInfo?.is_git_repo && useWorktree && (
             <WorktreeDetail
@@ -785,6 +791,7 @@ export default function NewTaskRoute({ projects, agents, skills = [], onNewTask,
               onChangeBase={setBaseRef}
             />
           )}
+          {goalMode && <GoalModeDetail />}
         </div>
 
         <div style={{ marginTop: 28, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>

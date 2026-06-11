@@ -15,6 +15,28 @@ import (
 
 var errChatStoppedAfterError = errors.New("chat stopped after error event")
 
+// mutateChat re-reads the chat under a.mu, applies fn to the fresh record,
+// and saves it. The run goroutine's read-modify-write saves must go through
+// this (applying only the fields the run owns): the goal RPCs (AnswerGoal,
+// UpdateGoalCriteria, SignoffGoal) commit whole-record updates under a.mu,
+// and an unlocked GetChat→mutate→SaveChat in the run goroutine would silently
+// revert anything they wrote in between. Keep fn small and non-blocking —
+// never call refreshChatSummary, store.ListEvents, runtime, or broker
+// publishes from inside it.
+func (a *App) mutateChat(chatID string, fn func(*model.ChatRecord)) (model.ChatRecord, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	chat, err := a.store.GetChat(chatID)
+	if err != nil {
+		return model.ChatRecord{}, err
+	}
+	fn(&chat)
+	if err := a.store.SaveChat(chat); err != nil {
+		return model.ChatRecord{}, err
+	}
+	return chat, nil
+}
+
 type chatRunController struct {
 	cancel            context.CancelFunc
 	pendingInterrupts []pendingInterrupt
@@ -52,10 +74,7 @@ func (a *App) PostMessage(chatID, content, targetAgentID string, attachments []m
 		return model.ChatRecord{}, ErrConflict
 	}
 	if chat.LastRuntimeSession.AgentID != "" && chat.LastRuntimeSession.AgentID != targetAgentID {
-		events, err := a.store.ListEvents(chatID, 0)
-		if err == nil {
-			_ = a.store.WriteSummary(chatID, model.BuildChatSummary(events))
-		}
+		a.refreshChatSummary(chatID)
 	}
 
 	now := time.Now().UTC()
@@ -257,6 +276,14 @@ func (a *App) runChat(ctx context.Context, controller *chatRunController, chatID
 	currentTurnID := turnID
 	currentPrompt := prompt
 	currentHandoverNote := ""
+	// currentIsVerifier marks the isolated goal-verification turn: a
+	// daemon-synthesized anonymous agent on the lead's runtime, fresh
+	// session, no conversation summary, no handover powers. steerTargetID
+	// is who a steer restart should address — never the verifier, since it
+	// isn't a stored agent and holds no crew role.
+	currentIsVerifier := false
+	steerTargetID := agentID
+	var goalRun *goalRunState
 
 	for {
 		chat, err := a.store.GetChat(chatID)
@@ -264,10 +291,27 @@ func (a *App) runChat(ctx context.Context, controller *chatRunController, chatID
 			a.finishChatWithError(chatID, err.Error())
 			return
 		}
-		agent, err := a.store.GetAgent(currentAgentID)
-		if err != nil {
-			a.finishChatWithError(chatID, err.Error())
-			return
+		if chat.Goal != nil && goalRun == nil {
+			goalRun = &goalRunState{}
+		}
+		steerTargetID = currentAgentID
+		if currentIsVerifier {
+			steerTargetID = chat.MainAgentID
+		}
+		var agent model.AgentConfig
+		if currentIsVerifier {
+			lead, leadErr := a.store.GetAgent(chat.MainAgentID)
+			if leadErr != nil {
+				a.finishChatWithError(chatID, leadErr.Error())
+				return
+			}
+			agent = goalVerifierAgent(lead)
+		} else {
+			agent, err = a.store.GetAgent(currentAgentID)
+			if err != nil {
+				a.finishChatWithError(chatID, err.Error())
+				return
+			}
 		}
 		runtimeRecord, err := a.store.GetRuntime(agent.RuntimeID)
 		if err != nil {
@@ -279,15 +323,25 @@ func (a *App) runChat(ctx context.Context, controller *chatRunController, chatID
 			a.finishChatWithError(chatID, err.Error())
 			return
 		}
-		agentSkills, err := a.resolveRunSkills(agent)
-		if err != nil {
-			a.finishChatWithError(chatID, err.Error())
-			return
+		var agentSkills []runtime.SkillContext
+		var availableAgents []model.AgentConfig
+		if !currentIsVerifier {
+			agentSkills, err = a.resolveRunSkills(agent)
+			if err != nil {
+				a.finishChatWithError(chatID, err.Error())
+				return
+			}
+			availableAgents, err = a.availableHandoverAgents()
+			if err != nil {
+				a.finishChatWithError(chatID, err.Error())
+				return
+			}
 		}
-		availableAgents, err := a.availableHandoverAgents()
-		if err != nil {
-			a.finishChatWithError(chatID, err.Error())
-			return
+		summaryPath := a.store.SummaryPath(chatID)
+		if currentIsVerifier {
+			// The verifier checks the crew's claims from scratch; the
+			// conversation summary would only let it inherit them.
+			summaryPath = ""
 		}
 		runtimeAgent := agent
 		runtimeAgent.Instruction = promptbuilder.BuildSystemPrompt(promptbuilder.SystemPromptInput{
@@ -295,9 +349,12 @@ func (a *App) runChat(ctx context.Context, controller *chatRunController, chatID
 			Runtime:                 runtimeRecord,
 			AvailableAgents:         availableAgents,
 			Skills:                  promptSkills(agentSkills),
-			SummaryPath:             a.store.SummaryPath(chatID),
+			SummaryPath:             summaryPath,
 			ChatSessionDir:          a.store.ChatSessionDir(chatID),
 			HandoverNote:            currentHandoverNote,
+			Goal:                    chat.Goal,
+			IsGoalLead:              !currentIsVerifier && currentAgentID == chat.MainAgentID,
+			IsGoalVerifier:          currentIsVerifier,
 			UserMemoryDir:           a.store.UserMemoryDir(),
 			ProjectMemoryDir:        a.store.ProjectMemoryDir(project.ID),
 			LegacyUserMemoryPath:    a.store.UserMemoryPath(),
@@ -305,7 +362,7 @@ func (a *App) runChat(ctx context.Context, controller *chatRunController, chatID
 		})
 
 		resumeSessionID := ""
-		if chat.LastRuntimeSession.AgentID == currentAgentID {
+		if !currentIsVerifier && chat.LastRuntimeSession.AgentID == currentAgentID {
 			resumeSessionID = chat.LastRuntimeSession.SessionID
 		}
 
@@ -317,18 +374,28 @@ func (a *App) runChat(ctx context.Context, controller *chatRunController, chatID
 		if agent.Source != nil {
 			agentSourceDir = agent.Source.SourceDir
 		}
+		runtimeEnvID := currentAgentID
+		if currentIsVerifier {
+			// The verifier's env dir is scoped per chat (the chat-title
+			// summarizer precedent, RuntimeEnvTitleDir): one shared
+			// "goal-verifier" dir would let concurrent goal chats race each
+			// other on the same claude-config / skills tree.
+			runtimeEnvID = currentAgentID + "-" + chatID
+		}
 		result, err := a.engine.Run(ctx, runtime.RunRequest{
 			Runtime:         runtimeRecord,
 			Agent:           runtimeAgent,
 			AgentSkills:     agentSkills,
 			Prompt:          currentPrompt,
 			WorkDir:         chatWorkdir(chat, project),
-			RuntimeEnvDir:   a.store.RuntimeEnvDir(currentAgentID),
+			RuntimeEnvDir:   a.store.RuntimeEnvDir(runtimeEnvID),
 			AgentSourceDir:  agentSourceDir,
 			ResumeSessionID: resumeSessionID,
 			// Only the main interactive turn gets the headless browser. Utility
-			// calls like the title summarizer (chat_title.go) leave this off.
-			EnableBrowserMCP: true,
+			// calls like the title summarizer (chat_title.go) leave this off,
+			// and so does the verifier — verification means checking the
+			// crew's claims with local tools, not browsing.
+			EnableBrowserMCP: !currentIsVerifier,
 		}, func(streamEvent runtime.StreamEvent) error {
 			event := model.Event{
 				Type:           streamEvent.Type,
@@ -352,8 +419,17 @@ func (a *App) runChat(ctx context.Context, controller *chatRunController, chatID
 			}
 			if streamEvent.Message != nil && streamEvent.Message.Role == model.MessageRoleAssistant {
 				cleaned, handoverTargets := model.ExtractAgentHandoverMarkers(streamEvent.Message.Content)
+				var goalMarkers []model.GoalMarker
+				if goalRun != nil {
+					cleaned, goalMarkers = model.ExtractGoalMarkers(cleaned)
+				}
 				lastAssistant = cleaned
 				triggerSteer := cleaned != "" && a.hasPendingSteer(chatID, controller)
+				if currentIsVerifier {
+					// The verifier holds no crew role: any handover marker it
+					// emits is stripped but never scheduled.
+					handoverTargets = nil
+				}
 				if !triggerSteer {
 					for _, handover := range handoverTargets {
 						target, errorPayload := a.validateHandoverTarget(handover.AgentID, currentAgentID)
@@ -363,22 +439,24 @@ func (a *App) runChat(ctx context.Context, controller *chatRunController, chatID
 						}
 						pendingHandoverAgent = target
 						pendingHandoverNote = handover.Note
-						latestChat, err := a.store.GetChat(chatID)
-						if err != nil {
-							return err
-						}
-						latestChat.PendingHandoverAgentID = target.ID
-						latestChat.UpdatedAt = time.Now().UTC()
-						if err := a.store.SaveChat(latestChat); err != nil {
+						if _, err := a.mutateChat(chatID, func(c *model.ChatRecord) {
+							c.PendingHandoverAgentID = target.ID
+							c.UpdatedAt = time.Now().UTC()
+						}); err != nil {
 							return err
 						}
 						if err := a.appendHandoverEvent(chatID, currentTurnID, currentAgentID, handoverSubtypeScheduled, target, handover.Note); err != nil {
 							return err
 						}
 					}
+					if len(goalMarkers) > 0 {
+						if err := a.processGoalMarkers(chatID, currentTurnID, currentAgentID, agent.Name, goalMarkers, goalRun); err != nil {
+							return err
+						}
+					}
 				}
 				if cleaned == "" {
-					if len(handoverTargets) == 0 {
+					if len(handoverTargets) == 0 && len(goalMarkers) == 0 {
 						a.finishChatWithErrorPayload(chatID, currentTurnID, currentAgentID, model.ErrorPayload{
 							Subtype: "message",
 							Code:    "empty_assistant_output",
@@ -403,7 +481,9 @@ func (a *App) runChat(ctx context.Context, controller *chatRunController, chatID
 				key := toolCallKey(currentAgentID, persisted.ToolCall.CallID)
 				pendingToolSeqs[key] = append(pendingToolSeqs[key], persisted.Seq)
 			}
-			if streamEvent.RuntimeSession != nil && streamEvent.RuntimeSession.SessionID != "" {
+			if streamEvent.RuntimeSession != nil && streamEvent.RuntimeSession.SessionID != "" && !currentIsVerifier {
+				// The verifier's throwaway session must not clobber the
+				// lead's resumable one.
 				a.updateLastRuntimeSession(chatID, currentAgentID, streamEvent.RuntimeSession.SessionID)
 			}
 			a.broker.Publish(chatID, broker.Notification[model.Event]{Kind: broker.KindEvent, Value: persisted})
@@ -418,7 +498,7 @@ func (a *App) runChat(ctx context.Context, controller *chatRunController, chatID
 			}
 			if errors.Is(err, context.Canceled) || ctx.Err() != nil {
 				if delivered, remaining, ok := a.consumeTriggeredPendingSteer(chatID, controller); ok {
-					if restartErr := a.restartAfterSteer(chatID, currentAgentID, delivered, remaining); restartErr != nil {
+					if restartErr := a.restartAfterSteer(chatID, steerTargetID, delivered, remaining); restartErr != nil {
 						a.finishChatWithError(chatID, restartErr.Error())
 					}
 					return
@@ -430,51 +510,91 @@ func (a *App) runChat(ctx context.Context, controller *chatRunController, chatID
 			return
 		}
 
-		chat, err = a.store.GetChat(chatID)
+		// End-of-turn save: re-read under a.mu and touch only the fields this
+		// run owns, so a goal RPC (e.g. UpdateGoalCriteria) that committed
+		// mid-stream is never reverted by a stale whole-record write.
+		chat, err = a.mutateChat(chatID, func(c *model.ChatRecord) {
+			if !currentIsVerifier {
+				c.LastRuntimeSession = model.LastRuntimeSession{
+					AgentID:   currentAgentID,
+					SessionID: result.SessionID,
+					UpdatedAt: time.Now().UTC(),
+				}
+				c.CurrentAgentID = currentAgentID
+			}
+			c.UpdatedAt = time.Now().UTC()
+			if pendingHandoverAgent.ID == "" {
+				c.PendingHandoverAgentID = ""
+			}
+		})
 		if err != nil {
-			a.finishChatWithError(chatID, err.Error())
-			return
-		}
-		chat.LastRuntimeSession = model.LastRuntimeSession{
-			AgentID:   currentAgentID,
-			SessionID: result.SessionID,
-			UpdatedAt: time.Now().UTC(),
-		}
-		chat.CurrentAgentID = currentAgentID
-		chat.UpdatedAt = time.Now().UTC()
-		if pendingHandoverAgent.ID == "" {
-			chat.PendingHandoverAgentID = ""
-		}
-		if err := a.store.SaveChat(chat); err != nil {
 			a.finishChatWithError(chatID, err.Error())
 			return
 		}
 
 		if pendingHandoverAgent.ID == "" {
+			// Goal gate continuation: a pending handover always wins, so this
+			// is only evaluated once the handover chain has fully unwound and
+			// the run would otherwise end. The next turn targets either the
+			// lead or the isolated verifier.
+			if nextTurn, ok := a.nextGoalTurn(ctx, controller, chatID, currentTurnID, currentAgentID, agent.Name, goalRun); ok {
+				if currentAgentID != chat.MainAgentID {
+					a.refreshChatSummary(chatID)
+				}
+				nextTurnID := id.New()
+				chat, err = a.mutateChat(chatID, func(c *model.ChatRecord) {
+					c.ActiveTurnID = nextTurnID
+					// Verifier turns surface as the lead in chat-level state —
+					// the verifier is not a stored agent, so clients must never
+					// be handed its id as a message target. Its identity rides
+					// on the timeline events instead.
+					c.CurrentAgentID = c.MainAgentID
+					c.UpdatedAt = time.Now().UTC()
+					c.Stream = model.ChatStreamState{
+						Status:    "streaming",
+						AgentID:   c.MainAgentID,
+						StartedAt: time.Now().UTC(),
+					}
+				})
+				if err != nil {
+					a.finishChatWithError(chatID, err.Error())
+					return
+				}
+				currentIsVerifier = nextTurn.verifier
+				if currentIsVerifier {
+					currentAgentID = model.GoalVerifierAgentID
+					goalRun.verifierActive = true
+				} else {
+					currentAgentID = chat.MainAgentID
+				}
+				currentPrompt = nextTurn.prompt
+				currentHandoverNote = ""
+				currentTurnID = nextTurnID
+				continue
+			}
 			break
 		}
 		if _, errorPayload := a.validateHandoverTarget(pendingHandoverAgent.ID, currentAgentID); errorPayload != nil {
 			a.finishChatWithErrorPayload(chatID, currentTurnID, currentAgentID, *errorPayload)
 			return
 		}
-		events, err := a.store.ListEvents(chatID, 0)
-		if err == nil {
-			_ = a.store.WriteSummary(chatID, model.BuildChatSummary(events))
-		}
+		a.refreshChatSummary(chatID)
 
 		nextPrompt := buildHandoverPrompt(currentPrompt, lastAssistant)
 		nextTurnID := id.New()
-		chat.PendingHandoverAgentID = ""
-		chat.CurrentAgentID = pendingHandoverAgent.ID
-		chat.UpdatedAt = time.Now().UTC()
-		chat.ActiveTurnID = nextTurnID
-		chat.Stream = model.ChatStreamState{
-			Status:    "streaming",
-			AgentID:   pendingHandoverAgent.ID,
-			StartedAt: time.Now().UTC(),
-		}
-		chat.ParticipantAgentIDs = appendUnique(chat.ParticipantAgentIDs, pendingHandoverAgent.ID)
-		if err := a.store.SaveChat(chat); err != nil {
+		chat, err = a.mutateChat(chatID, func(c *model.ChatRecord) {
+			c.PendingHandoverAgentID = ""
+			c.CurrentAgentID = pendingHandoverAgent.ID
+			c.UpdatedAt = time.Now().UTC()
+			c.ActiveTurnID = nextTurnID
+			c.Stream = model.ChatStreamState{
+				Status:    "streaming",
+				AgentID:   pendingHandoverAgent.ID,
+				StartedAt: time.Now().UTC(),
+			}
+			c.ParticipantAgentIDs = appendUnique(c.ParticipantAgentIDs, pendingHandoverAgent.ID)
+		})
+		if err != nil {
 			a.finishChatWithError(chatID, err.Error())
 			return
 		}
@@ -489,12 +609,22 @@ func (a *App) runChat(ctx context.Context, controller *chatRunController, chatID
 	}
 
 	if pending, ok := a.consumePendingSteer(chatID, controller); ok {
-		if restartErr := a.restartAfterSteer(chatID, currentAgentID, pending, nil); restartErr != nil {
+		if restartErr := a.restartAfterSteer(chatID, steerTargetID, pending, nil); restartErr != nil {
 			a.finishChatWithError(chatID, restartErr.Error())
 		}
 		return
 	}
 	a.finishChatSuccess(chatID)
+}
+
+// refreshChatSummary rebuilds the persisted cross-agent conversation summary
+// from the full event log. Best-effort: any failure leaves the previous
+// summary in place.
+func (a *App) refreshChatSummary(chatID string) {
+	events, err := a.store.ListEvents(chatID, 0)
+	if err == nil {
+		_ = a.store.WriteSummary(chatID, model.BuildChatSummary(events))
+	}
 }
 
 func (a *App) hasPendingSteer(chatID string, controller *chatRunController) bool {
@@ -683,46 +813,37 @@ func buildInterruptPrompt(pending []pendingInterrupt) string {
 }
 
 func (a *App) updateLastRuntimeSession(chatID, agentID, sessionID string) {
-	chat, err := a.store.GetChat(chatID)
-	if err != nil {
-		return
-	}
-	chat.LastRuntimeSession = model.LastRuntimeSession{
-		AgentID:   agentID,
-		SessionID: sessionID,
-		UpdatedAt: time.Now().UTC(),
-	}
-	chat.UpdatedAt = time.Now().UTC()
-	_ = a.store.SaveChat(chat)
+	_, _ = a.mutateChat(chatID, func(c *model.ChatRecord) {
+		c.LastRuntimeSession = model.LastRuntimeSession{
+			AgentID:   agentID,
+			SessionID: sessionID,
+			UpdatedAt: time.Now().UTC(),
+		}
+		c.UpdatedAt = time.Now().UTC()
+	})
 }
 
 func (a *App) finishChatSuccess(chatID string) {
-	chat, err := a.store.GetChat(chatID)
-	if err != nil {
-		return
-	}
-	chat.Stream.Status = "idle"
-	chat.Stream.LastError = ""
-	chat.Stream.CancelRequested = false
-	chat.Stream.PendingSteers = nil
-	chat.PendingHandoverAgentID = ""
-	chat.UpdatedAt = time.Now().UTC()
-	_ = a.store.SaveChat(chat)
+	_, _ = a.mutateChat(chatID, func(c *model.ChatRecord) {
+		c.Stream.Status = "idle"
+		c.Stream.LastError = ""
+		c.Stream.CancelRequested = false
+		c.Stream.PendingSteers = nil
+		c.PendingHandoverAgentID = ""
+		c.UpdatedAt = time.Now().UTC()
+	})
 	a.broker.Publish(chatID, broker.Notification[model.Event]{Kind: broker.KindDone})
 }
 
 func (a *App) finishChatCanceled(chatID string) {
-	chat, err := a.store.GetChat(chatID)
-	if err != nil {
-		return
-	}
-	chat.Stream.Status = "idle"
-	chat.Stream.LastError = ""
-	chat.Stream.CancelRequested = false
-	chat.Stream.PendingSteers = nil
-	chat.PendingHandoverAgentID = ""
-	chat.UpdatedAt = time.Now().UTC()
-	_ = a.store.SaveChat(chat)
+	_, _ = a.mutateChat(chatID, func(c *model.ChatRecord) {
+		c.Stream.Status = "idle"
+		c.Stream.LastError = ""
+		c.Stream.CancelRequested = false
+		c.Stream.PendingSteers = nil
+		c.PendingHandoverAgentID = ""
+		c.UpdatedAt = time.Now().UTC()
+	})
 	a.broker.Publish(chatID, broker.Notification[model.Event]{Kind: broker.KindDone})
 }
 
@@ -781,13 +902,14 @@ func (a *App) finishChatWithErrorPayload(chatID, turnID, actorAgentID string, pa
 		if appendErr == nil {
 			a.broker.Publish(chatID, broker.Notification[model.Event]{Kind: broker.KindEvent, Value: event})
 		}
-		chat.Stream.Status = "idle"
-		chat.Stream.LastError = payload.Message
-		chat.Stream.CancelRequested = true
-		chat.Stream.PendingSteers = nil
-		chat.PendingHandoverAgentID = ""
-		chat.UpdatedAt = time.Now().UTC()
-		_ = a.store.SaveChat(chat)
+		_, _ = a.mutateChat(chatID, func(c *model.ChatRecord) {
+			c.Stream.Status = "idle"
+			c.Stream.LastError = payload.Message
+			c.Stream.CancelRequested = true
+			c.Stream.PendingSteers = nil
+			c.PendingHandoverAgentID = ""
+			c.UpdatedAt = time.Now().UTC()
+		})
 	}
 	if payload.Message == "" {
 		payload.Message = "Chat stopped because an error occurred."

@@ -68,6 +68,9 @@ func (s *Server) registerMethods() {
 		"chats.events.unsubscribe":         s.chatsEventsUnsubscribe,
 		"chats.tool.get":                   s.chatsToolGet,
 		"chats.cancel":                     s.chatsCancel,
+		"chats.goal.answer":                s.chatsGoalAnswer,
+		"chats.goal.criteria.update":       s.chatsGoalCriteriaUpdate,
+		"chats.goal.signoff":               s.chatsGoalSignoff,
 
 		"optimizer.suggestions.list": s.optimizerSuggestionsList,
 		"optimizer.scan.run":         s.optimizerScanRun,
@@ -537,8 +540,11 @@ func (s *Server) chatsCreate(_ context.Context, _ Peer, params json.RawMessage) 
 		Title       string `json:"title"`
 		MainAgentID string `json:"main_agent_id"`
 		// Pointer so an absent flag falls back to the project default.
-		UseWorktree *bool `json:"use_worktree"`
+		UseWorktree *bool  `json:"use_worktree"`
 		BaseRef     string `json:"base_ref"`
+		// GoalMode seeds the chat in Goal mode: the lead agent scopes the
+		// goal first and the crew iterates until every criterion verifies.
+		GoalMode bool `json:"goal_mode"`
 		// Optional client-allocated ID so the new-task UI can preview the
 		// exact worktree branch; validated server-side before use.
 		ID string `json:"id"`
@@ -546,7 +552,55 @@ func (s *Server) chatsCreate(_ context.Context, _ Peer, params json.RawMessage) 
 	if err := decodeParams(params, &body); err != nil {
 		return nil, err
 	}
-	return s.app.CreateChat(body.ProjectID, body.Title, body.MainAgentID, body.UseWorktree, body.BaseRef, body.ID)
+	return s.app.CreateChatWithOptions(body.ProjectID, body.Title, body.MainAgentID, app.ChatCreateOptions{
+		UseWorktree: body.UseWorktree,
+		BaseRef:     body.BaseRef,
+		GoalMode:    body.GoalMode,
+		ID:          body.ID,
+	})
+}
+
+func (s *Server) chatsGoalAnswer(_ context.Context, _ Peer, params json.RawMessage) (any, error) {
+	var body struct {
+		ID string `json:"id"`
+		// ClarifySeq is required: it pins the answers to the clarify round
+		// they were written against, so answers for a superseded round
+		// conflict instead of resolving against the wrong questions.
+		ClarifySeq *int64                `json:"clarify_seq"`
+		Answers    []app.GoalAnswerInput `json:"answers"`
+	}
+	if err := decodeParams(params, &body); err != nil {
+		return nil, err
+	}
+	if body.ClarifySeq == nil {
+		return nil, app.ErrBadRequest
+	}
+	return s.app.AnswerGoal(body.ID, *body.ClarifySeq, body.Answers)
+}
+
+func (s *Server) chatsGoalCriteriaUpdate(_ context.Context, _ Peer, params json.RawMessage) (any, error) {
+	var body struct {
+		ID string `json:"id"`
+		// Pointer so an absent statement leaves the current one untouched.
+		Statement *string                  `json:"statement"`
+		Criteria  []app.GoalCriterionInput `json:"criteria"`
+	}
+	if err := decodeParams(params, &body); err != nil {
+		return nil, err
+	}
+	return s.app.UpdateGoalCriteria(body.ID, body.Statement, body.Criteria)
+}
+
+func (s *Server) chatsGoalSignoff(_ context.Context, _ Peer, params json.RawMessage) (any, error) {
+	var body struct {
+		ID     string `json:"id"`
+		Action string `json:"action"`
+		Notes  string `json:"notes"`
+	}
+	if err := decodeParams(params, &body); err != nil {
+		return nil, err
+	}
+	return s.app.SignoffGoal(body.ID, body.Action, body.Notes)
 }
 
 func (s *Server) chatsList(_ context.Context, _ Peer, params json.RawMessage) (any, error) {

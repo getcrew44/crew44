@@ -9,10 +9,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gorilla/websocket"
 	"github.com/getcrew44/crew44/daemon/internal/model"
 	"github.com/getcrew44/crew44/daemon/internal/rpc"
 	"github.com/getcrew44/crew44/daemon/internal/runtime"
+	"github.com/gorilla/websocket"
 )
 
 func TestTransportHealthDoesNotRequireToken(t *testing.T) {

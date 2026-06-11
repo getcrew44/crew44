@@ -9,6 +9,10 @@ import { attachmentsSupported, dedupeAttachments, droppedAttachments, pickAttach
 import { dataTransferHasFiles } from './dragDrop.js';
 import { primeAudioContext, playDoneSound } from './audio.js';
 import { SendShortcutMenu, shortcutPlaceholderHint, shouldSendFromEnterKey, useSendShortcutMode } from './sendShortcut.jsx';
+import {
+  GoalCard, GoalClarifyEvent, GoalLockDivider, GoalVerifyEvent,
+  GoalDoneEvent, GoalSignoffDivider, GoalHeaderPill,
+} from './GoalMode.jsx';
 
 function isAgentActivityEvent(event) {
   if (!event) return false;
@@ -769,6 +773,9 @@ function EventRouter({
   searchQuery = '',
   activeSearchMatchIndex = 0,
   getSearchMatchIndex,
+  chatGoal,
+  onGoalAnswer,
+  onGoalSignoff,
 }) {
   if (event.kind === 'message') return (
     <MessageEvent
@@ -787,6 +794,13 @@ function EventRouter({
   if (event.kind === 'tool_group') return <ToolGroupEvent events={event.events} agentsMap={agentsMap} showHeader={showHeader} />;
   if (event.kind === 'tool_result') return <ToolResultEvent event={event} agentsMap={agentsMap} />;
   if (event.kind === 'error') return <ErrorEvent event={event} agentsMap={agentsMap} showHeader={showHeader} copyAction={copyAction} />;
+  if (event.kind === 'goal_clarify') return (
+    <GoalClarifyEvent event={event} agentsMap={agentsMap} showHeader={showHeader} chatGoal={chatGoal} onAnswer={onGoalAnswer} />
+  );
+  if (event.kind === 'goal_lock') return <GoalLockDivider event={event} />;
+  if (event.kind === 'goal_verify') return <GoalVerifyEvent event={event} />;
+  if (event.kind === 'goal_done') return <GoalDoneEvent event={event} chatGoal={chatGoal} onSignoff={onGoalSignoff} />;
+  if (event.kind === 'goal_signoff') return <GoalSignoffDivider event={event} />;
   // runtime_session is intentionally swallowed; no UI for it.
   return null;
 }
@@ -968,6 +982,12 @@ function TaskHeader({ chat, events, fileCount, drawerOpen, onToggleDrawer, onCha
             {chat.worktree && (
               <>
                 <WorktreeBadge worktree={chat.worktree} />
+                <span style={{ color: '#D6CDB6' }}>·</span>
+              </>
+            )}
+            {chat.goal && (
+              <>
+                <GoalHeaderPill goal={chat.goal} />
                 <span style={{ color: '#D6CDB6' }}>·</span>
               </>
             )}
@@ -2277,6 +2297,9 @@ function renderEventsWithHandovers({
   searchQuery = '',
   activeSearchMatchIndex = 0,
   getSearchMatchIndex,
+  chatGoal,
+  onGoalAnswer,
+  onGoalSignoff,
 }) {
   const prepared = groupConsecutiveTools(prepareEvents(events));
   const copyActionsByEvent = buildCopyActionsByEvent(prepared);
@@ -2387,6 +2410,9 @@ function renderEventsWithHandovers({
         searchQuery={searchQuery}
         activeSearchMatchIndex={activeSearchMatchIndex}
         getSearchMatchIndex={getSearchMatchIndex}
+        chatGoal={chatGoal}
+        onGoalAnswer={onGoalAnswer}
+        onGoalSignoff={onGoalSignoff}
       />
     );
 
@@ -3731,6 +3757,68 @@ export default function TaskView({ chatId, agentsMap, skills = [], projects = []
     }
   }, [chatId]);
 
+  // Submits the clarify-round answers; the daemon persists them on
+  // chat.goal (the clarify card re-renders as answered via chat.updated)
+  // and starts the internal goal-lock turn. clarify_seq binds the answers
+  // to the round being answered — for the interactive round it equals the
+  // clarify event's own seq. Rejections reset the waiting state and
+  // rethrow so the clarify card can re-enable and surface the error.
+  const handleGoalAnswer = React.useCallback(async (answers) => {
+    if (!chatId) return;
+    try {
+      waitingForAgentRef.current = true;
+      waitingAfterSeqRef.current = lastSeqRef.current;
+      agentActivitySinceSendRef.current = false;
+      const updatedChat = await api.answerGoal(chatId, answers, chat?.goal?.clarify_seq);
+      setChat(updatedChat);
+      connectEventStream(chatId, lastSeqRef.current);
+    } catch (err) {
+      waitingForAgentRef.current = false;
+      agentActivitySinceSendRef.current = false;
+      console.error('Goal answer failed:', err);
+      throw err;
+    }
+  }, [chatId, chat, connectEventStream]);
+
+  // Rejections (e.g. clicking Accept while the verifier turn's tail is
+  // still streaming → daemon conflict) reset the waiting state and rethrow
+  // so the done banner can surface the error instead of silently no-oping.
+  const handleGoalSignoff = React.useCallback(async (action, notes) => {
+    if (!chatId) return;
+    try {
+      if (action === 'send_back') {
+        waitingForAgentRef.current = true;
+        waitingAfterSeqRef.current = lastSeqRef.current;
+        agentActivitySinceSendRef.current = false;
+      }
+      const updatedChat = await api.signoffGoal(chatId, action, notes || '');
+      setChat(updatedChat);
+      if (action === 'send_back') connectEventStream(chatId, lastSeqRef.current);
+    } catch (err) {
+      if (action === 'send_back') {
+        waitingForAgentRef.current = false;
+        agentActivitySinceSendRef.current = false;
+      }
+      console.error('Goal signoff failed:', err);
+      throw err;
+    }
+  }, [chatId, connectEventStream]);
+
+  // Whole-list criteria replacement from the pinned GoalCard; the
+  // authoritative state comes back on the returned record (and again via
+  // chat.updated for other clients). Rethrows on failure so the card can
+  // show the error instead of pretending the edit landed.
+  const handleGoalCriteriaSave = React.useCallback(async ({ statement, criteria }) => {
+    if (!chatId) return;
+    try {
+      const updatedChat = await api.updateGoalCriteria(chatId, { statement, criteria });
+      setChat(updatedChat);
+    } catch (err) {
+      console.error('Goal criteria update failed:', err);
+      throw err;
+    }
+  }, [chatId]);
+
   const handleCancel = React.useCallback(async () => {
     if (!chatId) return;
     try {
@@ -3798,6 +3886,13 @@ export default function TaskView({ chatId, agentsMap, skills = [], projects = []
             onClose={closeFind}
           />
         )}
+        {activeChat?.goal && (
+          <div style={{ padding: '0 36px', flexShrink: 0 }}>
+            <div style={conversationColumn}>
+              <GoalCard goal={activeChat.goal} onSave={handleGoalCriteriaSave} />
+            </div>
+          </div>
+        )}
         <div
           ref={timelineRef}
           data-testid="conversation-scroll"
@@ -3814,6 +3909,9 @@ export default function TaskView({ chatId, agentsMap, skills = [], projects = []
                 searchQuery,
                 activeSearchMatchIndex: activeFindIndex,
                 getSearchMatchIndex,
+                chatGoal: activeChat?.goal || null,
+                onGoalAnswer: handleGoalAnswer,
+                onGoalSignoff: handleGoalSignoff,
               });
               const streamingAgentId = lastAgentActor || chat?.current_agent_id;
               const showStreamingHeader = lastDisplayedActor !== streamingAgentId;

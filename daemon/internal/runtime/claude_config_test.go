@@ -25,12 +25,12 @@ func TestClaudeSettingsEnvCoercesScalars(t *testing.T) {
 		t.Fatalf("unmarshal: %v", err)
 	}
 	want := map[string]envValue{
-		"ANTHROPIC_BASE_URL":                      "https://example.test",
-		"API_TIMEOUT_MS":                          "3000000",
-		"ANTHROPIC_MODEL":                         "MiniMax-M2.7",
+		"ANTHROPIC_BASE_URL":                       "https://example.test",
+		"API_TIMEOUT_MS":                           "3000000",
+		"ANTHROPIC_MODEL":                          "MiniMax-M2.7",
 		"CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
-		"SOMETHING_BOOLEAN":                       "true",
-		"SOMETHING_NULL":                          "",
+		"SOMETHING_BOOLEAN":                        "true",
+		"SOMETHING_NULL":                           "",
 	}
 	for k, v := range want {
 		if got := s.Env[k]; got != v {

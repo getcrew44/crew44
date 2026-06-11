@@ -1,6 +1,6 @@
 import React from 'react';
 import { Avatar, Icon, Toggle, ghostBtn, primaryBtn, card, MONO_FONT, UI_FONT } from './components.jsx';
-import { relativeTime, deriveAgentDescription } from './utils.js';
+import { relativeTime, deriveAgentDescription, isPartnerAgent } from './utils.js';
 import { runtimeIconUrl } from './runtime-icons/index.js';
 import * as api from './api.js';
 
@@ -842,7 +842,7 @@ function AgentMenu({ isPreset, canDelete = true, onRename, onResetPreset, onDele
 }
 
 function canDeleteAgent(agent) {
-  return !(agent?.preset_id === 'default-crew' && agent?.preset_key === 'partner');
+  return !isPartnerAgent(agent);
 }
 
 function displayModel(model) {
