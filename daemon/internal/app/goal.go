@@ -2,9 +2,12 @@ package app
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/getcrew44/crew44/daemon/internal/broker"
 	"github.com/getcrew44/crew44/daemon/internal/id"
@@ -43,6 +46,9 @@ type goalRunState struct {
 	// into the verifier prompt.
 	verifyRequested bool
 	readySummary    string
+	// verifierFingerprint is the goal snapshot the isolated verifier was
+	// asked to check. If criteria change while it runs, its verdict is stale.
+	verifierFingerprint string
 	// verifierActive marks the in-flight turn as the isolated verifier turn;
 	// verifySeen records that it produced a valid verify marker, so a turn
 	// that ends without one gets a single corrective retry.
@@ -342,12 +348,19 @@ func (a *App) applyGoalVerify(chatID, turnID, agentID, agentName string, marker 
 		return nil
 	}
 	chat.Goal.Attempt++
+	stale := run.verifierFingerprint != "" && run.verifierFingerprint != goalVerifierFingerprint(chat.Goal)
 	rows := make([]model.GoalVerifyRow, 0, len(chat.Goal.Criteria))
 	var unmet []model.GoalCriterion
 	for i := range chat.Goal.Criteria {
 		criterion := &chat.Goal.Criteria[i]
 		result, covered := byID[criterion.ID]
 		switch {
+		case stale:
+			// The verifier checked a different snapshot. Fail closed: do not
+			// apply any pass/fail result by id because the id may now describe
+			// different text or a different verify method.
+			criterion.Status = model.GoalCriterionPending
+			criterion.Detail = ""
 		case covered && result.Status == model.GoalVerifyStatusPass:
 			criterion.Status = model.GoalCriterionVerified
 			criterion.Detail = result.Detail
@@ -361,7 +374,7 @@ func (a *App) applyGoalVerify(chatID, turnID, agentID, agentName string, marker 
 			criterion.Detail = ""
 		}
 		rowStatus := model.GoalVerifyRowPending
-		if covered {
+		if covered && !stale {
 			rowStatus = result.Status
 		}
 		rows = append(rows, model.GoalVerifyRow{
@@ -384,6 +397,8 @@ func (a *App) applyGoalVerify(chatID, turnID, agentID, agentName string, marker 
 			outcome = fmt.Sprintf("All %d criteria verified. Goal gate is open.", len(chat.Goal.Criteria))
 		}
 		chat.Goal.Phase = model.GoalPhaseAwaitingSignoff
+	} else if stale {
+		outcome = "Goal criteria changed during verification; the stale verifier result was ignored and the gate held."
 	} else if outcome == "" {
 		outcome = fmt.Sprintf("Gate held — %d of %d criteria failed or unverified.", len(unmet), len(chat.Goal.Criteria))
 	}
@@ -437,6 +452,7 @@ func (a *App) applyGoalVerify(chatID, turnID, agentID, agentName string, marker 
 		run.gateHeld = true
 		run.failedSnapshot = unmet
 	}
+	run.verifierFingerprint = ""
 	a.publishChatMeta(chatID)
 	return nil
 }
@@ -511,6 +527,7 @@ func (a *App) nextGoalTurn(ctx context.Context, controller *chatRunController, c
 			return goalNextTurn{}, false
 		}
 		run.verifySeen = false
+		run.verifierFingerprint = goalVerifierFingerprint(chat.Goal)
 		// An unrelated malformed marker from the lead's message must not
 		// latch into the verifier's no-verdict retry prompt — the verifier
 		// turn starts clean.
@@ -553,6 +570,30 @@ func (a *App) nextGoalTurn(ctx context.Context, controller *chatRunController, c
 	}
 	run.leadCorrectionsUsed++
 	return goalNextTurn{prompt: buildGoalCorrectionPrompt(kind, errMsg)}, true
+}
+
+func goalVerifierFingerprint(goal *model.GoalState) string {
+	if goal == nil {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString(goal.UpdatedAt.UTC().Format(time.RFC3339Nano))
+	b.WriteByte('\x00')
+	b.WriteString(goal.Statement)
+	for _, criterion := range goal.Criteria {
+		b.WriteByte('\x00')
+		b.WriteString(criterion.ID)
+		b.WriteByte('\x00')
+		b.WriteString(criterion.Text)
+		b.WriteByte('\x00')
+		b.WriteString(criterion.Verify)
+		b.WriteByte('\x00')
+		b.WriteString(criterion.Status)
+		b.WriteByte('\x00')
+		b.WriteString(criterion.Detail)
+	}
+	sum := sha256.Sum256([]byte(b.String()))
+	return hex.EncodeToString(sum[:])
 }
 
 func goalMarkerTag(kind model.GoalMarkerKind) string {
@@ -779,14 +820,14 @@ func (a *App) UpdateGoalCriteria(chatID string, statement *string, inputs []Goal
 	seen := map[string]bool{}
 	next := make([]model.GoalCriterion, 0, len(inputs))
 	for _, input := range inputs {
-		text := strings.TrimSpace(input.Text)
+		text := model.NormalizeGoalPromptField(input.Text)
 		if text == "" {
 			continue
 		}
 		criterion := model.GoalCriterion{
 			ID:     strings.TrimSpace(input.ID),
 			Text:   text,
-			Verify: strings.TrimSpace(input.Verify),
+			Verify: model.NormalizeGoalPromptField(input.Verify),
 			Status: model.GoalCriterionPending,
 		}
 		if prev, ok := existing[criterion.ID]; ok && criterion.ID != "" && !seen[criterion.ID] {
@@ -814,12 +855,30 @@ func (a *App) UpdateGoalCriteria(chatID string, statement *string, inputs []Goal
 		a.mu.Unlock()
 		return model.ChatRecord{}, ErrBadRequest
 	}
+	if len(next) > model.GoalMaxLockCriteria {
+		a.mu.Unlock()
+		return model.ChatRecord{}, fmt.Errorf("goal criteria update has %d criteria (max %d): %w", len(next), model.GoalMaxLockCriteria, ErrBadRequest)
+	}
+	for _, criterion := range next {
+		if utf8.RuneCountInString(criterion.Text) > model.GoalMaxCriterionTextLen {
+			a.mu.Unlock()
+			return model.ChatRecord{}, fmt.Errorf("goal criterion %q text is %d characters (max %d): %w", criterion.ID, utf8.RuneCountInString(criterion.Text), model.GoalMaxCriterionTextLen, ErrBadRequest)
+		}
+		if utf8.RuneCountInString(criterion.Verify) > model.GoalMaxVerifyLen {
+			a.mu.Unlock()
+			return model.ChatRecord{}, fmt.Errorf("goal criterion %q verify is %d characters (max %d): %w", criterion.ID, utf8.RuneCountInString(criterion.Verify), model.GoalMaxVerifyLen, ErrBadRequest)
+		}
+	}
 
 	now := time.Now().UTC()
 	chat.Goal.Criteria = next
 	if statement != nil {
-		if trimmed := strings.TrimSpace(*statement); trimmed != "" {
-			chat.Goal.Statement = trimmed
+		if normalized := model.NormalizeGoalPromptField(*statement); normalized != "" {
+			if utf8.RuneCountInString(normalized) > model.GoalMaxStatementLen {
+				a.mu.Unlock()
+				return model.ChatRecord{}, fmt.Errorf("goal statement is %d characters (max %d): %w", utf8.RuneCountInString(normalized), model.GoalMaxStatementLen, ErrBadRequest)
+			}
+			chat.Goal.Statement = normalized
 		}
 	}
 	if chat.Goal.Phase == model.GoalPhaseAwaitingSignoff {

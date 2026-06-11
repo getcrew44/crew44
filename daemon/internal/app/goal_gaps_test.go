@@ -188,6 +188,70 @@ func TestGoalVerifyUnknownCriterionIDsDropped(t *testing.T) {
 	}
 }
 
+// A verifier result is only valid for the criteria snapshot it was asked to
+// check. If the checklist changes while the isolated verifier turn is
+// running, matching by id alone must not mark the edited criterion verified.
+func TestGoalVerifyStaleAfterCriteriaEditHoldsGate(t *testing.T) {
+	verifierStarted := make(chan struct{})
+	allowVerifier := make(chan struct{})
+	engine := &goalEngine{replies: []string{
+		"done\n" + goalReady,
+		goalVerifyAllPass,
+		"continuing after the changed checklist",
+	}}
+	engine.onRun = func(call int) {
+		if call == 1 {
+			close(verifierStarted)
+			<-allowVerifier
+		}
+	}
+	a := newGoalTestApp(t, engine)
+	agentID := firstAgentID(t, a)
+	chat := newGoalChat(t, a, agentID)
+	lockGoalState(t, a, chat.ID, twoGoalCriteria()...)
+
+	if _, err := a.PostMessage(chat.ID, "go", agentID, nil); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-verifierStarted:
+	case <-time.After(5 * time.Second):
+		t.Fatal("verifier turn never started")
+	}
+	if _, err := a.UpdateGoalCriteria(chat.ID, nil, []GoalCriterionInput{
+		{ID: "c1", Text: "Green on 20 consecutive runs", Verify: "run_tests x20"},
+		{ID: "c2", Text: "No .only or .skip left anywhere", Verify: "grep gate"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	close(allowVerifier)
+	got := waitForIdle(t, a, chat.ID)
+
+	if got.Goal.Phase != model.GoalPhaseRunning {
+		t.Fatalf("phase = %q, want running (stale verifier result held the gate)", got.Goal.Phase)
+	}
+	byID := map[string]model.GoalCriterion{}
+	for _, criterion := range got.Goal.Criteria {
+		byID[criterion.ID] = criterion
+	}
+	if byID["c2"].Text != "No .only or .skip left anywhere" {
+		t.Fatalf("c2 text = %q, want edited criteria", byID["c2"].Text)
+	}
+	if byID["c2"].Status == model.GoalCriterionVerified {
+		t.Fatalf("c2 = %+v, stale verifier pass must not verify edited criteria", byID["c2"])
+	}
+	verifyEvents := goalEventsOfType(t, a, chat.ID, model.EventTypeGoalVerify)
+	if len(verifyEvents) != 1 {
+		t.Fatalf("verify events = %d, want 1", len(verifyEvents))
+	}
+	if verifyEvents[0].GoalVerify.Overall != model.GoalVerifyOverallFailed {
+		t.Fatalf("overall = %q, want failed", verifyEvents[0].GoalVerify.Overall)
+	}
+	if !strings.Contains(engine.prompt(2), "No .only or .skip left anywhere") {
+		t.Fatalf("continuation prompt = %q, want edited criteria", engine.prompt(2))
+	}
+}
+
 // A steer queued during the isolated verifier turn restarts the run at the
 // lead, never the verifier — the verifier is not a stored agent and must not
 // become a message target.
@@ -271,6 +335,45 @@ func TestUpdateGoalCriteriaDuplicateInputIDs(t *testing.T) {
 	}
 	if second.Status != model.GoalCriterionPending || second.Detail != "" {
 		t.Fatalf("second = %+v, want pending with no detail", second)
+	}
+}
+
+func TestUpdateGoalCriteriaAppliesPromptFieldCaps(t *testing.T) {
+	a := newGoalTestApp(t, &goalEngine{})
+	agentID := firstAgentID(t, a)
+	chat := newGoalChat(t, a, agentID)
+	lockGoalState(t, a, chat.ID, twoGoalCriteria()...)
+
+	var tooMany []GoalCriterionInput
+	for i := 0; i < model.GoalMaxLockCriteria+1; i++ {
+		tooMany = append(tooMany, GoalCriterionInput{Text: "criterion"})
+	}
+	if _, err := a.UpdateGoalCriteria(chat.ID, nil, tooMany); !errors.Is(err, ErrBadRequest) {
+		t.Fatalf("too many criteria err = %v, want bad request", err)
+	}
+
+	longText := strings.Repeat("x", model.GoalMaxCriterionTextLen+1)
+	if _, err := a.UpdateGoalCriteria(chat.ID, nil, []GoalCriterionInput{{Text: longText}}); !errors.Is(err, ErrBadRequest) {
+		t.Fatalf("long criterion err = %v, want bad request", err)
+	}
+
+	longStatement := strings.Repeat("s", model.GoalMaxStatementLen+1)
+	if _, err := a.UpdateGoalCriteria(chat.ID, &longStatement, []GoalCriterionInput{{ID: "c1", Text: "Green on 20 consecutive runs"}}); !errors.Is(err, ErrBadRequest) {
+		t.Fatalf("long statement err = %v, want bad request", err)
+	}
+
+	statement := "Line one\nLine two"
+	updated, err := a.UpdateGoalCriteria(chat.ID, &statement, []GoalCriterionInput{
+		{ID: "c1", Text: "Green\non 20 runs", Verify: "run\nsuite"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Goal.Statement != "Line one Line two" {
+		t.Fatalf("statement = %q, want collapsed newlines", updated.Goal.Statement)
+	}
+	if updated.Goal.Criteria[0].Text != "Green on 20 runs" || updated.Goal.Criteria[0].Verify != "run suite" {
+		t.Fatalf("criterion = %+v, want collapsed prompt fields", updated.Goal.Criteria[0])
 	}
 }
 
@@ -645,5 +748,38 @@ func TestGoalCancelMidGateLoopStopsAndReArms(t *testing.T) {
 	}
 	if got.Goal.Attempt != 2 {
 		t.Fatalf("attempt after re-arm = %d, want 2", got.Goal.Attempt)
+	}
+}
+
+// Chat metadata updates must serialize on a.mu with goal RPCs and run-side
+// mutateChat saves. Otherwise a rename/archive can persist a stale whole chat
+// record over newer Goal or Stream state during a long goal run.
+func TestUpdateChatSerializesOnAppMutex(t *testing.T) {
+	a := newGoalTestApp(t, &goalEngine{})
+	agentID := firstAgentID(t, a)
+	chat := newGoalChat(t, a, agentID)
+
+	a.mu.Lock()
+	done := make(chan error, 1)
+	go func() {
+		_, err := a.UpdateChat(model.ChatRecord{ID: chat.ID, Title: "Renamed"})
+		done <- err
+	}()
+
+	select {
+	case err := <-done:
+		a.mu.Unlock()
+		t.Fatalf("UpdateChat returned while a.mu was held (err=%v); want it serialized", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+	a.mu.Unlock()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("UpdateChat did not finish after a.mu was released")
 	}
 }

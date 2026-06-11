@@ -1249,6 +1249,9 @@ func (a *App) GetChat(id string) (model.ChatRecord, error) {
 }
 
 func (a *App) UpdateChat(chat model.ChatRecord) (model.ChatRecord, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
 	current, err := a.store.GetChat(chat.ID)
 	if err != nil {
 		return model.ChatRecord{}, a.mapError(err)

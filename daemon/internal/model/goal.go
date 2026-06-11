@@ -604,6 +604,13 @@ func NormalizeGoalLockCriteria(criteria []GoalCriterion) []GoalCriterion {
 	return out
 }
 
+// NormalizeGoalPromptField collapses a prompt-bound goal field the same way
+// marker parsing does before those fields are interpolated into system
+// prompts.
+func NormalizeGoalPromptField(s string) string {
+	return collapsePromptField(s)
+}
+
 // collapsePromptField collapses newlines, tabs, control characters, and
 // space runs to single spaces and trims the result. These fields are
 // interpolated into system prompts, where a raw newline could forge new
