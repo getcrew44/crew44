@@ -175,10 +175,12 @@ describe('TaskView goal mode', () => {
     fireEvent.click(lockButton);
 
     await waitFor(() => {
+      // The third arg is the clarify round's seq (chat.goal.clarify_seq) —
+      // the daemon requires it to bind answers to the round they answer.
       expect(api.answerGoal).toHaveBeenCalledWith('chat-1', [
         { question_id: 'q1', option: 0 },
         { question_id: 'q2', text: 'leave CI config alone' },
-      ]);
+      ], 5);
     });
   });
 
@@ -225,6 +227,32 @@ describe('TaskView goal mode', () => {
     expect(screen.getByTestId('goal-verify-held')).toHaveTextContent('gate held');
     expect(gate).toHaveTextContent('flaked on run 13');
     expect(gate).toHaveTextContent('Gate held — 1 of 2 criteria failed or unverified.');
+  });
+
+  it('renders nothing for a passed verification gate — the banner and done card carry it', async () => {
+    api.getChat.mockResolvedValue(goalChat({ ...runningGoal, phase: 'awaiting_signoff' }));
+    render(<TaskView chatId="chat-1" agentsMap={agentsMap} />);
+    await screen.findByTestId('composer-input');
+
+    const stream = api.streamChatEvents.mock.calls[0];
+    await emitEvent(stream, {
+      seq: 9, type: 'goal_verify', ts: '2026-06-10T11:00:00Z', actor_agent_id: 'goal-verifier',
+      goal_verify: {
+        attempt: 1, overall: 'passed',
+        rows: [
+          { id: 'c1', text: 'Green on 20 consecutive runs', verify: 'run_tests x20', status: 'pass', detail: '20/20' },
+          { id: 'c2', text: 'No .only left behind', verify: 'grep gate', status: 'pass', detail: 'clean' },
+        ],
+        outcome: 'All 2 criteria verified. Goal gate is open.',
+      },
+    });
+    await emitEvent(stream, {
+      seq: 10, type: 'goal_done', ts: '2026-06-10T11:00:05Z', actor_agent_id: '',
+      goal_done: { statement: 'Stable', criteria_total: 2, attempts: 1, elapsed_seconds: 60 },
+    });
+
+    await screen.findByTestId('goal-done');
+    expect(screen.queryByTestId('goal-verify')).toBeNull();
   });
 
   it('signs off from the goal-done banner', async () => {
@@ -300,7 +328,11 @@ describe('TaskView goal mode', () => {
         ],
       });
     });
-    expect(screen.getByTestId('goal-card')).toHaveTextContent('gate re-arms');
+    // The footer now flips only once the save resolves (a rejected save no
+    // longer claims the gate re-armed), so wait for it.
+    await waitFor(() => {
+      expect(screen.getByTestId('goal-card')).toHaveTextContent('gate re-arms');
+    });
   });
 
   it('removes and adds criteria through the card', async () => {

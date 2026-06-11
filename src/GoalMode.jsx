@@ -88,6 +88,25 @@ const GOAL_STATUS_LABEL = {
   running: 'running', pending: 'pending',
 };
 
+// Inline failure line for goal RPCs (criteria save, clarify answer,
+// sign-off). There is no app-wide inline-error idiom for these — TaskView
+// only console.errors other RPC failures — so this is the goal-palette
+// red-tinted text line the goal surfaces share. Cleared on the next attempt.
+function goalErrorMessage(prefix, err) {
+  const detail = err && err.message ? String(err.message) : 'try again';
+  return `${prefix} — ${detail}`;
+}
+
+function GoalErrorLine({ testId, message, style }) {
+  if (!message) return null;
+  return (
+    <div data-testid={testId} role="alert" style={{
+      padding: '6px 14px', fontSize: 11.5, lineHeight: 1.5,
+      color: G.err, fontFamily: UI_FONT, ...style,
+    }}>{message}</div>
+  );
+}
+
 function formatGoalElapsed(seconds) {
   seconds = Math.max(0, Math.floor(seconds || 0));
   const hours = Math.floor(seconds / 3600);
@@ -125,6 +144,11 @@ function GoalCriterionRow({ c, onEdit, onRemove }) {
   const [editing, setEditing] = React.useState(false);
   const [draft, setDraft] = React.useState(c.text);
   const [hover, setHover] = React.useState(false);
+  // Reveal the edit/remove actions on focus-within too, so keyboard focus
+  // never lands on an invisible control (the buttons stay hidden — and out
+  // of the tab order — until the row is hovered or holds focus).
+  const [focusWithin, setFocusWithin] = React.useState(false);
+  const showActions = (hover || focusWithin) && !editing;
 
   const commit = () => {
     setEditing(false);
@@ -138,6 +162,8 @@ function GoalCriterionRow({ c, onEdit, onRemove }) {
       data-testid="goal-criterion-row"
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
+      onFocus={() => setFocusWithin(true)}
+      onBlur={() => setFocusWithin(false)}
       style={{
         display: 'flex', alignItems: 'center', gap: 10,
         padding: '6px 14px', fontFamily: UI_FONT,
@@ -151,7 +177,8 @@ function GoalCriterionRow({ c, onEdit, onRemove }) {
           data-testid="goal-criterion-input"
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
-          onBlur={commit}
+          onFocus={(e) => { e.currentTarget.style.borderColor = G.gold; }}
+          onBlur={(e) => { e.currentTarget.style.borderColor = G.goldLn; commit(); }}
           onKeyDown={(e) => {
             if (e.key === 'Enter') commit();
             if (e.key === 'Escape') { setDraft(c.text); setEditing(false); }
@@ -179,7 +206,9 @@ function GoalCriterionRow({ c, onEdit, onRemove }) {
       <span style={{
         display: 'inline-flex', gap: 2, flexShrink: 0, width: 38,
         justifyContent: 'flex-end',
-        opacity: hover && !editing ? 1 : 0, transition: 'opacity .12s',
+        opacity: showActions ? 1 : 0,
+        visibility: showActions ? 'visible' : 'hidden',
+        transition: 'opacity .12s',
       }}>
         <button
           title="Edit criterion"
@@ -198,37 +227,95 @@ function GoalCriterionRow({ c, onEdit, onRemove }) {
   );
 }
 
-// Pinned above the conversation. Edits commit immediately through
-// onSave({ criteria }) — the whole-list-replacement RPC — and the
-// authoritative state flows back via chat.updated, so there is no local
-// dirty copy to drift.
+// Pinned above the conversation. Edits apply to an optimistic local working
+// copy immediately (so two quick edits never resurrect each other's
+// changes), commit through onSave({ criteria }) — the whole-list-replacement
+// RPC, serialized so saves can't race — and reconcile with the
+// authoritative server state once no save is in flight.
+//
+// Locally-added criteria have no server id until the echo reconciles, so
+// every added row gets a client-side temp key. It is used only for row
+// matching and React keys — matching on `c.id` alone would treat every
+// unsaved row as the same row (`undefined === undefined`) and corrupt the
+// working copy. toInputs strips it; the daemon assigns the real id.
+let goalTempKeySeq = 0;
+
 export function GoalCard({ goal, onSave }) {
   const drafting = goal.phase === 'scoping';
   const [open, setOpen] = React.useState(false);
   const [edited, setEdited] = React.useState(false);
   const [adding, setAdding] = React.useState(false);
   const [addDraft, setAddDraft] = React.useState('');
+  const [saveError, setSaveError] = React.useState('');
   React.useEffect(() => { setEdited(false); }, [goal.phase]);
 
-  const criteria = goal.criteria || [];
+  // Optimistic working copy of the criteria list. workingRef is the source
+  // of truth edits compute from (state can lag a tick behind two rapid
+  // clicks); inflightRef counts queued saves; queueRef serializes them so
+  // each whole-list replacement is sent in order with the latest snapshot.
+  const serverCriteria = goal.criteria || [];
+  const [working, setWorking] = React.useState(serverCriteria);
+  const workingRef = React.useRef(serverCriteria);
+  const serverRef = React.useRef(serverCriteria);
+  const inflightRef = React.useRef(0);
+  const queueRef = React.useRef(Promise.resolve());
+  React.useEffect(() => {
+    serverRef.current = goal.criteria || [];
+    // Only reconcile when no save is in flight — a stale server echo of an
+    // earlier save must not clobber an optimistic edit still being saved.
+    if (inflightRef.current === 0) {
+      workingRef.current = serverRef.current;
+      setWorking(serverRef.current);
+    }
+  }, [goal]);
+
+  const criteria = working;
   const verified = criteria.filter(c => c.status === 'verified').length;
   const anyFailed = criteria.some(c => c.status === 'failed');
   const allVerified = !drafting && criteria.length > 0 && verified === criteria.length;
 
+  // Saved rows match by server id, unsaved rows by their temp key.
+  const criterionKey = (c) => c.id || c.__tempKey;
+  // Temp keys never reach the RPC: id stays undefined for unsaved rows and
+  // the daemon mints the real one.
   const toInputs = (list) => list.map(c => ({ id: c.id, text: c.text, verify: c.verify }));
   const commitList = (list) => {
-    setEdited(true);
-    onSave({ criteria: toInputs(list) });
+    workingRef.current = list;
+    setWorking(list);
+    inflightRef.current += 1;
+    queueRef.current = queueRef.current.then(async () => {
+      try {
+        await onSave({ criteria: toInputs(list) });
+        // Only flip the "gate re-arms" footer once the save actually
+        // landed — a rejected save must not claim the checklist changed.
+        setEdited(true);
+        setSaveError('');
+      } catch (err) {
+        setSaveError(goalErrorMessage("Couldn't save the checklist", err));
+      } finally {
+        inflightRef.current -= 1;
+        if (inflightRef.current === 0) {
+          // Queue drained: reconcile with the latest server state (reverts
+          // the optimistic copy if the save was rejected). This also maps
+          // temp rows to their server-assigned rows positionally: the
+          // daemon builds the echo in input order, so adopting the echo
+          // wholesale replaces each temp row with its same-position server
+          // row (now carrying a real id).
+          workingRef.current = serverRef.current;
+          setWorking(serverRef.current);
+        }
+      }
+    });
   };
-  const editCriterion = (id, text) => {
-    commitList(criteria.map(c => (c.id === id ? { ...c, text } : c)));
+  const editCriterion = (key, text) => {
+    commitList(workingRef.current.map(c => (criterionKey(c) === key ? { ...c, text } : c)));
   };
-  const removeCriterion = (id) => {
-    commitList(criteria.filter(c => c.id !== id));
+  const removeCriterion = (key) => {
+    commitList(workingRef.current.filter(c => criterionKey(c) !== key));
   };
   const commitAdd = () => {
     const t = addDraft.trim();
-    if (t) commitList([...criteria, { text: t, verify: '' }]);
+    if (t) commitList([...workingRef.current, { text: t, verify: '', __tempKey: 'tmp-' + (++goalTempKeySeq) }]);
     setAddDraft('');
     setAdding(false);
   };
@@ -296,6 +383,10 @@ export function GoalCard({ goal, onSave }) {
         )}
       </button>
 
+      {/* Outside the collapsible so a failed save is visible even while the
+          checklist is collapsed. */}
+      <GoalErrorLine testId="goal-card-error" message={saveError} style={{ padding: '0 14px 7px' }} />
+
       {/* Expand/collapse animates via the grid 0fr→1fr trick: the content
           stays mounted and the row track tweens its height, so no measuring
           is needed and both directions ease smoothly. */}
@@ -318,11 +409,11 @@ export function GoalCard({ goal, onSave }) {
           transition: 'opacity 180ms ease' + (open ? ' 60ms' : ''),
         }}>
           <div style={{ padding: '4px 0' }}>
-            {criteria.map(c => (
+            {criteria.map((c) => (
               <GoalCriterionRow
-                key={c.id} c={c}
-                onEdit={(text) => editCriterion(c.id, text)}
-                onRemove={() => removeCriterion(c.id)}
+                key={criterionKey(c)} c={c}
+                onEdit={(text) => editCriterion(criterionKey(c), text)}
+                onRemove={() => removeCriterion(criterionKey(c))}
               />
             ))}
             {adding ? (
@@ -333,7 +424,8 @@ export function GoalCard({ goal, onSave }) {
                   data-testid="goal-criterion-add-input"
                   value={addDraft}
                   onChange={(e) => setAddDraft(e.target.value)}
-                  onBlur={commitAdd}
+                  onFocus={(e) => { e.currentTarget.style.borderColor = G.gold; }}
+                  onBlur={(e) => { e.currentTarget.style.borderColor = G.goldLn; commitAdd(); }}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter') commitAdd();
                     if (e.key === 'Escape') { setAddDraft(''); setAdding(false); }
@@ -391,13 +483,19 @@ export function GoalCard({ goal, onSave }) {
 // answers land on chat.goal (via chat.updated), it collapses to a summary.
 export function GoalClarifyEvent({ event, agentsMap, showHeader = true, chatGoal, onAnswer }) {
   const agent = resolveAuthor(event.author, agentsMap);
-  const isCurrentRound = chatGoal && chatGoal.clarify_seq === event._seq && chatGoal.phase === 'scoping';
-  const storedAnswers = (chatGoal && chatGoal.answers) || null;
+  // chat.goal.answers (and clarify_seq) describe the CURRENT round only.
+  // Question ids (q1, q2, …) collide across rounds, so a superseded round
+  // must never resolve the current round's answers against its own old
+  // questions — it renders as answered without answer detail instead.
+  const isThisRound = !!chatGoal && chatGoal.clarify_seq === event._seq;
+  const isCurrentRound = isThisRound && chatGoal.phase === 'scoping';
+  const storedAnswers = (isThisRound && chatGoal.answers) || null;
   const answered = !isCurrentRound || (storedAnswers && Object.keys(storedAnswers).length > 0);
 
   const [answers, setAnswers] = React.useState({});
   const [open, setOpen] = React.useState(!answered);
   const [submitting, setSubmitting] = React.useState(false);
+  const [submitError, setSubmitError] = React.useState('');
   React.useEffect(() => { setOpen(!answered); }, [answered]);
 
   const questions = event.questions || [];
@@ -408,6 +506,7 @@ export function GoalClarifyEvent({ event, agentsMap, showHeader = true, chatGoal
   const submit = async () => {
     if (!ready || !onAnswer) return;
     setSubmitting(true);
+    setSubmitError('');
     try {
       const payload = questions.map(q => (
         q.type === 'chips'
@@ -415,6 +514,10 @@ export function GoalClarifyEvent({ event, agentsMap, showHeader = true, chatGoal
           : { question_id: q.id, text: answers[q.id] || '' }
       ));
       await onAnswer(payload);
+    } catch (err) {
+      // The card stays interactive: selections are kept and the lock
+      // button re-enables for a retry.
+      setSubmitError(goalErrorMessage("Couldn't lock the goal", err));
     } finally {
       setSubmitting(false);
     }
@@ -530,6 +633,8 @@ export function GoalClarifyEvent({ event, agentsMap, showHeader = true, chatGoal
                           data-testid="goal-clarify-chip"
                           disabled={locked && !sel}
                           onClick={() => !locked && setAnswers(s => ({ ...s, [q.id]: i }))}
+                          onMouseEnter={(e) => { if (!locked && !sel) e.currentTarget.style.background = '#F0EAD8'; }}
+                          onMouseLeave={(e) => { if (!locked && !sel) e.currentTarget.style.background = 'transparent'; }}
                           style={{
                             padding: '4px 11px', borderRadius: 999, fontSize: 12.5,
                             fontFamily: UI_FONT,
@@ -559,6 +664,8 @@ export function GoalClarifyEvent({ event, agentsMap, showHeader = true, chatGoal
                       data-testid="goal-clarify-text"
                       value={answers[q.id] || ''}
                       onChange={(e) => setAnswers(s => ({ ...s, [q.id]: e.target.value }))}
+                      onFocus={(e) => { e.currentTarget.style.borderColor = G.gold; }}
+                      onBlur={(e) => { e.currentTarget.style.borderColor = G.line2; }}
                       placeholder={q.placeholder}
                       style={{
                         width: '60%', minWidth: 240, fontFamily: UI_FONT, fontSize: 12.5,
@@ -598,6 +705,11 @@ export function GoalClarifyEvent({ event, agentsMap, showHeader = true, chatGoal
               </button>
             </div>
           )}
+          {!locked && (
+            <GoalErrorLine testId="goal-clarify-error" message={submitError} style={{
+              borderTop: '1px solid #EFD3C9', background: G.errSoft, padding: '7px 14px',
+            }} />
+          )}
         </div>
       </div>
     </div>
@@ -632,9 +744,14 @@ export function GoalLockDivider({ event }) {
 // ── goal_verify event ───────────────────────────────────────────────────
 export function GoalVerifyEvent({ event }) {
   const overall = event.overall; // passed | failed (running reserved for live gates)
-  const headBg = overall === 'failed' ? G.errSoft : overall === 'passed' ? G.okBg : G.goldBg;
-  const headLn = overall === 'failed' ? '#EFD3C9' : overall === 'passed' ? '#D3E5C5' : '#EFE3BC';
-  const headCol = overall === 'failed' ? G.err : overall === 'passed' ? G.ok : G.gold;
+  // A passed gate renders nothing: the pinned GoalCard already shows every
+  // criterion verified and the goal_done banner right below carries the
+  // stats — a third all-green card is pure duplication. Failed gates keep
+  // the full card; the per-row evidence is what the rework loop needs.
+  if (overall === 'passed') return null;
+  const headBg = overall === 'failed' ? G.errSoft : G.goldBg;
+  const headLn = overall === 'failed' ? '#EFD3C9' : '#EFE3BC';
+  const headCol = overall === 'failed' ? G.err : G.gold;
 
   return (
     <div data-testid="goal-verify" style={{ display: 'flex', gap: 14, padding: '10px 0' }}>
@@ -667,11 +784,6 @@ export function GoalVerifyEvent({ event }) {
             {overall === 'failed' && (
               <span data-testid="goal-verify-held" style={{ fontSize: 11.5, fontWeight: 600, color: G.err }}>gate held</span>
             )}
-            {overall === 'passed' && (
-              <span data-testid="goal-verify-passed" style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11.5, fontWeight: 600, color: G.ok }}>
-                <GIco.check /> all checks passed
-              </span>
-            )}
             <span style={{ fontSize: 11.5, color: G.ink4 }}>{event.time}</span>
           </div>
 
@@ -702,7 +814,7 @@ export function GoalVerifyEvent({ event }) {
           <div style={{
             padding: '7px 14px', borderTop: '1px solid ' + G.line,
             fontSize: 12, lineHeight: 1.5,
-            color: overall === 'failed' ? G.err : overall === 'passed' ? G.ok : G.ink3,
+            color: overall === 'failed' ? G.err : G.ink3,
             background: G.card,
           }}>
             {event.outcome}
@@ -724,14 +836,21 @@ export function GoalDoneEvent({ event, chatGoal, onSignoff }) {
   const [sendingBack, setSendingBack] = React.useState(false);
   const [notes, setNotes] = React.useState('');
   const [busy, setBusy] = React.useState(false);
+  const [signoffError, setSignoffError] = React.useState('');
 
   const act = async (action, actionNotes) => {
     if (!onSignoff || busy) return;
     setBusy(true);
+    setSignoffError('');
     try {
       await onSignoff(action, actionNotes);
       setSendingBack(false);
       setNotes('');
+    } catch (err) {
+      // Most common: Accept clicked while the verifier turn's tail is
+      // still streaming → daemon conflict. Re-enable the buttons and say
+      // why instead of silently no-oping.
+      setSignoffError(goalErrorMessage("Couldn't record the sign-off", err));
     } finally {
       setBusy(false);
     }
@@ -793,6 +912,8 @@ export function GoalDoneEvent({ event, chatGoal, onSignoff }) {
                       if (e.key === 'Enter' && notes.trim()) act('send_back', notes.trim());
                       if (e.key === 'Escape') { setSendingBack(false); setNotes(''); }
                     }}
+                    onFocus={(e) => { e.currentTarget.style.borderColor = G.gold; }}
+                    onBlur={(e) => { e.currentTarget.style.borderColor = '#C5DCB4'; }}
                     placeholder="What needs another pass?"
                     style={{
                       flex: 1, fontFamily: UI_FONT, fontSize: 12.5, color: G.ink,
@@ -834,9 +955,11 @@ export function GoalDoneEvent({ event, chatGoal, onSignoff }) {
                         onClick={() => act('accept', '')}
                         style={{
                           padding: '5px 14px', borderRadius: 6, fontSize: 12.5, fontWeight: 500,
-                          border: '1px solid ' + G.ink, background: G.ink, color: '#FCFBF7',
-                          cursor: 'pointer', fontFamily: UI_FONT,
-                        }}>Accept &amp; close task</button>
+                          border: '1px solid ' + (busy ? G.line2 : G.ink),
+                          background: busy ? G.card : G.ink,
+                          color: busy ? G.ink4 : '#FCFBF7',
+                          cursor: busy ? 'default' : 'pointer', fontFamily: UI_FONT,
+                        }}>{busy ? 'Accepting…' : 'Accept & close task'}</button>
                     </>
                   )}
                   {accepted && (
@@ -846,6 +969,7 @@ export function GoalDoneEvent({ event, chatGoal, onSignoff }) {
                   )}
                 </div>
               )}
+              <GoalErrorLine testId="goal-signoff-error" message={signoffError} style={{ padding: '6px 0 0' }} />
             </div>
           )}
         </div>
@@ -873,7 +997,7 @@ export function GoalSignoffDivider({ event }) {
       }}>
         <span style={{ color: G.err, display: 'flex', flexShrink: 0 }}><GoalGlyph size={12} /></span>
         <span style={{ fontSize: 12, color: G.err, fontWeight: 600, whiteSpace: 'nowrap' }}>Sent back</span>
-        <span style={{
+        <span title={event.notes} style={{
           fontSize: 12, color: '#9A5A4E', overflow: 'hidden',
           textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0,
         }}>· {event.notes}</span>
@@ -884,8 +1008,11 @@ export function GoalSignoffDivider({ event }) {
 }
 
 // ── New Task view: Goal mode chip + detail strip ────────────────────────
-export function GoalModeChip({ enabled, onToggle }) {
-  const Switch = ({ on }) => (
+// Module scope on purpose: defining this inside GoalModeChip would mint a
+// new component type every render (NewTaskRoute re-renders per keystroke),
+// remounting the DOM and killing the CSS transitions.
+function GoalModeSwitch({ on }) {
+  return (
     <span aria-hidden="true" style={{
       position: 'relative', display: 'inline-block',
       width: 22, height: 13, borderRadius: 999,
@@ -900,6 +1027,9 @@ export function GoalModeChip({ enabled, onToggle }) {
       }} />
     </span>
   );
+}
+
+export function GoalModeChip({ enabled, onToggle }) {
   return (
     <button
       type="button"
@@ -917,7 +1047,7 @@ export function GoalModeChip({ enabled, onToggle }) {
       onMouseEnter={(e) => { e.currentTarget.style.background = '#F0EAD8'; }}
       onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
     >
-      <Switch on={enabled} />
+      <GoalModeSwitch on={enabled} />
       <span style={enabled
         ? { color: G.gold, fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 5 }
         : undefined}>

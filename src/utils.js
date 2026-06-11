@@ -90,6 +90,28 @@ export const HUMAN_USER = {
   initial: 'Y',
 };
 
+// The daemon-synthesized anonymous verifier that runs the goal gate in an
+// isolated turn. Never a stored agent, so it resolves to a fixed identity
+// in the goal-mode gold instead of falling through to "Deleted agent".
+// NOTE: id/name/color must stay in sync with the GoalVerifier* constants in
+// daemon/internal/model/goal.go and with the G palette gold (G.gold) in
+// GoalMode.jsx — change one and you must change the others.
+export const GOAL_VERIFIER = {
+  id: 'goal-verifier',
+  name: 'Verifier',
+  kind: 'agent',
+  role: 'verification gate',
+  color: '#7A6420',
+  initial: 'V',
+};
+
+// The default-crew strategic partner — the permanent lead agent. Shared
+// predicate for the New Task lead-pick fallback (NewTaskRoute) and the
+// delete guard (CrewRoute).
+export function isPartnerAgent(agent) {
+  return !!agent && agent.preset_id === 'default-crew' && agent.preset_key === 'partner';
+}
+
 // Session-local memory of every agent we have seen this run. Lets us still
 // label messages from agents that have since been deleted from the live list.
 // Not persisted — a hard reload starts empty.
@@ -115,6 +137,7 @@ export function __resetSeenAgentsCacheForTests() {
 export function resolveAuthor(authorId, agentsMap) {
   if (!authorId) return null;
   if (authorId === '__human__') return HUMAN_USER;
+  if (authorId === GOAL_VERIFIER.id) return GOAL_VERIFIER;
   const known = agentsMap?.[authorId];
   if (known) return known;
   const remembered = seenAgentsCache.get(authorId);

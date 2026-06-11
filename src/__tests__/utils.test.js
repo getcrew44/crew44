@@ -3,7 +3,23 @@ import {
   agentColor, agentInitial, relativeTime, formatTime,
   displayAgent, mapBackendEvent, mergeToolResults, HUMAN_USER,
   resolveAuthor, rememberAgents, __resetSeenAgentsCacheForTests,
+  isPartnerAgent,
 } from '../utils.js';
+
+// ─── isPartnerAgent ────────────────────────────────────────────────────────────
+describe('isPartnerAgent', () => {
+  it('matches only the default-crew partner preset', () => {
+    expect(isPartnerAgent({ preset_id: 'default-crew', preset_key: 'partner' })).toBe(true);
+    expect(isPartnerAgent({ preset_id: 'default-crew', preset_key: 'builder' })).toBe(false);
+    expect(isPartnerAgent({ preset_id: 'other-crew', preset_key: 'partner' })).toBe(false);
+    expect(isPartnerAgent({ id: 'a1', name: 'Custom' })).toBe(false);
+  });
+
+  it('is false for null and undefined', () => {
+    expect(isPartnerAgent(null)).toBe(false);
+    expect(isPartnerAgent(undefined)).toBe(false);
+  });
+});
 
 // ─── agentColor ────────────────────────────────────────────────────────────────
 describe('agentColor', () => {
@@ -396,6 +412,13 @@ describe('resolveAuthor', () => {
 
   it('returns HUMAN_USER for the human sentinel', () => {
     expect(resolveAuthor('__human__', {})).toBe(HUMAN_USER);
+  });
+
+  it('returns the anonymous verifier identity for the goal-verifier sentinel', () => {
+    const got = resolveAuthor('goal-verifier', {});
+    expect(got.name).toBe('Verifier');
+    expect(got.kind).toBe('agent');
+    expect(got.archived).toBeUndefined();
   });
 
   it('returns the live agent when present in agentsMap', () => {

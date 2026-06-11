@@ -10,6 +10,7 @@ import { primeAudioContext } from './audio.js';
 import { textareaCaretPoint } from './textareaCaret.js';
 import { SendShortcutMenu, shouldSendFromEnterKey, useSendShortcutMode } from './sendShortcut.jsx';
 import { GoalModeChip, GoalModeDetail } from './GoalMode.jsx';
+import { isPartnerAgent } from './utils.js';
 import {
   clearComposerDraft,
   newTaskDraftChatId,
@@ -333,7 +334,7 @@ export default function NewTaskRoute({ projects, agents, skills = [], onNewTask,
   // partner); there is no lead picker. Falls back to the first agent for
   // setups without the default crew.
   const leadAgent = React.useMemo(
-    () => agents.find(a => a.preset_id === 'default-crew' && a.preset_key === 'partner') || agents[0] || null,
+    () => agents.find(isPartnerAgent) || agents[0] || null,
     [agents],
   );
   const agentSkills = React.useMemo(() => {

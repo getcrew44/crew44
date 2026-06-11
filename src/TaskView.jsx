@@ -3759,21 +3759,30 @@ export default function TaskView({ chatId, agentsMap, skills = [], projects = []
 
   // Submits the clarify-round answers; the daemon persists them on
   // chat.goal (the clarify card re-renders as answered via chat.updated)
-  // and starts the internal goal-lock turn.
+  // and starts the internal goal-lock turn. clarify_seq binds the answers
+  // to the round being answered — for the interactive round it equals the
+  // clarify event's own seq. Rejections reset the waiting state and
+  // rethrow so the clarify card can re-enable and surface the error.
   const handleGoalAnswer = React.useCallback(async (answers) => {
     if (!chatId) return;
     try {
       waitingForAgentRef.current = true;
       waitingAfterSeqRef.current = lastSeqRef.current;
       agentActivitySinceSendRef.current = false;
-      const updatedChat = await api.answerGoal(chatId, answers);
+      const updatedChat = await api.answerGoal(chatId, answers, chat?.goal?.clarify_seq);
       setChat(updatedChat);
       connectEventStream(chatId, lastSeqRef.current);
     } catch (err) {
+      waitingForAgentRef.current = false;
+      agentActivitySinceSendRef.current = false;
       console.error('Goal answer failed:', err);
+      throw err;
     }
-  }, [chatId, connectEventStream]);
+  }, [chatId, chat, connectEventStream]);
 
+  // Rejections (e.g. clicking Accept while the verifier turn's tail is
+  // still streaming → daemon conflict) reset the waiting state and rethrow
+  // so the done banner can surface the error instead of silently no-oping.
   const handleGoalSignoff = React.useCallback(async (action, notes) => {
     if (!chatId) return;
     try {
@@ -3786,13 +3795,19 @@ export default function TaskView({ chatId, agentsMap, skills = [], projects = []
       setChat(updatedChat);
       if (action === 'send_back') connectEventStream(chatId, lastSeqRef.current);
     } catch (err) {
+      if (action === 'send_back') {
+        waitingForAgentRef.current = false;
+        agentActivitySinceSendRef.current = false;
+      }
       console.error('Goal signoff failed:', err);
+      throw err;
     }
   }, [chatId, connectEventStream]);
 
   // Whole-list criteria replacement from the pinned GoalCard; the
   // authoritative state comes back on the returned record (and again via
-  // chat.updated for other clients).
+  // chat.updated for other clients). Rethrows on failure so the card can
+  // show the error instead of pretending the edit landed.
   const handleGoalCriteriaSave = React.useCallback(async ({ statement, criteria }) => {
     if (!chatId) return;
     try {
@@ -3800,6 +3815,7 @@ export default function TaskView({ chatId, agentsMap, skills = [], projects = []
       setChat(updatedChat);
     } catch (err) {
       console.error('Goal criteria update failed:', err);
+      throw err;
     }
   }, [chatId]);
 

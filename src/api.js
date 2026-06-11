@@ -181,8 +181,12 @@ export async function createChat(projectId, title, mainAgentId, { useWorktree, b
 
 // answers: [{ question_id, option }] for chips, [{ question_id, text }] for
 // free text. Locks in the clarify round and starts the goal-lock turn.
-export async function answerGoal(chatId, answers) {
-  return rpc.call('chats.goal.answer', { id: chatId, answers });
+// clarifySeq is required by the daemon: it binds the answers to the clarify
+// round they answer (the seq of that round's goal_clarify event, mirrored on
+// chat.goal.clarify_seq), so a stale submission against a superseded round
+// is rejected instead of silently mis-applied.
+export async function answerGoal(chatId, answers, clarifySeq) {
+  return rpc.call('chats.goal.answer', { id: chatId, answers, clarify_seq: clarifySeq });
 }
 
 // Whole-list replacement: criteria not in the list are removed, changed
