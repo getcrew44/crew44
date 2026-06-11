@@ -72,6 +72,7 @@ The same skills folder runs across every provider, so you're never locked in. Ha
 | Chat      | A turn-by-turn thread. One in-flight response at a time; events are an append-only `events.jsonl`.      |
 | Worktree  | An optional isolated git checkout for a chat. Toggle it on a new task and the crew works on its own `crew/…` branch without touching your working tree. |
 | Handover  | A marker an agent emits to pass the turn to a teammate, with a one-line brief.                          |
+| Goal      | An optional verifiable outcome for a task. The crew scopes it into a locked criteria checklist, and an independent verifier — fresh session, no chat history — must confirm every criterion before you sign off. |
 
 The default crew ships with a **Partner**, an **Engineer**, a **Product Lead**, and a **Designer** — each owning a role, a model, and its own skills folder.
 
